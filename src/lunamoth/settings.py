@@ -36,7 +36,9 @@ class Settings:
     provider: str = "mock"
     base_url: str = ""
     api_key: str = ""
-    model: str = "dolphin-phi:2.7b"
+    # Matches the OpenRouter preset (the recommended first-run path); the wizard
+    # overwrites this with whatever preset/model the operator actually picks.
+    model: str = "deepseek/deepseek-v4-flash"
     temperature: float = 0.85
     max_tokens: int = 420
     # NOTE: there is deliberately no `lang` setting. Language is not a user choice —

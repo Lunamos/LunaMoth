@@ -71,6 +71,31 @@ class SessionMeta:
     def pid_path(self) -> Path:
         return self.root / "tui.pid"
 
+    @property
+    def daemon_pid_path(self) -> Path:
+        return self.root / "daemon.pid"
+
+    @property
+    def daemon_log(self) -> Path:
+        return self.root / "daemon.log"
+
+    @property
+    def config_path(self) -> Path:
+        return self.root / "config.json"
+
+    def is_configured(self) -> bool:
+        """Has this agent been set up (provider/character chosen)?"""
+        return self.config_path.exists()
+
+    def character_label(self) -> str:
+        """Display name of the agent's character, read cheaply from config.json."""
+        try:
+            data = json.loads(self.config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return "LunaMoth 月蛾"
+        path = (data.get("character_path") or "").strip()
+        return Path(path).stem if path else "LunaMoth 月蛾"
+
     def save(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         data = {k: v for k, v in asdict(self).items()}
@@ -103,6 +128,27 @@ class SessionMeta:
             self.pid_path.unlink()
         except OSError:
             pass
+
+    @staticmethod
+    def _alive(pid_path: Path) -> int | None:
+        try:
+            pid = int(pid_path.read_text().strip())
+            os.kill(pid, 0)
+            return pid
+        except (OSError, ValueError):
+            return None
+
+    def daemon_pid(self) -> int | None:
+        """PID of the detached background loop for this agent, if running."""
+        return self._alive(self.daemon_pid_path)
+
+    def status(self) -> str:
+        """attached (live TUI) | running (background daemon) | idle | new (unconfigured)."""
+        if self._alive(self.pid_path):
+            return "attached"
+        if self.daemon_pid():
+            return "running"
+        return "idle" if self.is_configured() else "new"
 
 
 def load_session(name: str) -> SessionMeta | None:
@@ -150,8 +196,9 @@ def delete_session(name: str) -> None:
     meta = load_session(name)
     if meta is None:
         raise FileNotFoundError(f"no session named {name!r}")
-    if meta.running_pid():
-        raise RuntimeError(f"session {name!r} is running (pid {meta.running_pid()}); stop it first")
+    pid = meta.running_pid() or meta.daemon_pid()
+    if pid:
+        raise RuntimeError(f"session {name!r} is running (pid {pid}); stop it first")
     shutil.rmtree(meta.root)
 
 

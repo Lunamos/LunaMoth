@@ -1,7 +1,7 @@
 """Run shell commands for the agent's `terminal` tool — Hermes/Claude-Code style.
 
 The agent is given ONE language-agnostic capability: run a shell command in its
-session workspace. Containment is provided by the OS, not by intercepting a
+session workspace. Isolation is provided by the OS, not by intercepting a
 specific interpreter, so there is no Python-only guard and no language lock-in.
 
 Three isolation mechanisms (chosen per session, see `sessions.py`):

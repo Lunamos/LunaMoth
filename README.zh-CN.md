@@ -39,6 +39,7 @@
 - [x] **隔离等级选择** —— 按会话选择 `dir` / `sandbox`（OS 级：sandbox-exec / bubblewrap）/ `docker`
 - [x] **语言无关的 `terminal` 工具** —— 在会话隔离下跑 shell 命令，网络可运行时开关（`/net on`）
 - [x] **角色驱动的配置** —— 语言、世界书、工具与限制全部来自角色卡；引擎保持角色无关，普通 SillyTavern 卡也有安全默认值
+- [x] **Resume 优先的启动器与持久 chara** —— `lunamoth` 打开蓝色名册；每个 chara 在后台持续运行（`start` / `start-all` / `stop`），你 attach / detach 而非创建 / 杀死
 
 以下每个未完成项都按"可独立完成"拆分——各自标注了涉及的模块；不共享模块的两项可以并行开发、互不影响。
 
@@ -100,19 +101,23 @@ uv run lunamoth        # 同一个 CLI，代码可编辑
 
 </details>
 
-## 会话
+## Chara —— 持续存在的智能体，而非用完即弃的会话
 
-每个会话是一个独立的角色之家——独立配置、沙盒、记忆与隔离等级，存放在 `~/.lunamoth/sessions/` 下：
+这是 LunaMoth 和 Hermes / Claude Code 最不同的地方。你不是开一个会话、干完就丢。每一个 **chara**（我们叫它 chara 或 agent，混用，一种风味）都是一个持续存在的数字生命，有自己的配置、沙盒、记忆和隔离等级，存放在 `~/.lunamoth/sessions/<name>/`。它们在**后台持续运行**——通过空闲 `--forever` 循环在自己的 workspace 里思考、创作——你是 *attach / detach*，而不是随手创建、随手杀掉。
+
+所以 `lunamoth`（无参数）打开的是一个 **roster（名册，resume 优先）**，而不是一个新会话：一段蓝色 LunaMoth splash + 你的 chara 列表及状态（`◆ 已连接` / `● 后台运行` / `○ 空闲`）。选一个 attach;新建一个是郑重的事,要走 setup。
 
 ```bash
-lunamoth                          # 打开默认 "home" 会话
+lunamoth                     # 名册：选一个 chara attach，或按 n 召唤一个新的
+lunamoth ls                  # 名称 / 角色 / 状态 / 隔离 / 最近活跃
+lunamoth attach muse         # 打开一个 chara（连接期间接管它的后台循环）
+lunamoth start muse          # 让一个 chara 在后台运行（forever 循环，脱离终端）
+lunamoth start-all           # 把所有 chara 唤醒 —— 比如开机之后
+lunamoth stop muse           # 让一个 chara 回到沉睡
 lunamoth new muse --isolation docker
-lunamoth ls                       # 名称 / 隔离 / 状态 / 最近活跃
-lunamoth attach muse
-lunamoth rm muse
 ```
 
-远程保底方案：`ssh yourserver -t lunamoth attach muse` —— 会话生活在服务器上，你的终端只是取景框。（公网 IP / VPS 的网关接入在路线图上；会话激活已抽象在 `SessionMeta.env()` 后面，留好了接口。）
+attach 一个后台 chara 时会先暂停它的守护进程（免得两边争抢 workspace），detach 时再把它交还后台——chara 一直活着。远程保底方案：`ssh yourserver -t lunamoth attach muse` —— chara 生活在服务器上，你的终端只是取景框。（公网 IP / VPS 网关在路线图上；激活已抽象在 `SessionMeta.env()` 后面。）
 
 ## 接入模型
 
@@ -163,10 +168,9 @@ export OPENAI_MODEL=qwen2.5:3b-instruct
 
 ```bash
 lunamoth                  # 三卡片 TUI：角色输出流 / 操作员控制台 / 环境遥测
-lunamoth --forever        # 开启空闲自语循环
+lunamoth --no-forever     # 关闭空闲自语循环（默认开启）
 lunamoth --cooldown 4     # 自语循环间隔秒数
 lunamoth --plain          # 旧版纯终端模式
-./run_web.sh              # 实验性网页端（源码目录内）
 ```
 
 会话内命令：`/help`、`/status`、`/memory`、`/workspace`、`/net on|off`、`/allow-dir <path>`、`/forever on|off`、`/cooldown <s>`、`/exit`。

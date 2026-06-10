@@ -39,6 +39,7 @@ It borrows the best of three worlds: the agent runtime of [Hermes](https://githu
 - [x] **Isolation selector** — `dir` / `sandbox` (OS jail: sandbox-exec / bubblewrap) / `docker` per session
 - [x] **Language-agnostic `terminal` tool** — shell commands under the session's isolation, with a runtime network toggle (`/net on`)
 - [x] **Character-driven config** — language, world, tools and limits all come from the card; the engine stays character-neutral, and plain SillyTavern imports get safe defaults
+- [x] **Resume-first launcher & persistent charas** — `lunamoth` opens a blue roster of your agents; each lives in the background (`start` / `start-all` / `stop`), you attach & detach instead of create & kill
 
 Each unchecked item below is scoped to be independently completable — it lists the modules it touches, and two items that don't share a module can be worked on in parallel.
 
@@ -100,19 +101,23 @@ uv run lunamoth        # same CLI, editable code
 
 </details>
 
-## Sessions
+## Charas — persistent agents, not throwaway sessions
 
-Every session is an independent character home — its own config, sandbox, memory, and isolation level — stored under `~/.lunamoth/sessions/`:
+This is where LunaMoth diverges from Hermes / Claude Code. You don't spin up a session, finish, and discard it. Each **chara** (we call them charas or agents, interchangeably) is a persistent digital being with its own config, sandbox, memory, and isolation level under `~/.lunamoth/sessions/<name>/`. They live in the **background** — thinking and making art in their workspace via the idle `--forever` loop — and you *attach* and *detach*, you don't create-and-kill.
+
+So `lunamoth` (no args) opens a **roster** (resume-first), not a fresh session: a blue LunaMoth splash and the list of your charas with status (`◆ attached` / `● running` / `○ idle`). Pick one to attach; creating a new one is deliberate and goes through setup.
 
 ```bash
-lunamoth                          # open the default "home" session
+lunamoth                     # the roster: pick a chara to attach, or press n to summon one
+lunamoth ls                  # NAME / CHARACTER / STATUS / ISOLATION / LAST ACTIVE
+lunamoth attach muse         # open a chara (adopts its background loop while you're attached)
+lunamoth start muse          # run a chara in the background (forever loop, detached)
+lunamoth start-all           # bring every chara back to life — e.g. after a reboot
+lunamoth stop muse           # send a chara back to sleep
 lunamoth new muse --isolation docker
-lunamoth ls                       # NAME / ISOLATION / STATUS / LAST ACTIVE
-lunamoth attach muse
-lunamoth rm muse
 ```
 
-Remote baseline: `ssh yourserver -t lunamoth attach muse` — sessions live on the server, your terminal is just a viewport. (A proper gateway for public-IP/VPS access is on the roadmap; session activation is already factored behind `SessionMeta.env()` for it.)
+Attaching a backgrounded chara pauses its daemon so the two don't fight over the workspace, then hands it back to the background when you detach — the chara keeps living. Remote baseline: `ssh yourserver -t lunamoth attach muse` — charas live on the server, your terminal is just a viewport. (A proper gateway for public-IP/VPS access is on the roadmap; activation is already factored behind `SessionMeta.env()`.)
 
 ## Connecting a model
 
@@ -163,10 +168,9 @@ How that command is contained is the isolation level, chosen per session with `l
 
 ```bash
 lunamoth                  # three-card TUI: character stream / operator console / telemetry
-lunamoth --forever        # enable the idle self-talk loop
+lunamoth --no-forever     # start with the idle self-talk loop OFF (it is ON by default)
 lunamoth --cooldown 4     # pause between self-talk cycles
 lunamoth --plain          # legacy plain terminal mode
-./run_web.sh              # experimental web UI (from a clone)
 ```
 
 In-session: `/help`, `/status`, `/memory`, `/workspace`, `/net on|off`, `/allow-dir <path>`, `/forever on|off`, `/cooldown <s>`, `/exit`.

@@ -70,4 +70,4 @@ def test_cli_new_ls_rm(temp_home):
     out = run("rm", "beta", "-y")
     assert out.returncode == 0
     out = run("ls")
-    assert "no sessions yet" in out.stdout
+    assert "no chara yet" in out.stdout

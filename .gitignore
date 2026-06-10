@@ -104,10 +104,8 @@ worlds/*
 
 # LunaMoth runtime artifacts
 sandbox/logs/*.jsonl
-sandbox/control/*
 sandbox/workspace/*
 !sandbox/logs/.gitkeep
-!sandbox/control/.gitkeep
 !sandbox/workspace/.gitkeep
 !sandbox/workspace/memory.txt
 
@@ -124,4 +122,3 @@ reference/
 
 # runtime env state (regenerated per session)
 sandbox/env_status.json
-sandbox/containment_status.json

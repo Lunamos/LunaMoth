@@ -1,17 +1,20 @@
-"""The `lunamoth` command — Hermes-style CLI over named sessions.
+"""The `lunamoth` command — a roster of persistent agents, not throwaway sessions.
 
-    lunamoth                 attach the default session (first run: setup wizard)
-    lunamoth new NAME        create a session (--isolation dir|sandbox|docker)
-    lunamoth ls              list sessions
-    lunamoth attach NAME     open a session in the TUI
-    lunamoth rm NAME         delete a session
-    lunamoth setup           (re)run the setup wizard for a session
+    lunamoth                 open the roster (resume-first launcher)
+    lunamoth new NAME        create an agent (--isolation dir|sandbox|docker)
+    lunamoth ls              list agents and their status
+    lunamoth attach NAME     open an agent in the TUI (adopts its background loop)
+    lunamoth start [NAME]    run an agent in the background; --all / `start-all`
+    lunamoth stop [NAME]     stop an agent's background loop; --all
+    lunamoth rm NAME         delete an agent
+    lunamoth setup [NAME]    (re)run the setup wizard
     lunamoth update          update the installed checkout (git pull + uv sync)
     lunamoth doctor          check environment & sandbox backends
-    lunamoth version         print version
 
-Remote baseline: `ssh host -t lunamoth attach NAME`. Future gateways should
-reuse `sessions.SessionMeta.env()` as the activation interface.
+Each agent is a persistent being: it lives in the background (forever loop) and
+you attach/detach. `start-all` brings them all back after a reboot. Remote
+baseline: `ssh host -t lunamoth attach NAME`; future gateways reuse
+`sessions.SessionMeta.env()` as the activation interface.
 
 IMPORTANT: runtime modules (config/settings/tui) resolve paths from env at
 import time, so this module only imports them lazily AFTER session env vars
@@ -46,11 +49,58 @@ def _activate(meta: S.SessionMeta) -> None:
 
 
 def _needs_setup(meta: S.SessionMeta) -> bool:
-    return not (meta.root / "config.json").exists()
+    return not meta.is_configured()
+
+
+# ---- background daemon (persistent agents) ---------------------------------
+
+def _start_daemon(meta: S.SessionMeta, cooldown: float = 2.0) -> bool:
+    """Spawn a detached background process running this agent's forever loop.
+
+    The agent keeps thinking / creating in its workspace with no terminal
+    attached. Returns True if it started (or was already running)."""
+    if meta.daemon_pid():
+        return True
+    if not meta.is_configured():
+        return False
+    env = {**os.environ, **meta.env()}
+    env.setdefault("LUNAMOTH_PY_BACKEND", _ISOLATION_TO_BACKEND[meta.isolation])
+    log = meta.daemon_log.open("ab")
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "lunamoth.terminal", "--cooldown", str(cooldown)],
+        stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+        start_new_session=True, env=env, cwd=str(APP_DIR),
+    )
+    meta.daemon_pid_path.write_text(str(proc.pid), encoding="utf-8")
+    meta.last_active = time.time()
+    meta.save()
+    return True
+
+
+def _stop_daemon(meta: S.SessionMeta) -> bool:
+    pid = meta.daemon_pid()
+    if not pid:
+        meta.daemon_pid_path.unlink(missing_ok=True)
+        return False
+    import signal
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except OSError:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    meta.daemon_pid_path.unlink(missing_ok=True)
+    return True
 
 
 def _launch_tui(meta: S.SessionMeta, args: argparse.Namespace) -> int:
     _activate(meta)
+    # Attaching adopts a backgrounded agent: pause its daemon so the two don't
+    # both write the session, then resume it in the background when we detach.
+    was_daemon = meta.daemon_pid() is not None
+    if was_daemon:
+        _stop_daemon(meta)
     # The rich TUI has its own first-run welcome screen (provider + character +
     # world + theme pickers), so we only fall back to the plain-text wizard for
     # the legacy --plain terminal or a non-interactive shell.
@@ -59,8 +109,10 @@ def _launch_tui(meta: S.SessionMeta, args: argparse.Namespace) -> int:
 
         run_wizard()
     argv = [sys.argv[0], "--cooldown", str(args.cooldown)]
-    if args.forever and not args.plain:
-        argv.append("--forever")  # plain terminal mode has thinking on by default
+    # Persistent-agent philosophy: the idle self-talk loop is ON by default
+    # (opt out with --no-forever). plain terminal mode handles thinking itself.
+    if not getattr(args, "no_forever", False) and not args.plain:
+        argv.append("--forever")
     if args.clean_on_exit:
         argv.append("--clean-on-exit")
     module = "lunamoth.terminal" if args.plain else "lunamoth.tui"
@@ -73,14 +125,65 @@ def _launch_tui(meta: S.SessionMeta, args: argparse.Namespace) -> int:
     finally:
         sys.argv = old_argv
         meta.clear_running()
+        # Hand the agent back to the background if it was living there.
+        if was_daemon and meta.is_configured():
+            _start_daemon(meta, cooldown=args.cooldown)
 
 
 # ---- subcommands -----------------------------------------------------------
 
 
 def cmd_default(args: argparse.Namespace) -> int:
-    meta = S.ensure_default_session()
-    return _launch_tui(meta, args)
+    """Resume-first launcher: show the roster of agents, act on the choice, repeat."""
+    if not sys.stdin.isatty():
+        # Headless: no roster UI — just open/create the default agent.
+        return _launch_tui(S.ensure_default_session(), args)
+    S.ensure_default_session()  # there is always at least the 'home' agent
+    from .roster import LauncherApp
+
+    while True:
+        result = LauncherApp().run()
+        if not result:
+            return 0
+        action, name = result
+        if action == "attach":
+            meta = S.load_session(name)
+            if meta:
+                _launch_tui(meta, args)
+        elif action == "new":
+            meta = _prompt_new_session()
+            if meta:
+                _launch_tui(meta, args)
+        elif action == "start_all":
+            _start_all()
+        elif action == "stop" and name:
+            meta = S.load_session(name)
+            if meta:
+                print("stopped" if _stop_daemon(meta) else "not running")
+
+
+def _prompt_new_session() -> "S.SessionMeta | None":
+    """Creating an agent is deliberate (each one is a persistent being)."""
+    try:
+        name = input("new chara name: ").strip()
+        if not name:
+            return None
+        iso = (input(f"isolation {S.ISOLATION_LEVELS} [sandbox]: ").strip() or "sandbox")
+        return S.create_session(name, isolation=iso)
+    except (EOFError, KeyboardInterrupt):
+        return None
+    except (ValueError, FileExistsError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return None
+
+
+def _start_all() -> None:
+    started = []
+    for meta in S.list_sessions():
+        if meta.is_configured() and not meta.daemon_pid() and not meta.running_pid():
+            if _start_daemon(meta):
+                started.append(meta.name)
+    print(f"summoned {len(started)} chara into the background: {', '.join(started) or '(none)'}")
 
 
 def cmd_new(args: argparse.Namespace) -> int:
@@ -99,28 +202,54 @@ def cmd_new(args: argparse.Namespace) -> int:
 def cmd_ls(_args: argparse.Namespace) -> int:
     rows = S.list_sessions()
     if not rows:
-        print("no sessions yet — run `lunamoth` or `lunamoth new NAME`")
+        print("no chara yet — run `lunamoth` or `lunamoth new NAME`")
         return 0
-    print(f"{'NAME':<18} {'ISOLATION':<10} {'STATUS':<10} LAST ACTIVE")
+    print(f"{'NAME':<16} {'CHARACTER':<22} {'STATUS':<10} {'ISOLATION':<9} LAST ACTIVE")
     for m in rows:
-        pid = m.running_pid()
-        status = f"up:{pid}" if pid else "idle"
         ts = m.last_active or m.created_at
         when = _dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "-"
-        print(f"{m.name:<18} {m.isolation:<10} {status:<10} {when}")
+        print(f"{m.name:<16} {m.character_label():<22} {m.status():<10} {m.isolation:<9} {when}")
     return 0
 
 
 def cmd_attach(args: argparse.Namespace) -> int:
     meta = S.load_session(args.name)
     if meta is None:
-        print(f"error: no session named {args.name!r} (see `lunamoth ls`)", file=sys.stderr)
+        print(f"error: no chara named {args.name!r} (see `lunamoth ls`)", file=sys.stderr)
         return 1
-    pid = meta.running_pid()
-    if pid:
-        print(f"error: session {args.name!r} already running (pid {pid})", file=sys.stderr)
+    if meta.running_pid():
+        print(f"error: chara {args.name!r} already has a TUI attached (pid {meta.running_pid()})", file=sys.stderr)
         return 1
     return _launch_tui(meta, args)
+
+
+def cmd_start(args: argparse.Namespace) -> int:
+    if getattr(args, "all", False) or args.name is None:
+        _start_all()
+        return 0
+    meta = S.load_session(args.name)
+    if meta is None:
+        print(f"error: no chara named {args.name!r}", file=sys.stderr)
+        return 1
+    if not meta.is_configured():
+        print(f"error: chara {args.name!r} isn't set up yet — `lunamoth attach {args.name}` first", file=sys.stderr)
+        return 1
+    _start_daemon(meta, cooldown=args.cooldown)
+    print(f"{args.name}: running in the background (pid {meta.daemon_pid()}) · logs: {meta.daemon_log}")
+    return 0
+
+
+def cmd_stop(args: argparse.Namespace) -> int:
+    if getattr(args, "all", False) or args.name is None:
+        n = sum(1 for m in S.list_sessions() if _stop_daemon(m))
+        print(f"stopped {n} background chara")
+        return 0
+    meta = S.load_session(args.name)
+    if meta is None:
+        print(f"error: no chara named {args.name!r}", file=sys.stderr)
+        return 1
+    print(f"{args.name}: stopped" if _stop_daemon(meta) else f"{args.name}: not running")
+    return 0
 
 
 def cmd_rm(args: argparse.Namespace) -> int:
@@ -260,7 +389,7 @@ def _maybe_update_hint() -> None:
 
 def _add_tui_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--cooldown", type=float, default=2.0, help="idle self-talk pause seconds")
-    p.add_argument("--forever", action="store_true", help="start with the idle self-talk loop ON")
+    p.add_argument("--no-forever", action="store_true", help="start with the idle self-talk loop OFF (default: ON)")
     p.add_argument("--plain", action="store_true", help="legacy plain terminal instead of the TUI")
     p.add_argument("--clean-on-exit", action="store_true", help="wipe the session sandbox on shutdown (default: persist)")
 
@@ -286,6 +415,21 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("name")
     _add_tui_flags(sp)
     sp.set_defaults(func=cmd_attach)
+
+    sp = sub.add_parser("start", help="run an agent in the background (forever loop); --all for every agent")
+    sp.add_argument("name", nargs="?")
+    sp.add_argument("--all", action="store_true", help="start every configured agent")
+    sp.add_argument("--cooldown", type=float, default=2.0)
+    sp.set_defaults(func=cmd_start)
+
+    sp = sub.add_parser("start-all", help="start every configured agent in the background (e.g. after a reboot)")
+    sp.add_argument("--cooldown", type=float, default=2.0)
+    sp.set_defaults(func=lambda a: (_start_all() or 0))
+
+    sp = sub.add_parser("stop", help="stop an agent's background loop; --all to stop every agent")
+    sp.add_argument("name", nargs="?")
+    sp.add_argument("--all", action="store_true")
+    sp.set_defaults(func=cmd_stop)
 
     sp = sub.add_parser("rm", help="delete a session")
     sp.add_argument("name")

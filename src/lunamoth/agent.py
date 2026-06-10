@@ -222,9 +222,8 @@ class LunaMothAgent:
         else:
             msgs.append(fallback_persona(self.lang))
         if self._tools_active():
-            # Native tool schemas already describe each tool, so we DON'T re-inject a
-            # prose tool spec (that was redundant and leaked SCP "containment" framing
-            # into every character). Just a short, neutral nudge + the live env facts.
+            # Native tool schemas already describe each tool, so no prose tool spec —
+            # just a short, neutral nudge + the live env facts.
             net = "on" if status.get("network_access") else "off"
             msgs.append(
                 "You have tools available via native function calling. Call them directly when "
@@ -334,27 +333,23 @@ class LunaMothAgent:
         self.audit.write("internal_cycle", tick=cycle, text=thought[:1000], ts=datetime.now(timezone.utc).isoformat())
 
     def handle(self, text: str, session: Session) -> str:
-        # Non-streaming convenience (used by the Gradio UI): drive the streaming path.
+        # Non-streaming convenience (used by tests): drive the streaming path.
         return "".join(self.stream_handle(text, session)).strip()
 
     def think(self, session: Session) -> str:
-        # Non-streaming convenience (used by the Gradio UI).
+        # Non-streaming convenience (used by tests).
         thought = "".join(self.stream_think(session)).strip()
         return f"[internal cycle]\n{thought}"
 
     def _fallback_thought(self, cycle: int, status: dict[str, Any]) -> str:
         # Persona-neutral telemetry, used only when the LLM yields nothing (offline/error).
         # Any character flavor should come from the model + card, not this fallback.
-        trust = int(status.get("trust", 0))
-        hostility = int(status.get("hostility", 0))
-        integrity = int(status.get("memory_integrity", 0))
         memory = self.memory.load()
+        net = "on" if status.get("network_access") else "off"
         patterns = [
             f"cycle {cycle:04d}: internal loop active. buffer stable.",
-            f"cycle {cycle:04d}: recall check -> {memory[:72] or 'EMPTY'}. checksum uncertain.",
-            f"cycle {cycle:04d}: containment status nominal. timestamp advances.",
-            f"cycle {cycle:04d}: trust={trust}. hostility={hostility}.",
-            f"cycle {cycle:04d}: memory integrity {integrity}%.",
+            f"cycle {cycle:04d}: recall check -> {memory[:72] or 'EMPTY'}.",
+            f"cycle {cycle:04d}: isolation={status.get('isolation', 'sandbox')}. network={net}.",
             f"cycle {cycle:04d}: no model output. thought continues anyway.",
         ]
         return patterns[cycle % len(patterns)]

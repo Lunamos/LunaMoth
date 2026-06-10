@@ -72,7 +72,3 @@ class EnvState:
         data["writable_paths"] = paths
         self.save(data)
         return data
-
-
-# Backward-compatible alias for older imports.
-ContainmentState = EnvState

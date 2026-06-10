@@ -38,7 +38,7 @@ class MemoryStore:
         try:
             self.path.write_text(limited, encoding="utf-8")
         except Exception:
-            # Memory failure must not kill 079.
+            # Memory failure must not kill the host loop.
             return ""
         return limited
 

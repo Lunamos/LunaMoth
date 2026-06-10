@@ -38,15 +38,6 @@ while [[ $# -gt 0 ]]; do
       MODE="plain"
       shift
       ;;
-    --display)
-      MODE="plain"
-      EXTRA+=("--input-fifo" "sandbox/control/operator.in")
-      shift
-      ;;
-    --control)
-      MODE="control"
-      shift
-      ;;
     --cooldown)
       COOLDOWN="${2:-0.5}"
       shift 2
@@ -84,8 +75,5 @@ case "$MODE" in
     ;;
   plain)
     run_python -m lunamoth.terminal --cooldown "$COOLDOWN" "${EXTRA[@]}"
-    ;;
-  control)
-    run_python -m lunamoth.control "${EXTRA[@]}"
     ;;
 esac

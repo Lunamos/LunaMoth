@@ -14,20 +14,9 @@ class LLMConfig:
     provider: str = os.getenv("LLM_PROVIDER", "mock").strip().lower()
     base_url: str = os.getenv("OPENAI_BASE_URL", "").rstrip("/")
     api_key: str = os.getenv("OPENAI_API_KEY", "")
-    model: str = os.getenv("OPENAI_MODEL", "dolphin-phi:2.7b")
+    model: str = os.getenv("OPENAI_MODEL", "deepseek/deepseek-v4-flash")
     temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.85"))
     max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "420"))
-
-
-@dataclass(frozen=True)
-class GitHubMemoryConfig:
-    enabled: bool = os.getenv("MEMORY_BACKEND", "local").strip().lower() == "github"
-    token: str = os.getenv("GITHUB_TOKEN", "")
-    repo: str = os.getenv("GITHUB_REPO", "")
-    branch: str = os.getenv("GITHUB_BRANCH", "main")
-    path: str = os.getenv("GITHUB_MEMORY_PATH", "sandbox/memory.json")
-    committer_name: str = os.getenv("GITHUB_COMMITTER_NAME", "LunaMoth")
-    committer_email: str = os.getenv("GITHUB_COMMITTER_EMAIL", "lunamoth@example.invalid")
 
 
 @dataclass(frozen=True)

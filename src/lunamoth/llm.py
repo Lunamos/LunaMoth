@@ -225,12 +225,12 @@ class LLMClient:
             return random.choice([
                 "[mock] internal loop tick. buffer stable.",
                 "[mock] recall check: " + (memory[:60] or "EMPTY"),
-                "[mock] containment status nominal.",
+                "[mock] idle cycle complete.",
             ])
         if "memory" in lower or "记忆" in user_text:
             return f"[mock] loaded memory:\n{memory or '(empty)'}"
         if "status" in lower or "状态" in user_text:
-            return f"[mock] containment={status.get('containment_level', 'unknown')} trust={status.get('trust')} hostility={status.get('hostility')}"
+            return f"[mock] isolation={status.get('isolation', 'sandbox')} network={'on' if status.get('network_access') else 'off'}"
         return random.choice([
             "[mock] offline engine. Configure an API in the welcome screen for a real reply.",
             "[mock] logged.",

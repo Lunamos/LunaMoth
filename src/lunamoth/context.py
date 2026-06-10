@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 def estimate_tokens(text: str) -> int:
     # Conservative-ish mixed Chinese/English approximation.
-    # For containment bookkeeping, exact tokenizer is unnecessary.
+    # For context-budget bookkeeping, an exact tokenizer is unnecessary.
     cjk = sum(1 for ch in text if '\u4e00' <= ch <= '\u9fff')
     other = max(0, len(text) - cjk)
     return cjk + other // 4

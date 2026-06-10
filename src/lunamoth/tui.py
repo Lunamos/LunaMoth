@@ -26,6 +26,7 @@ SLASH_COMMANDS = [
     "/allow-dir", "/settings", "/clear", "/exit",
 ]
 
+from . import art
 from .agent import LunaMothAgent, Session
 from .cleanup import clean_runtime_sandbox
 from .config import ROOT
@@ -87,7 +88,7 @@ def _preset_for(settings: Settings) -> str:
 
 
 class WelcomeScreen(Screen):
-    """Containment console boot screen: pick a provider, set the API, then enter.
+    """Welcome / boot screen: pick a provider, set the API, then enter.
 
     Dismisses with the chosen Settings, or None if the operator backs out.
     """
@@ -101,25 +102,27 @@ class WelcomeScreen(Screen):
         width: 84;
         height: auto;
         max-height: 90%;
-        border: heavy #7d0000;
+        border: heavy #2f5468;
         background: #0a0a0a;
         padding: 1 2;
     }
     #banner {
-        color: #ff4040;
-        text-style: bold;
+        width: auto;
+        content-align: center middle;
     }
     #title {
-        color: #ff6a6a;
-        text-style: bold;
+        color: #9fd9ff;
+        text-style: bold italic;
         margin-top: 1;
+        content-align: center middle;
+        width: 100%;
     }
     #lore {
         color: #888888;
         margin-bottom: 1;
     }
     .field-label {
-        color: #00ff66;
+        color: #6db8e8;
         margin-top: 1;
     }
     #conn_status {
@@ -146,7 +149,7 @@ class WelcomeScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with VerticalScroll(id="welcome"):
-            yield Static(self.skin.banner, id="banner")
+            yield Static(art.wordmark(compact=True), id="banner")
             yield Static(self.skin.subtitle, id="title")
             yield Static(
                 "Pick a model and a character, then enter. Choosing a character fills in its "
@@ -273,7 +276,6 @@ class WelcomeScreen(Screen):
             # Live-preview the chosen skin's banner/colors right in the welcome screen.
             path = event.value if isinstance(event.value, str) else ""
             self.skin = load_theme(path)
-            self.query_one("#banner", Static).update(self.skin.banner)
             self.query_one("#title", Static).update(self.skin.subtitle)
             self._paint_theme(self.skin)
             return
@@ -381,7 +383,7 @@ class LunaMothTUI(App):
     Screen {
         background: #050505;
     }
-    /* Left 3/4 column (079 display + console) | right 1/4 telemetry sidebar. */
+    /* Left 3/4 column (character display + console) | right 1/4 telemetry sidebar. */
     #body {
         height: 1fr;
     }
@@ -394,8 +396,8 @@ class LunaMothTUI(App):
        cursor and Textual's compositor only redraws changed cells, so growth is flicker-free. */
     #display {
         height: 2fr;
-        border: heavy #7d0000;
-        border-title-color: #ff4040;
+        border: heavy #2f5468;
+        border-title-color: #9fd9ff;
         border-title-style: bold;
         background: #050505;
         scrollbar-size-vertical: 1;
@@ -462,7 +464,7 @@ class LunaMothTUI(App):
         super().__init__()
         self.cooldown = cooldown
         self.clean_on_exit = clean_on_exit
-        # `forever` = the eternal self-talk loop (079 keeps thinking aloud on its own).
+        # `forever` = the eternal self-talk loop (the character keeps thinking aloud on its own).
         # This is NOT the model's chain-of-thought / reasoning ("thinking") — that's separate.
         self.forever = forever
         self.settings = load_settings()
@@ -476,7 +478,7 @@ class LunaMothTUI(App):
         self.shutdown_requested = False
         self.display_text = ""
         self.next_forever_at = time.monotonic() + 0.2
-        self._containment_started = False
+        self._session_started = False
         # Operator messages are QUEUED, never dropped: with a live provider a think
         # cycle is almost always streaming, so starting a stream synchronously on submit
         # would silently fail. The pump (scheduler + submit) drains this with priority.
@@ -569,14 +571,14 @@ class LunaMothTUI(App):
                 f"provider={result.provider} · model={result.model} · ctx={self.agent.context_limit()}",
                 "grey50",
             )
-        if not self._containment_started:
-            self._begin_containment()
+        if not self._session_started:
+            self._begin_session()
         else:
             self._update_status()
             self.input.focus()
 
-    def _begin_containment(self) -> None:
-        self._containment_started = True
+    def _begin_session(self) -> None:
+        self._session_started = True
         self.input.focus()
         self.set_interval(0.03, self._drain_output)
         self.set_interval(0.06, self._flush_display)  # ~16fps repaint of the top pane
@@ -591,7 +593,8 @@ class LunaMothTUI(App):
             self.session.context.add("assistant", greeting)
             self.next_forever_at = time.monotonic() + self.cooldown
         else:
-            self._start_stream(StreamJob(kind="user", text="你是谁？只用一句话回答。"), prefix=self.skin.reply_pfx(name))
+            probe = "你是谁？只用一句话回答。" if self.agent.lang == "zh" else "Who are you? Answer in one sentence."
+            self._start_stream(StreamJob(kind="user", text=probe), prefix=self.skin.reply_pfx(name))
 
     # ---- output routing ----------------------------------------------------------
     # Two surfaces, strictly separated:
@@ -772,14 +775,14 @@ class LunaMothTUI(App):
                 break
             wrote = True
             if kind == "prefix":
-                # Blank-line separation between 079 messages in the top pane.
+                # Blank-line separation between character messages in the top pane.
                 if self.display_text and not self.display_text.endswith("\n\n"):
                     self._append_display("\n")
                 self._append_display(text)
             elif kind == "chunk":
                 self._append_display(text)
             elif kind == "interrupt":
-                # System notice, not 079 speech -> console, dimmed.
+                # System notice, not character speech -> console, dimmed.
                 self._console(text, "grey42")
             elif kind == "error":
                 self._console(text, "red")
@@ -879,7 +882,7 @@ class LunaMothTUI(App):
             return
         if text.startswith("/"):
             # Remaining agent commands (/status /memory /files /read ...): run inline,
-            # echo command + result into the console — never the 079 pane.
+            # echo command + result into the console — never the character pane.
             self._console(text, "green")
             try:
                 result = self.agent._command(text, self.session)

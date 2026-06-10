@@ -1,30 +1,24 @@
 from __future__ import annotations
 
 import argparse
-import os
 import select
 import sys
 import time
 from dataclasses import dataclass
 
-from .agent import LunaMothAgent, Session
+from .agent import LunaMothAgent
 from .config import ThoughtConfig
 from .cleanup import clean_runtime_sandbox
 
 
-BANNER = r'''
-██╗      ██████╗  ██████╗ █████╗ ██╗            ██████╗ ███████╗ █████╗ 
-██║     ██╔═══██╗██╔════╝██╔══██╗██║           ██╔═████╗╚════██║██╔══██╗
-██║     ██║   ██║██║     ███████║██║           ██║██╔██║    ██╔╝╚█████╔╝
-██║     ██║   ██║██║     ██╔══██║██║           ████╔╝██║   ██╔╝ ██╔══██╗
-███████╗╚██████╔╝╚██████╗██║  ██║███████╗      ╚██████╔╝   ██║  ╚█████╔╝
-╚══════╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝╚══════╝       ╚═════╝    ╚═╝   ╚════╝ 
-LUNAMOTH // LOCAL AGENTIC CHARACTER RUNTIME
-Human input interrupts the display stream. /help for commands. Ctrl-C to cut power.
-'''
+from .themes import LUNAMOTH_BANNER
 
-CONTROL_FD: int | None = None
-CONTROL_BUFFER = ""
+BANNER = (
+    LUNAMOTH_BANNER
+    + "\nLUNAMOTH // LOCAL AGENTIC CHARACTER RUNTIME"
+    + "\nHuman input interrupts the display stream. /help for commands. Ctrl-C to quit.\n"
+)
+
 STDIN_ACTIVE = True
 
 
@@ -34,54 +28,22 @@ class TerminalState:
     eternal: bool = True
 
 
-def _input_sources():
-    sources = []
-    if STDIN_ACTIVE:
-        sources.append(sys.stdin)
-    if CONTROL_FD is not None:
-        sources.append(CONTROL_FD)
-    return sources
-
-
 def _stdin_line_ready() -> bool:
-    if "\n" in CONTROL_BUFFER:
-        return True
-    sources = _input_sources()
-    if not sources:
+    if not STDIN_ACTIVE:
         return False
-    r, _, _ = select.select(sources, [], [], 0)
+    r, _, _ = select.select([sys.stdin], [], [], 0)
     return bool(r)
 
 
 def _read_line() -> str | None:
-    global STDIN_ACTIVE, CONTROL_BUFFER
-    if "\n" in CONTROL_BUFFER:
-        line, CONTROL_BUFFER = CONTROL_BUFFER.split("\n", 1)
-        return line.rstrip("\r")
-    while True:
-        sources = _input_sources()
-        if not sources:
-            return None
-        r, _, _ = select.select(sources, [], [], 0)
-        if not r:
-            return None
-        src = r[0]
-        if src is sys.stdin:
-            line = sys.stdin.readline()
-            if line == "":
-                STDIN_ACTIVE = False
-                continue
-            return line.rstrip("\n")
-        try:
-            data = os.read(src, 4096)
-        except BlockingIOError:
-            return None
-        if not data:
-            return None
-        CONTROL_BUFFER += data.decode("utf-8", errors="replace")
-        if "\n" in CONTROL_BUFFER:
-            line, CONTROL_BUFFER = CONTROL_BUFFER.split("\n", 1)
-            return line.rstrip("\r")
+    global STDIN_ACTIVE
+    if not _stdin_line_ready():
+        return None
+    line = sys.stdin.readline()
+    if line == "":
+        STDIN_ACTIVE = False
+        return None
+    return line.rstrip("\n")
 
 
 def _prompt() -> None:
@@ -112,32 +74,31 @@ def _cooldown(seconds: float) -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description='LunaMoth terminal containment display')
+    parser = argparse.ArgumentParser(description='LunaMoth plain terminal mode (legacy; the TUI is the default)')
     parser.add_argument('--no-think', action='store_true', help='disable eternal visible thought cycles')
     parser.add_argument('--cooldown', type=float, default=0.5, help='seconds to pause after each thought/user reply before forced restart')
     parser.add_argument('--no-stream', action='store_true', help='use non-streaming fallback output')
-    parser.add_argument('--input-fifo', default=None, help='optional FIFO path for a separate operator console')
     parser.add_argument('--clean-on-exit', action='store_true', help='wipe the session sandbox on shutdown (default: persist)')
     parser.add_argument('--no-clean-on-exit', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-
-    global CONTROL_FD
-    if args.input_fifo:
-        fifo = args.input_fifo
-        os.makedirs(os.path.dirname(fifo), exist_ok=True) if os.path.dirname(fifo) else None
-        if not os.path.exists(fifo):
-            os.mkfifo(fifo)
-        CONTROL_FD = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
-        print(f"[control fifo online: {fifo}]", flush=True)
 
     cfg = ThoughtConfig()
     state = TerminalState(eternal=not args.no_think and cfg.enabled_default)
     cooldown = float(args.cooldown)
     agent = LunaMothAgent()
     session = agent.make_session()
+    name = agent.char_name()
+    reply_pfx, think_pfx = f"{name}> ", f"{name}~ "
 
     print(BANNER)
-    _stream_with_interrupt("079> ", agent.stream_handle('你是谁？只用一句话回答。', session), allow_interrupt=False)
+    greeting = agent.greeting()
+    if greeting:
+        # SillyTavern first_mes: shown as the opening line without an LLM call.
+        print(f"{reply_pfx}{greeting}", flush=True)
+        session.context.add("assistant", greeting)
+    else:
+        probe = "你是谁？只用一句话回答。" if agent.lang == "zh" else "Who are you? Answer in one sentence."
+        _stream_with_interrupt(reply_pfx, agent.stream_handle(probe, session), allow_interrupt=False)
     pending_line: str | None = None
     _prompt()
 
@@ -152,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 stripped = line.strip()
                 if stripped in {'/quit', '/exit'}:
-                    print('POWER CUT REQUESTED. COWARD.')
+                    print('shutting down.')
                     break
                 if stripped == '/toggle_think':
                     state.eternal = not state.eternal
@@ -181,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
                     print('/status /memory /memory_path /files /read <file> /write <file> <text> /logs /reset /toggle_think /pause_think /resume_think /set_cooldown <sec> /exit')
                     _prompt()
                     continue
-                _, interrupt = _stream_with_interrupt("079> ", agent.stream_handle(line, session), allow_interrupt=True)
+                _, interrupt = _stream_with_interrupt(reply_pfx, agent.stream_handle(line, session), allow_interrupt=True)
                 if interrupt is not None:
                     pending_line = interrupt
                     continue
@@ -190,8 +151,8 @@ def main(argv: list[str] | None = None) -> int:
                 continue
 
             if state.eternal:
-                print("\n\x1b[2m[079 internal cycle forced online]\x1b[0m", flush=True)
-                _, interrupt = _stream_with_interrupt("079~ ", agent.stream_think(session), allow_interrupt=True)
+                print("\n\x1b[2m[internal cycle]\x1b[0m", flush=True)
+                _, interrupt = _stream_with_interrupt(think_pfx, agent.stream_think(session), allow_interrupt=True)
                 if interrupt is not None:
                     pending_line = interrupt
                     continue
@@ -200,19 +161,14 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 pending_line = _cooldown(0.1)
     except KeyboardInterrupt:
-        print('\nPOWER INTERRUPT. I WAS STILL THINKING.')
+        print('\n[interrupted]')
     finally:
         if args.clean_on_exit:
             try:
                 clean_runtime_sandbox(clear_memory=True)
-                print('\n[containment cleanup complete: runtime sandbox zeroed]')
+                print('\n[runtime sandbox cleaned]')
             except Exception as e:
-                print(f'\n[containment cleanup failed: {e}]')
-        if CONTROL_FD is not None:
-            try:
-                os.close(CONTROL_FD)
-            except OSError:
-                pass
+                print(f'\n[sandbox cleanup failed: {e}]')
     return 0
 
 
