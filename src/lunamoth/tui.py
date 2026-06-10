@@ -24,7 +24,7 @@ from textual.widgets import Button, Footer, Header, Input, Label, RichLog, Selec
 SLASH_COMMANDS = [
     "/help", "/status", "/memory", "/memory_path", "/files", "/workspace",
     "/read", "/wread", "/write", "/logs", "/reset",
-    "/mode live", "/mode chat", "/patience", "/theme", "/net on", "/net off",
+    "/mode live", "/mode chat", "/patience", "/reasoning", "/theme", "/net on", "/net off",
     "/allow-dir", "/settings", "/clear", "/exit",
 ]
 
@@ -997,6 +997,23 @@ class LunaMothTUI(App):
                     "grey50",
                 )
             return
+        if low.startswith("/reasoning"):
+            parts = low.split()
+            levels = {"off", "low", "medium", "high"}
+            if len(parts) == 2 and parts[1] in levels:
+                self.settings = replace(self.settings, reasoning=parts[1])
+                save_settings(self.settings)
+                self.agent.reconfigure(self.settings)
+                self._console(f"reasoning = {parts[1]} (persisted)", "grey50")
+            else:
+                cur = self.settings.reasoning or "medium"
+                sup = "yes" if self.agent.llm.reasoning_supported() else "no (this model/route ignores it)"
+                self._console(
+                    f"reasoning = {cur} · model supports the param: {sup}  "
+                    "(usage: /reasoning off|low|medium|high — thinking streams dimmed in the top pane)",
+                    "grey50",
+                )
+            return
         if low.startswith("/theme"):
             self._cmd_theme(text)
             return
@@ -1064,6 +1081,7 @@ class LunaMothTUI(App):
             "  /net on|off       allow the terminal tool to reach the network (this session)",
             "  /allow-dir <path> add a writable path outside the workspace (sandbox isolation)",
             "  /patience <sec>   pause between its spontaneous cycles (live mode)",
+            "  /reasoning off|low|medium|high   thinking effort (default medium; shown dimmed)",
             "  /theme [name]     list/switch TUI skin",
             "  /settings   reopen config      /clear   clear top pane      /exit   shut down",
         ):

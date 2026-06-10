@@ -17,6 +17,9 @@ class LLMConfig:
     model: str = os.getenv("OPENAI_MODEL", "deepseek/deepseek-v4-flash")
     temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.85"))
     max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "4096"))
+    # Reasoning effort for thinking models: off | low | medium | high.
+    # Default ON at medium; only sent to routes/models known to accept it.
+    reasoning: str = os.getenv("LLM_REASONING", "medium").strip().lower()
 
 
 @dataclass(frozen=True)

@@ -65,31 +65,54 @@ class ContextBuffer:
         self.messages.append(msg)
         if self.persist is not None:
             self.persist(msg)
+        self._prune_thinks()
         self.trim()
 
     def restore(self, rows: list[dict]) -> None:
         """Load previously persisted history WITHOUT re-persisting it."""
         self.messages = [dict(m) for m in rows]
+        self._prune_thinks()
         self.trim()
+
+    def _prune_thinks(self) -> None:
+        """Drop idle monologues beyond THINK_WINDOW from the buffer itself.
+
+        They are already persisted to the transcript, never replayed to the API,
+        and must not occupy token budget — otherwise a chatty daemon's thinks
+        would crowd the operator's real instructions out of the trim window.
+        """
+        seen = 0
+        keep_from_end: list[int] = []
+        for i in range(len(self.messages) - 1, -1, -1):
+            if self.messages[i].get("kind") == "think":
+                seen += 1
+                if seen > THINK_WINDOW:
+                    keep_from_end.append(i)
+        for i in keep_from_end:
+            del self.messages[i]
 
     def pairs(self) -> list[tuple[str, str]]:
         """(role, content) view for UIs/tests — structured fields flattened away."""
         return [(str(m.get("role", "")), str(m.get("content") or "")) for m in self.messages]
 
     def render(self, include_reasoning: bool = False) -> list[dict]:
-        """API-ready view: sanitized keys, old think cycles dropped so self-talk
-        can't bury the operator's instructions. Reasoning is withheld unless the
-        provider demands the echo-back (DeepSeek thinking mode — see llm.py)."""
+        """API-ready view: sanitized keys, orphaned tool results dropped.
+        Reasoning is withheld unless the provider demands the echo-back
+        (DeepSeek thinking mode — see llm.py)."""
         keys = _API_KEYS + ("reasoning_content",) if include_reasoning else _API_KEYS
-        think_seen = 0
         out: list[dict] = []
-        for msg in reversed(self.messages):
-            if msg.get("kind") == "think":
-                think_seen += 1
-                if think_seen > THINK_WINDOW:
-                    continue
+        declared_call_ids: set[str] = set()
+        for msg in self.messages:
+            # A role:"tool" message is only valid right after the assistant
+            # message that declared its tool_call_id; if that assistant got
+            # trimmed/restored away, the orphan would 400 the API (hermes
+            # sanitizes tool pairs the same way).
+            if msg.get("tool_call_id") and msg["tool_call_id"] not in declared_call_ids:
+                continue
+            for tc in msg.get("tool_calls") or []:
+                if tc.get("id"):
+                    declared_call_ids.add(tc["id"])
             out.append({k: msg[k] for k in keys if k in msg})
-        out.reverse()
         return out
 
     def token_count(self) -> int:

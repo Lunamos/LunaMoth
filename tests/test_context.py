@@ -12,17 +12,32 @@ def test_render_sanitizes_and_withholds_reasoning():
     assert out == [{"role": "assistant", "content": "did it"}]
 
 
-def test_old_think_cycles_age_out_of_api_view():
+def test_old_think_cycles_pruned_from_buffer():
     c = ContextBuffer()
     c.add("user", "please do X")
     for i in range(THINK_WINDOW + 5):
         c.add("assistant", f"[internal cycle]\nmusing {i}", kind="think")
+    # Old monologues are pruned from the BUFFER itself (they stay in the
+    # transcript), so they neither reach the API nor occupy trim budget —
+    # a chatty daemon can't crowd out the operator's real instruction.
+    thinks = [m for m in c.messages if m.get("kind") == "think"]
+    assert len(thinks) == THINK_WINDOW
+    assert thinks[-1]["content"].endswith(f"musing {THINK_WINDOW + 4}")  # newest kept
+    assert c.render()[0] == {"role": "user", "content": "please do X"}  # still visible
+
+
+def test_render_drops_orphaned_tool_results():
+    c = ContextBuffer()
+    # A restored window that BEGINS with a tool result (its assistant got
+    # trimmed away in an earlier life) must not leak the orphan to the API.
+    c.restore([
+        {"role": "tool", "tool_call_id": "lost", "content": "stale result"},
+        {"role": "assistant", "content": "ok", "tool_calls": [{"id": "kept"}]},
+        {"role": "tool", "tool_call_id": "kept", "content": "fresh result"},
+    ])
     rendered = c.render()
-    thinks = [m for m in rendered if "internal cycle" in str(m.get("content"))]
-    assert len(thinks) == THINK_WINDOW  # monologue flood can't bury the instruction
-    assert rendered[0] == {"role": "user", "content": "please do X"}  # still visible
-    # ...but nothing was deleted from memory/transcript.
-    assert len(c.messages) == THINK_WINDOW + 6
+    assert all(m.get("tool_call_id") != "lost" for m in rendered)
+    assert any(m.get("tool_call_id") == "kept" for m in rendered)  # valid pair survives
 
 
 def test_trim_never_strands_tool_results():

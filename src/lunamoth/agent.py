@@ -187,6 +187,8 @@ class LunaMothAgent:
 
     # Wide fallback context window so task/world cards fit; cards may narrow it.
     DEFAULT_CONTEXT_TOKENS = 1_000_000
+    # Attach restores only the transcript tail; the full history stays on disk.
+    RESTORE_MAX_MESSAGES = 400
 
     def context_limit(self) -> int:
         return self._effective_limit("context_tokens", self.DEFAULT_CONTEXT_TOKENS)
@@ -202,9 +204,10 @@ class LunaMothAgent:
         ctx = self.context_limit()
         session.context.max_tokens = ctx
         session.context.trim_buffer_tokens = min(100_000, max(4096, ctx // 8))
-        # Durable conversation: restore the current transcript epoch, then persist
-        # every new message back — the conversation survives restarts and handoffs.
-        session.context.restore(self.transcript.load())
+        # Durable conversation: restore the TAIL of the current transcript epoch
+        # (a long-lived chara's full history would be loaded only to be trimmed),
+        # then persist every new message back — conversations survive restarts.
+        session.context.restore(self.transcript.load(max_messages=self.RESTORE_MAX_MESSAGES))
         session.context.persist = self.transcript.append_message
         return session
 

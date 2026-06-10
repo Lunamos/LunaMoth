@@ -62,6 +62,9 @@ class Settings:
     memory_tokens: int = 0
     # TUI theme card (cosmetic skin: banner/colors/decoration). Empty => built-in LunaMoth theme.
     tui_theme_path: str = ""
+    # Reasoning effort for thinking models: off | low | medium | high (default ON
+    # at medium). Only sent to routes/models known to accept the parameter.
+    reasoning: str = "medium"
     # Interaction mode — how the chara behaves while you are attached (see presence/):
     #   live = greets you, then keeps living its own loop while you watch (default)
     #   chat = greets you, then attends to you only — no self-talk while attached
@@ -81,6 +84,7 @@ class Settings:
             model=self.model,
             temperature=float(self.temperature),
             max_tokens=int(self.max_tokens),
+            reasoning=(self.reasoning or "medium").strip().lower(),
         )
 
 
@@ -130,6 +134,7 @@ _ENV_MAP: dict[str, tuple[str, ...]] = {
     "memory_chars": ("LUNAMOTH_MEMORY_CHARS", "LUNAMOSS_MEMORY_CHARS"),
     "memory_tokens": ("LUNAMOTH_MEMORY_TOKENS", "LUNAMOSS_MEMORY_TOKENS"),
     "mode": ("LUNAMOTH_MODE", "LUNAMOTH_PRESENCE"),
+    "reasoning": ("LLM_REASONING",),
 }
 
 _INT_FIELDS = {"max_tokens", "context_tokens", "memory_chars", "memory_tokens"}
@@ -148,6 +153,9 @@ def _coerce(name: str, raw: Any) -> Any:
         from .presence import normalize_mode
 
         return normalize_mode(str(raw))
+    if name == "reasoning":
+        v = str(raw).strip().lower()
+        return v if v in {"off", "low", "medium", "high"} else "medium"
     return str(raw)
 
 

@@ -32,9 +32,11 @@ def strip_dim(text: str) -> str:
 
 # Model families that accept OpenRouter's unified `reasoning` request param
 # (hermes gates this the same way: unknown extra_body fields get forwarded
-# upstream and some providers 400 on them).
+# upstream and some providers 400 on them). List copied from hermes-agent's
+# reasoning_model_prefixes, plus nousresearch.
 _REASONING_PREFIXES = (
-    "deepseek/", "anthropic/", "openai/", "x-ai/", "google/gemini", "qwen/qwen3", "nousresearch/",
+    "deepseek/", "anthropic/", "openai/", "x-ai/", "google/gemini-2", "google/gemma-4",
+    "qwen/qwen3", "tencent/hy3-preview", "xiaomi/", "nousresearch/",
 )
 
 
@@ -59,15 +61,44 @@ class LLMClient:
         return "deepseek" in model or "api.deepseek.com" in base
 
     def reasoning_echoback_required(self) -> bool:
-        """DeepSeek thinking mode rejects replayed assistant tool-call messages
-        that omit reasoning_content (hermes #15250) — for those models we echo
-        the thinking back; for everyone else it is withheld."""
-        return "deepseek" in (self.cfg.model or "").lower() or "api.deepseek.com" in (self.cfg.base_url or "").lower()
+        """Some thinking modes reject replayed assistant tool-call messages that
+        omit reasoning_content — DeepSeek (hermes #15250), Xiaomi MiMo, and
+        Kimi/Moonshot when called on their own endpoints (aggregators like
+        OpenRouter speak their own protocol for Kimi, hence the host gate)."""
+        model = (self.cfg.model or "").lower()
+        base = (self.cfg.base_url or "").lower()
+        return (
+            "deepseek" in model
+            or "api.deepseek.com" in base
+            or "mimo" in model
+            or any(h in base for h in ("api.kimi.com", "moonshot.ai", "moonshot.cn"))
+        )
 
     def _reasoning_body(self, body: dict) -> dict:
-        if self.reasoning_supported():
-            body["reasoning"] = {"enabled": True, "effort": "medium"}
+        """Attach the unified `reasoning` request param (default ON at medium).
+
+        cfg.reasoning: off | low | medium | high. "off" still sends an explicit
+        {"enabled": false} to reasoning-capable models (some think by default);
+        non-reasoning routes get nothing either way."""
+        if not self.reasoning_supported():
+            return body
+        effort = (self.cfg.reasoning or "medium").strip().lower()
+        if effort == "off":
+            body["reasoning"] = {"enabled": False}
+        else:
+            if effort not in {"low", "medium", "high"}:
+                effort = "medium"
+            body["reasoning"] = {"enabled": True, "effort": effort}
         return body
+
+    def _max_tokens_param(self) -> dict:
+        """OpenAI's newer models on the DIRECT endpoint require
+        max_completion_tokens; OpenRouter/local/older routes use max_tokens
+        (copied from hermes-agent's _max_tokens_param)."""
+        base = (self.cfg.base_url or "").lower()
+        if "api.openai.com" in base or "openai.azure.com" in base:
+            return {"max_completion_tokens": self.cfg.max_tokens}
+        return {"max_tokens": self.cfg.max_tokens}
 
     def stream_complete(
         self, user_text: str, memory: str, status: dict[str, Any], context: list[dict],
@@ -107,6 +138,10 @@ class LLMClient:
             role = msg.get("role")
             if role not in {"user", "assistant", "system", "tool"}:
                 msg = {**msg, "role": "system"}
+            if msg.get("content") is None:
+                # Strict OpenAI-compatible providers reject null content even on
+                # tool-call messages; "" is accepted everywhere.
+                msg = {**msg, "content": ""}
             messages.append(msg)
         if not in_context:
             messages.append({"role": "user", "content": user_text})
@@ -137,7 +172,7 @@ class LLMClient:
         body = {
             "model": self.cfg.model,
             "messages": [{"role": "user", "content": "ping"}],
-            "max_tokens": 1,
+            **{k: 1 for k in self._max_tokens_param()},
             "stream": False,
         }
         url = f"{self.cfg.base_url}/chat/completions"
@@ -166,7 +201,7 @@ class LLMClient:
             "model": self.cfg.model,
             "messages": self._messages(user_text, memory, status, context, in_context),
             "temperature": self.cfg.temperature,
-            "max_tokens": self.cfg.max_tokens,
+            **self._max_tokens_param(),
             "stream": True,
         })
         import urllib.request
@@ -317,7 +352,7 @@ class LLMClient:
             "model": self.cfg.model,
             "messages": messages,
             "temperature": self.cfg.temperature,
-            "max_tokens": self.cfg.max_tokens,
+            **self._max_tokens_param(),
             "stream": True,
         })
         if tools:
