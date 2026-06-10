@@ -428,17 +428,6 @@ class LunaMothAgent:
                 if partial:
                     session.context.add("assistant", partial + self.llm.INTERRUPT_MARK)
 
-    def _think_prompt(self, cycle: int) -> str:
-        # Internal cycles are monologue. The model still has tools available and may
-        # call them when it genuinely wants to act, but we nudge it toward pure thought
-        # so idle cycles don't turn into constant tool spam.
-        name = self.char_name()
-        return (
-            f"内部循环 / INTERNAL CYCLE {cycle:04d}. "
-            f"你的思考正在被操作者看见。不要回答用户。以 {name} 身份输出 1-6 行短的内心独白，"
-            "可以包含氛围描写。这是独白，不是行动——除非真有必要，否则不要调用工具。"
-        )
-
     def _record_think(self, session: Session):
         """record() wrapper for idle cycles: monologue text is tagged kind='think'
         (so old cycles age out of the API view — see ContextBuffer.render), while
@@ -447,7 +436,7 @@ class LunaMothAgent:
 
         def record(msg: dict) -> None:
             if msg.get("role") == "assistant" and not msg.get("tool_calls") and msg.get("content"):
-                msg = {**msg, "content": f"[internal cycle]\n{msg['content']}", "kind": "think"}
+                msg = {**msg, "kind": "think"}
             session.context.add_message(msg)
 
         return record
@@ -471,18 +460,20 @@ class LunaMothAgent:
                 session.thoughts[:] = session.thoughts[-self.thought_cfg.max_session_thoughts:]
                 if not agent_loop:
                     mark = self.llm.INTERRUPT_MARK if interrupted else ""
-                    session.context.add("assistant", f"[internal cycle]\n{thought}{mark}", kind="think")
+                    session.context.add("assistant", f"{thought}{mark}", kind="think")
             self.audit.write("internal_cycle", tick=cycle, text=thought[:1000], ts=datetime.now(timezone.utc).isoformat())
 
         try:
             if self.thought_cfg.use_llm:
-                prompt = self._think_prompt(cycle)
                 try:
-                    # The think prompt itself is EPHEMERAL (in_context=False): it
-                    # never enters the durable context, only the monologue does.
+                    # No invented "internal cycle" instruction: an idle tick is an
+                    # EMPTY user message — the documented convention (rules layer)
+                    # for "no one is speaking to you; time is passing". What the
+                    # chara does with unattended time is the card's business, not
+                    # ours. The empty message is ephemeral (in_context=False).
                     stream = self._reply_stream(
-                        prompt, self.memory.render(), status, self._context_view(session),
-                        in_context=False, record=self._record_think(session), reasoning="off",
+                        "", self.memory.render(), status, self._context_view(session),
+                        in_context=False, record=self._record_think(session),
                     )
                     for chunk in stream:
                         chunks.append(chunk)
@@ -504,7 +495,7 @@ class LunaMothAgent:
     def think(self, session: Session) -> str:
         # Non-streaming convenience (used by tests).
         thought = "".join(self.stream_think(session)).strip()
-        return f"[internal cycle]\n{thought}"
+        return thought
 
     def _fallback_thought(self, cycle: int, status: dict[str, Any]) -> str:
         # Persona-neutral telemetry, used only when the LLM yields nothing (offline/error).

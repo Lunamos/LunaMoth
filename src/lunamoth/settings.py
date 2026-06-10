@@ -66,6 +66,9 @@ class Settings:
     # Reasoning effort for thinking models: off | low | medium | high (default ON
     # at medium). Only sent to routes/models known to accept the parameter.
     reasoning: str = "medium"
+    # Show the thinking TEXT in the transcript (dimmed)? Default off: you get a
+    # Claude-style "✶ thinking…" indicator instead, and the text leaves no trace.
+    show_thinking: bool = False
     # Interaction mode — how the chara behaves while you are attached (see presence/):
     #   live = greets you, then keeps living its own loop while you watch (default)
     #   chat = greets you, then attends to you only — no self-talk while attached
@@ -156,6 +159,8 @@ def _coerce(name: str, raw: Any) -> Any:
     if name == "reasoning":
         v = str(raw).strip().lower()
         return v if v in {"off", "low", "medium", "high"} else "medium"
+    if name == "show_thinking":
+        return str(raw).strip().lower() in {"1", "true", "yes", "on"}
     return str(raw)
 
 

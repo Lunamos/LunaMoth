@@ -26,22 +26,26 @@ from textual.widgets import (
 SLASH_COMMANDS = [
     "/help", "/status", "/memory", "/memory_path", "/files", "/workspace",
     "/read", "/wread", "/write", "/logs", "/reset",
-    "/mode live", "/mode chat", "/patience", "/reasoning", "/theme", "/net on", "/net off",
+    "/mode live", "/mode chat", "/patience", "/reasoning", "/thinking on", "/thinking off",
+    "/theme", "/net on", "/net off",
     "/allow-dir", "/panel", "/settings", "/clear", "/exit",
 ]
 
 from . import art
 from .agent import LunaMothAgent
 from .cleanup import clean_runtime_sandbox
+from .context import estimate_tokens
 from .config import ROOT
-from .llm import DIM_OFF, DIM_ON, LLMClient
+from .llm import DIM_OFF, DIM_ON, THINK_OFF, THINK_ON, LLMClient
 from .presence import MODES, normalize_mode
 from .runner import run_terminal
 from .settings import PRESETS, Settings, config_path, load_settings, save_settings
 from .themes import TuiTheme, load_theme
 
-# Splits streamed text on the in-band dim markers (see llm.py).
-_DIM_SPLIT = re.compile("(\x01|\x02)")
+# Splits streamed text on the in-band machinery markers (see llm.py):
+# \x01/\x02 = dim (tool activity, always shown dimmed),
+# \x03/\x04 = think (hidden by default behind the ✶ indicator).
+_DIM_SPLIT = re.compile("(\x01|\x02|\x03|\x04)")
 
 
 def _st_dir() -> Path | None:
@@ -535,6 +539,11 @@ class LunaMothTUI(App):
         # the first word; if you stay silent past this it returns to its work.
         self.grace_until = 0.0
         self._activity = "waiting"
+        # ✶ indicator state: when the stream started, tokens received, thinking volume.
+        self._stream_t0 = 0.0
+        self._recv_tokens = 0
+        self._think_tokens = 0
+        self.show_thinking = bool(self.settings.show_thinking)
         self._session_started = False
         # Operator messages are QUEUED, never dropped: with a live provider a think
         # cycle is almost always streaming, so starting a stream synchronously on submit
@@ -591,6 +600,10 @@ class LunaMothTUI(App):
         self.console_log = self.query_one("#console", RichLog)
         self.status = self.query_one("#status", Static)
         self.input = self.query_one("#input", Input)
+        # Steady (non-blinking) block caret, like a terminal / Claude Code — the
+        # blink is distracting while typing. Styled white via the #input cursor CSS;
+        # Textual hides it when the input loses focus (transparent-on-blur).
+        self.input.cursor_blink = False
         self.suggest = self.query_one("#suggest", Static)
         self.gauges = self.query_one("#gauges", Static)
         self.memview = self.query_one("#memview", Static)
@@ -646,6 +659,7 @@ class LunaMothTUI(App):
             save_settings(result)
             self.agent.reconfigure(result)
             self.mode = normalize_mode(result.mode)
+            self.show_thinking = bool(result.show_thinking)
             # Re-apply the (possibly new) context limit to the live session.
             self.session.context.max_tokens = self.agent.context_limit()
             self.skin = load_theme(result.tui_theme_path)
@@ -828,9 +842,9 @@ class LunaMothTUI(App):
         # Per-token widget updates are what made the pane thrash; batching one repaint
         # per frame lets Textual's compositor diff just the new cells (no flicker).
         #
-        # Text may carry in-band dim markers (llm.DIM_ON/DIM_OFF) around machinery
-        # output — reasoning, tool activity. Those spans render dimmed, hermes /
-        # Claude-Code style, so they never read as character speech.
+        # Text may carry in-band machinery markers (see llm.py). Tool activity
+        # (dim spans) always renders dimmed; thinking (think spans) is HIDDEN by
+        # default — counted for the ✶ indicator, revealed by /thinking on.
         if not text:
             return
         current = style
@@ -838,10 +852,20 @@ class LunaMothTUI(App):
             if part == DIM_ON:
                 current = "dim"
                 continue
-            if part == DIM_OFF:
+            if part == THINK_ON:
+                current = "think"
+                continue
+            if part in (DIM_OFF, THINK_OFF):
                 current = style
                 continue
-            if part:
+            if not part:
+                continue
+            if current == "think":
+                self._think_tokens += estimate_tokens(part)
+                if not self.show_thinking:
+                    continue  # the ✶ indicator is the only trace
+                self.display_segments.append(("dim", part))
+            else:
                 self.display_segments.append((current, part))
         total = sum(len(t) for _, t in self.display_segments)
         while total > 60000 and self.display_segments:  # bound UI memory
@@ -887,7 +911,19 @@ class LunaMothTUI(App):
         model = self.agent.settings.model
         provider = self.agent.settings.provider
         persona = self.agent.char_name()
-        activity = self._activity if self._is_streaming() else "waiting"
+        if self._is_streaming():
+            parts = []
+            elapsed = time.monotonic() - self._stream_t0
+            if elapsed >= 10:
+                parts.append(f"{int(elapsed)}s")
+            if self._recv_tokens:
+                parts.append(f"↓ {self._recv_tokens} tok")
+            effort = (self.settings.reasoning or "medium").lower()
+            if self._think_tokens and effort != "off":
+                parts.append(f"thinking {effort}")
+            activity = f"✶ {self._activity}…" + (f" ({' · '.join(parts)})" if parts else "")
+        else:
+            activity = "waiting"
         self.status.update(
             f"persona={persona} | mode={self.mode} | {activity} | patience={self.patience:.2f}s | "
             f"memory={mem_chars} chars/{self.agent.memory.limits.max_tokens} tok | "
@@ -997,6 +1033,9 @@ class LunaMothTUI(App):
             # Status-line activity word: replies are "talking"; spontaneous cycles
             # rotate through the activity vocabulary.
             self._activity = "talking" if job.kind in ("user", "event") else random.choice(self.ACTIVITIES)
+            self._stream_t0 = time.monotonic()
+            self._recv_tokens = 0
+            self._think_tokens = 0
             thread = threading.Thread(target=self._stream_worker, args=(job, prefix), daemon=True)
             self.current_thread = thread
             thread.start()
@@ -1037,6 +1076,7 @@ class LunaMothTUI(App):
                     self._append_display("\n")
                 self._append_display(text)
             elif kind == "chunk":
+                self._recv_tokens += estimate_tokens(text)
                 self._append_display(text)
             elif kind == "interrupt":
                 # System notice, not character speech -> console, dimmed.
@@ -1165,6 +1205,23 @@ class LunaMothTUI(App):
                     "grey50",
                 )
             return
+        if low.startswith("/thinking"):
+            parts = low.split()
+            if len(parts) == 2 and parts[1] in {"on", "off"}:
+                self.show_thinking = parts[1] == "on"
+                self.settings = replace(self.settings, show_thinking=self.show_thinking)
+                save_settings(self.settings)
+                self._console(
+                    f"thinking text = {'shown dimmed' if self.show_thinking else 'hidden (✶ indicator only)'} (persisted)",
+                    "grey50",
+                )
+            else:
+                self._console(
+                    f"thinking text = {'shown' if self.show_thinking else 'hidden'}  "
+                    "(usage: /thinking on|off — the ✶ status indicator always runs; /reasoning sets effort)",
+                    "grey50",
+                )
+            return
         if low.startswith("/reasoning"):
             parts = low.split()
             levels = {"off", "low", "medium", "high"}
@@ -1257,6 +1314,8 @@ class LunaMothTUI(App):
             "          while you watch; chat: replies only",
             "/patience <sec>   pause between its cycles",
             "/reasoning off|low|medium|high  (default medium)",
+            "/thinking on|off  show the thinking text",
+            "          (default off: just the ✶ indicator)",
             "/net on|off       terminal network access",
             "/allow-dir <path> extra writable path",
             "/theme [name]     TUI skin",

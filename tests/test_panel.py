@@ -49,4 +49,14 @@ def test_panel_routing(tui_env):
             assert app._panel_view() == "telemetry"
             assert app.focused is app.input
 
+            # Thinking is hidden by default: think spans never reach the display,
+            # but they feed the ✶ indicator's token counter. Tool dim spans show.
+            from lunamoth.llm import dim, think
+            before = len(app.display_segments)
+            app._append_display(think("secret pondering") + "spoken words" + dim("⚙ tool ✓"))
+            shown = "".join(t for _, t in app.display_segments[before:])
+            assert "secret pondering" not in shown
+            assert "spoken words" in shown and "⚙ tool ✓" in shown
+            assert app._think_tokens > 0
+
     asyncio.run(scenario())

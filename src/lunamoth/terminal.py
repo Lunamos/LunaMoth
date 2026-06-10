@@ -6,10 +6,16 @@ import sys
 import time
 from dataclasses import dataclass
 
+import re
+
 from .agent import LunaMothAgent
 from .cleanup import clean_runtime_sandbox
 from .llm import DIM_OFF, DIM_ON
 from .presence import normalize_mode
+
+# Thinking spans are hidden in plain mode (the TUI has the ✶ indicator and the
+# /thinking toggle; legacy mode just stays quiet about it).
+_THINK_SPAN = re.compile("\x03.*?\x04", re.S)
 
 
 from .themes import LUNAMOTH_BANNER
@@ -59,9 +65,10 @@ def _stream_with_interrupt(prefix: str, chunks, allow_interrupt: bool = True) ->
             line = _read_line()
             print("\n\x1b[31m[INTERRUPT: operator input overrides current cycle]\x1b[0m", flush=True)
             return "".join(full), line
-        # In-band dim markers (reasoning / tool activity) -> ANSI dim, so the
-        # machinery never reads as character speech.
-        print(chunk.replace(DIM_ON, "\x1b[2m").replace(DIM_OFF, "\x1b[0m"), end='', flush=True)
+        # Thinking spans are dropped; tool-activity dim markers -> ANSI dim, so
+        # the machinery never reads as character speech.
+        visible = _THINK_SPAN.sub("", chunk).replace(DIM_ON, "\x1b[2m").replace(DIM_OFF, "\x1b[0m")
+        print(visible, end='', flush=True)
         full.append(chunk)
     print('', flush=True)
     return "".join(full), None
@@ -218,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue
 
             if state.eternal:
-                print("\n\x1b[2m[internal cycle]\x1b[0m", flush=True)
+                print("\n\x1b[2m· idle ·\x1b[0m", flush=True)
                 _, interrupt = _stream_with_interrupt(think_pfx, agent.stream_think(session), allow_interrupt=True)
                 if interrupt is not None:
                     pending_line = interrupt

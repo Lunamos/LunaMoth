@@ -18,16 +18,28 @@ LIVE_PROVIDERS = {"openai_compatible", "openai", "ollama", "openrouter"}
 # the conversation context.
 DIM_ON = "\x01"
 DIM_OFF = "\x02"
-_DIM_SPAN = re.compile("\x01.*?\x02", re.S)
+# Thinking gets its own channel: tool activity (dim) is always shown dimmed,
+# while reasoning (think) is HIDDEN by default — the UI shows a Claude-style
+# "✶ thinking…" indicator instead, and /thinking on reveals the text.
+THINK_ON = "\x03"
+THINK_OFF = "\x04"
+_MACHINERY_SPAN = re.compile("[\x01\x03].*?[\x02\x04]", re.S)
 
 
 def dim(text: str) -> str:
     return f"{DIM_ON}{text}{DIM_OFF}"
 
 
+def think(text: str) -> str:
+    return f"{THINK_ON}{text}{THINK_OFF}"
+
+
 def strip_dim(text: str) -> str:
-    """Remove dim spans (reasoning/tool chatter) — what remains is speech."""
-    return _DIM_SPAN.sub("", text).replace(DIM_ON, "").replace(DIM_OFF, "")
+    """Remove machinery spans (reasoning + tool chatter) — what remains is speech."""
+    out = _MACHINERY_SPAN.sub("", text)
+    for marker in (DIM_ON, DIM_OFF, THINK_ON, THINK_OFF):
+        out = out.replace(marker, "")
+    return out
 
 
 # Model families that accept OpenRouter's unified `reasoning` request param
@@ -87,9 +99,7 @@ class LLMClient:
         """Attach the unified `reasoning` request param (default ON at medium).
 
         Effort: off | low | medium | high — from cfg.reasoning, or `override`
-        for a single call (idle think cycles pass "off": the monologue IS the
-        thinking, and chain-of-thought there both wastes tokens and narrates
-        our internal cycle prompt on screen). "off" still sends an explicit
+        for a single call. "off" still sends an explicit
         {"enabled": false} to reasoning-capable models (some think by default);
         non-reasoning routes get nothing either way."""
         if not self.reasoning_supported():
@@ -238,15 +248,18 @@ class LLMClient:
                     delta = payload.get("choices", [{}])[0].get("delta", {})
                     thinking = delta.get("reasoning_content") or delta.get("reasoning")
                     if thinking:
-                        # Visible but dimmed — machinery, not character speech.
+                        # Think channel: hidden by default (the UI shows a
+                        # "✶ thinking…" indicator); newlines ride inside the
+                        # spans so nothing leaks when it is hidden.
                         if flow != "think":
-                            yield "\n" if flow == "speech" else ""
+                            if flow == "speech":
+                                yield think("\n")
                             flow = "think"
-                        yield dim(thinking)
+                        yield think(thinking)
                     chunk = delta.get("content")
                     if chunk:
                         if flow == "think":
-                            yield "\n"  # close the dim thinking block on its own line
+                            yield think("\n")
                         flow = "speech"
                         yield chunk
         except urllib.error.HTTPError as e:
@@ -408,18 +421,18 @@ class LLMClient:
                     thinking = delta.get("reasoning_content") or delta.get("reasoning")
                     if thinking:
                         reasoning_parts.append(thinking)
-                        # Stream it dimmed on its own lines: the operator sees the
-                        # chara think (hermes/Claude-Code style) without it running
-                        # into — or reading as — speech.
+                        # Think channel: hidden by default behind the "✶ thinking…"
+                        # indicator; /thinking on reveals it dimmed. Newlines ride
+                        # inside the spans so nothing leaks when hidden.
                         if flow != "think":
                             if flow == "speech":
-                                yield "\n"
+                                yield think("\n")
                             flow = "think"
-                        yield dim(thinking)
+                        yield think(thinking)
                     chunk = delta.get("content")
                     if chunk:
                         if flow == "think":
-                            yield "\n"  # close the dim thinking block on its own line
+                            yield think("\n")
                         flow = "speech"
                         text_out.append(chunk)
                         yield chunk
@@ -450,7 +463,8 @@ class LLMClient:
         # Persona-neutral offline engine: keeps the app usable without an API. Real
         # character voice comes from the configured card + a live model, not from here.
         lower = user_text.lower()
-        if "internal cycle" in lower or "内部循环" in user_text:
+        if not user_text.strip():
+            # An empty user message = unattended time (see rules) — idle output.
             return random.choice([
                 "[mock] internal loop tick. buffer stable.",
                 "[mock] recall check: " + (memory[:60] or "EMPTY"),

@@ -16,7 +16,7 @@ def test_old_think_cycles_pruned_from_buffer():
     c = ContextBuffer()
     c.add("user", "please do X")
     for i in range(THINK_WINDOW + 5):
-        c.add("assistant", f"[internal cycle]\nmusing {i}", kind="think")
+        c.add("assistant", f"musing {i}", kind="think")
     # Old monologues are pruned from the BUFFER itself (they stay in the
     # transcript), so they neither reach the API nor occupy trim budget —
     # a chatty daemon can't crowd out the operator's real instruction.
@@ -88,15 +88,17 @@ def test_interrupted_think_cycle_is_committed(agent):
     next(gen)
     gen.close()
     thinks = [m for m in s.context.messages if m.get("kind") == "think"]
-    assert thinks and "[internal cycle]" in thinks[-1]["content"]
+    assert thinks and thinks[-1]["content"].strip()  # partial idle output committed
 
 
 def test_strip_dim_removes_machinery_spans():
-    from lunamoth.llm import DIM_OFF, DIM_ON, dim, strip_dim
+    from lunamoth.llm import DIM_OFF, DIM_ON, THINK_OFF, THINK_ON, dim, strip_dim, think
 
-    mixed = dim("thinking about it…") + "你好。" + "\n" + dim("⚙ terminal ✓") + "\n再见。"
+    mixed = think("pondering…") + "你好。" + "\n" + dim("⚙ terminal ✓") + "\n再见。"
     assert strip_dim(mixed) == "你好。\n\n再见。"
-    assert DIM_ON not in strip_dim(mixed) and DIM_OFF not in strip_dim(mixed)
+    cleaned = strip_dim(mixed)
+    for marker in (DIM_ON, DIM_OFF, THINK_ON, THINK_OFF):
+        assert marker not in cleaned
 
 
 def test_reasoning_policy_openrouter_and_deepseek():
