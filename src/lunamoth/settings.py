@@ -55,9 +55,10 @@ class Settings:
     # Composable tool pack (decoupled from the persona card). Name ('sandbox') or .json path.
     # Empty => no tools (pure roleplay). Any persona can be combined with any pack.
     toolpack: str = "sandbox"
-    # Resource limits as an independent layer (Overdrive). 0 => auto: use the card's
-    # extensions value if present, else the built-in default. Non-zero => explicit override.
-    context_tokens: int = 0
+    # The context window is NOT a setting — it's the model's real window, read from
+    # the provider (see providers.py). Memory limits stay configurable (0 => auto:
+    # the card's value, else the built-in default), since e.g. SCP-079's tiny memory
+    # is part of its character.
     memory_chars: int = 0
     memory_tokens: int = 0
     # TUI theme card (cosmetic skin: banner/colors/decoration). Empty => built-in LunaMoth theme.
@@ -130,14 +131,13 @@ _ENV_MAP: dict[str, tuple[str, ...]] = {
     "user_name": ("LUNAMOTH_USER", "LUNAMOSS_USER"),
     "tui_theme_path": ("LUNAMOTH_THEME", "LUNAMOSS_THEME"),
     "toolpack": ("LUNAMOTH_TOOLPACK", "LUNAMOSS_TOOLPACK"),
-    "context_tokens": ("LUNAMOTH_CONTEXT_TOKENS", "LUNAMOSS_CONTEXT_TOKENS"),
     "memory_chars": ("LUNAMOTH_MEMORY_CHARS", "LUNAMOSS_MEMORY_CHARS"),
     "memory_tokens": ("LUNAMOTH_MEMORY_TOKENS", "LUNAMOSS_MEMORY_TOKENS"),
     "mode": ("LUNAMOTH_MODE", "LUNAMOTH_PRESENCE"),
     "reasoning": ("LLM_REASONING",),
 }
 
-_INT_FIELDS = {"max_tokens", "context_tokens", "memory_chars", "memory_tokens"}
+_INT_FIELDS = {"max_tokens", "memory_chars", "memory_tokens"}
 
 _FIELD_TYPES = {f.name: f.type for f in fields(Settings)}
 

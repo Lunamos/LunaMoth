@@ -201,13 +201,10 @@ class WelcomeScreen(Screen):
             if cur_pack and cur_pack not in {v for _, v in pack_options}:
                 pack_options.append((cur_pack, cur_pack))
             yield Select(pack_options, value=self.draft.toolpack or "", allow_blank=False, id="toolpack")
-            with Horizontal():
-                with Vertical():
-                    yield Label("Overdrive: context tokens (0=auto)", classes="field-label")
-                    yield Input(str(self.draft.context_tokens), id="context_tokens")
-                with Vertical():
-                    yield Label("Overdrive: memory chars (0=auto)", classes="field-label")
-                    yield Input(str(self.draft.memory_chars), id="memory_chars")
+            # Context window is the model's real window (read from the provider),
+            # not a knob. Only durable-memory size is tunable here.
+            yield Label("Memory chars (0 = card default)", classes="field-label")
+            yield Input(str(self.draft.memory_chars), id="memory_chars")
             themes = _discover("themes", (".json",))
             yield Label("TUI theme (cosmetic skin)", classes="field-label")
             yield Select(
@@ -249,10 +246,6 @@ class WelcomeScreen(Screen):
         except ValueError:
             max_tokens = self.draft.max_tokens
         try:
-            context_tokens = int(_txt("context_tokens"))
-        except ValueError:
-            context_tokens = self.draft.context_tokens
-        try:
             memory_chars = int(_txt("memory_chars"))
         except ValueError:
             memory_chars = self.draft.memory_chars
@@ -267,7 +260,6 @@ class WelcomeScreen(Screen):
             model=_txt("model"),
             temperature=temperature,
             max_tokens=max_tokens,
-            context_tokens=context_tokens,
             memory_chars=memory_chars,
             character_path=character if isinstance(character, str) else "",
             world_path=world if isinstance(world, str) else "",
@@ -334,8 +326,6 @@ class WelcomeScreen(Screen):
             world = str(dw) if dw else ""
         self._set_select("#world", world)
         self._set_select("#toolpack", str(defaults.get("toolpack", "") or ""))
-        if defaults.get("context_tokens"):
-            self.query_one("#context_tokens", Input).value = str(int(defaults["context_tokens"]))
         if defaults.get("memory_chars"):
             self.query_one("#memory_chars", Input).value = str(int(defaults["memory_chars"]))
         lang_label = "中文" if card.language == "zh" else "English"

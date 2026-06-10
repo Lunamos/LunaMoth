@@ -135,10 +135,10 @@ class CharacterCard:
         """The card's recommended world / tool pack / limits.
 
         Lives in `extensions.lunamoth` (SillyTavern-compatible free-form field):
-            {"world": "worlds/X.json", "toolpack": "sandbox",
-             "context_tokens": 1000000, "memory_chars": 8000}
-        Cards that omit it (e.g. plain SillyTavern imports) just get the global
-        fallbacks — so any imported card Just Works.
+            {"world": "worlds/X.json", "toolpack": "sandbox", "memory_chars": 8000}
+        The context window is NOT here — it's the model's real window (providers.py).
+        Cards that omit this block (e.g. plain SillyTavern imports) just get the
+        global fallbacks — so any imported card Just Works.
         """
         ext = self.extensions.get("lunamoth")
         return dict(ext) if isinstance(ext, dict) else {}

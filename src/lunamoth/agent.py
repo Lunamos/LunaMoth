@@ -25,6 +25,7 @@ from .persona import (
     system_language,
 )
 from . import presence
+from . import providers
 from . import rules as rules_layer
 from .sandbox import Sandbox
 from .state import EnvState
@@ -90,7 +91,7 @@ class LunaMothAgent:
             character=self.char_name(),
             world=(self.world.name if self.world else None),
             toolpack=(self.toolpack.name if self.toolpack else None),
-            context_tokens=self.context_limit(),
+            context_window=self.context_limit(),
         )
 
     # ---- persona / tool pack / limits (independent composable layers) -------------
@@ -185,13 +186,19 @@ class LunaMothAgent:
             max_chars=self._effective_limit("memory_chars", 8000),
         )
 
-    # Wide fallback context window so task/world cards fit; cards may narrow it.
-    DEFAULT_CONTEXT_TOKENS = 1_000_000
     # Attach restores only the transcript tail; the full history stays on disk.
     RESTORE_MAX_MESSAGES = 400
 
     def context_limit(self) -> int:
-        return self._effective_limit("context_tokens", self.DEFAULT_CONTEXT_TOKENS)
+        """The model's REAL context window — read from the provider, never set by
+        the operator or a card. Cached per (provider, base_url, model); a model
+        swap via reconfigure refetches it."""
+        s = self.settings
+        key = (s.provider, s.base_url, s.model)
+        if getattr(self, "_ctx_window_key", None) != key:
+            self._ctx_window_key = key
+            self._ctx_window = providers.context_window(s.provider, s.base_url, s.model, s.api_key)
+        return self._ctx_window
 
     def make_session(self) -> "Session":
         """Build a Session whose context window honors the active limits layer.

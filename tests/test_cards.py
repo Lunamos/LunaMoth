@@ -20,12 +20,14 @@ def test_bundled_cards_declare_defaults_and_language():
     d = moth.defaults()
     assert d["world"] == "worlds/LunaMoth.zh.json"
     assert d["toolpack"] == "sandbox"
-    assert d["context_tokens"] >= 1_000_000
+    assert d["memory_chars"] == 8000
+    # The context window is NOT card-declared — it's the model's real window.
+    assert "context_tokens" not in d
 
     scp = CharacterCard.load("characters/SCP-079.en.json")
     assert scp.language == "en"
     assert scp.defaults()["world"] == "worlds/SCP-Foundation.en.json"
-    assert scp.defaults()["context_tokens"] == 8192
+    assert scp.defaults()["memory_chars"] == 1500  # 079's tiny memory is characterful
 
 
 def test_plain_card_without_bundle_gets_empty_defaults(tmp_path):

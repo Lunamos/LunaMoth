@@ -36,10 +36,13 @@ def test_no_scp_framing_in_system_prompt(agent):
         assert bad not in blob, f"engine leaked {bad!r} into a neutral character's prompt"
 
 
-def test_card_defaults_drive_limits(agent):
+def test_card_defaults_drive_toolpack_and_memory(agent):
     a = agent()
-    assert a.context_limit() >= 1_000_000   # moth's wide window
     assert a.toolpack is not None and a.toolpack.name == "sandbox"
+    assert a.memory.limits.max_chars == 8000  # moth's card-declared memory size
+    # Context window is the model's real window (default for mock/unknown), NOT the card.
+    from lunamoth.providers import DEFAULT_WINDOW
+    assert a.context_limit() == DEFAULT_WINDOW
 
 
 def test_env_state_is_neutral(agent):
