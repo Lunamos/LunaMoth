@@ -124,17 +124,19 @@ The dropdowns also scan your local SillyTavern data directory if you opt in with
 
 Imported cards are plain roleplay by default — tool access is opt-in via a tool pack, never implied by the card.
 
-## Isolation levels
+## Tools & isolation
 
-Pick per session with `lunamoth new NAME --isolation ...`:
+The character's one general capability is a `terminal` tool (named after [Hermes](https://github.com/NousResearch/hermes-agent)'s): it runs a shell command in the session workspace and gets stdout/stderr back. That's language-agnostic — `python3`, `node`, writing files, `git` — so there's no interpreter lock-in. Tools are exposed over the standard OpenAI tool-calling protocol; the active tool pack decides which the character gets.
 
-| Level | Boundary |
+How that command is contained is the isolation level, chosen per session with `lunamoth new NAME --isolation ...`:
+
+| Level | Mechanism |
 | --- | --- |
-| `dir` | Subprocess + workspace path guard + module blocklist + resource limits (Claude-Code-style directory trust) |
-| `sandbox` (default) | All of the above **plus an OS jail**: `sandbox-exec` on macOS / `bubblewrap` on Linux — network denied, writes confined to the workspace, no daemon, no root |
-| `docker` | Container: `--network none`, read-only rootfs, memory/CPU/pid caps — strongest, heaviest |
+| `dir` | No jail — runs with **your** privileges, cwd in the workspace (Claude-Code-style "I trust this directory") |
+| `sandbox` (default) | OS jail: `sandbox-exec` on macOS / `bubblewrap` on Linux — writes confined to the workspace, network denied, no daemon, no root |
+| `docker` | Container: read-only rootfs, bind-mounted workspace, memory/CPU/pid caps — strongest, heaviest |
 
-All file access is confined to the session sandbox; there is no raw shell tool and no default network tool. On exit the runtime sandbox is cleaned (keep it with `--no-clean-on-exit`).
+**Permissions are runtime-adjustable, not all-or-nothing.** Network is off by default; flip it live with `/net on` (per session, persisted). Grant writes to a path outside the workspace with `/allow-dir <path>` under `sandbox`. Sessions **persist** between runs like Hermes/Claude Code — nothing is wiped on exit unless you pass `--clean-on-exit`.
 
 ## TUI reference
 
@@ -146,8 +148,8 @@ lunamoth --plain          # legacy plain terminal mode
 ./run_web.sh              # experimental web UI (from a clone)
 ```
 
-In-session: `/help`, `/status`, `/memory`, `/workspace`, `/wread <file>`, `/think on|off`, `/cooldown <s>`, `/exit`.
-Keys: **Ctrl+S** settings · **Ctrl+T** pause/resume thinking · **Ctrl+L** clear · **Ctrl+C** shutdown & clean.
+In-session: `/help`, `/status`, `/memory`, `/workspace`, `/net on|off`, `/allow-dir <path>`, `/forever on|off`, `/cooldown <s>`, `/exit`.
+Keys: **Ctrl+S** settings · **Ctrl+T** pause/resume thinking · **Ctrl+L** clear · **Ctrl+C** shutdown.
 
 ## License & acknowledgements
 

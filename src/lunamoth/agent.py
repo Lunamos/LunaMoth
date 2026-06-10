@@ -227,7 +227,7 @@ class LunaMothAgent:
         if result.get("ok"):
             data = result.get("data", "")
             text = data if isinstance(data, str) else _json.dumps(data, ensure_ascii=False)
-            head = f"⚙ {name} ✓ ({len(text)} chars)" if name == "run_python" else f"⚙ {name} ✓"
+            head = f"⚙ {name} ✓ ({len(text)} chars)" if name == "terminal" else f"⚙ {name} ✓"
             snippet = _abbrev(text, 200)
             display = f"{head}\n  {snippet}" if snippet else head
             content = text[:4000] or "(empty)"

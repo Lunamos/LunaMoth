@@ -58,8 +58,8 @@ def _launch_tui(meta: S.SessionMeta, args: argparse.Namespace) -> int:
     argv = [sys.argv[0], "--cooldown", str(args.cooldown)]
     if args.forever and not args.plain:
         argv.append("--forever")  # plain terminal mode has thinking on by default
-    if args.no_clean_on_exit:
-        argv.append("--no-clean-on-exit")
+    if args.clean_on_exit:
+        argv.append("--clean-on-exit")
     module = "lunamoth.terminal" if args.plain else "lunamoth.tui"
     meta.mark_running()
     old_argv = sys.argv
@@ -259,7 +259,7 @@ def _add_tui_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--cooldown", type=float, default=2.0, help="idle self-talk pause seconds")
     p.add_argument("--forever", action="store_true", help="start with the idle self-talk loop ON")
     p.add_argument("--plain", action="store_true", help="legacy plain terminal instead of the TUI")
-    p.add_argument("--no-clean-on-exit", action="store_true", help="keep the runtime sandbox on shutdown")
+    p.add_argument("--clean-on-exit", action="store_true", help="wipe the session sandbox on shutdown (default: persist)")
 
 
 def build_parser() -> argparse.ArgumentParser:

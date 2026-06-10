@@ -124,17 +124,19 @@ export OPENAI_MODEL=qwen2.5:3b-instruct
 
 导入的角色卡默认是纯角色扮演——工具能力必须通过工具包显式授予，卡本身不隐含任何权限。
 
-## 隔离等级
+## 工具与隔离
 
-创建会话时用 `lunamoth new NAME --isolation ...` 按会话选择：
+角色唯一的通用能力是一个 `terminal` 工具（名字对齐 [Hermes](https://github.com/NousResearch/hermes-agent)）：在会话 workspace 里跑 shell 命令，拿回 stdout/stderr。它语言无关——`python3`、`node`、写文件、`git` 都行，不锁定解释器。工具通过标准 OpenAI tool-calling 协议暴露，由当前工具包决定角色拿到哪些。
 
-| 等级 | 边界 |
+命令"怎么被关住"就是隔离等级，创建会话时用 `lunamoth new NAME --isolation ...` 按会话选择：
+
+| 等级 | 机制 |
 | --- | --- |
-| `dir` | 子进程 + workspace 路径守卫 + 模块黑名单 + 资源限制（Claude Code 式目录信任） |
-| `sandbox`（默认） | 在上面基础上**叠加 OS 级牢笼**：macOS `sandbox-exec` / Linux `bubblewrap` —— 拒绝网络、写入限制在工作区内，无守护进程、无需 root |
-| `docker` | 容器：`--network none`、只读根文件系统、内存/CPU/PID 上限 —— 最强也最重 |
+| `dir` | 无牢笼——用**你的**权限运行，cwd 在 workspace（Claude Code 式"我信任这个目录"） |
+| `sandbox`（默认） | OS 牢笼：macOS `sandbox-exec` / Linux `bubblewrap` —— 写入限制在 workspace、拒绝网络、无守护进程、无需 root |
+| `docker` | 容器：只读根文件系统、bind-mount 工作区、内存/CPU/PID 上限 —— 最强也最重 |
 
-所有文件访问被限制在会话沙盒内；没有裸 shell 工具，默认没有网络工具。退出时会清理运行时沙盒（用 `--no-clean-on-exit` 保留现场）。
+**权限运行时可改，不是一刀切。** 网络默认关闭，`/net on` 实时打开（按会话持久化）；`sandbox` 档下用 `/allow-dir <path>` 放开 workspace 之外某个路径的写入。会话像 Hermes/Claude Code 一样**跨次运行持久化**——除非加 `--clean-on-exit`，退出时什么都不清。
 
 ## TUI 速查
 
@@ -146,8 +148,8 @@ lunamoth --plain          # 旧版纯终端模式
 ./run_web.sh              # 实验性网页端（源码目录内）
 ```
 
-会话内命令：`/help`、`/status`、`/memory`、`/workspace`、`/wread <file>`、`/think on|off`、`/cooldown <s>`、`/exit`。
-快捷键：**Ctrl+S** 设置 · **Ctrl+T** 暂停/恢复思考 · **Ctrl+L** 清屏 · **Ctrl+C** 关闭并清理。
+会话内命令：`/help`、`/status`、`/memory`、`/workspace`、`/net on|off`、`/allow-dir <path>`、`/forever on|off`、`/cooldown <s>`、`/exit`。
+快捷键：**Ctrl+S** 设置 · **Ctrl+T** 暂停/恢复思考 · **Ctrl+L** 清屏 · **Ctrl+C** 关闭。
 
 ## 许可与致谢
 

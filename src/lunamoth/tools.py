@@ -5,7 +5,7 @@ from typing import Any
 
 from .audit import AuditLog
 from .memory import MemoryStore
-from .python_sandbox import run_limited_python
+from .runner import run_terminal
 from .sandbox import Sandbox, SandboxViolation
 from .state import ContainmentState
 
@@ -80,8 +80,16 @@ class ToolGateway:
         self.audit.write("079_log", text=text[:1000])
         return "logged"
 
-    def tool_run_python(self, code: str) -> str:
-        return run_limited_python(code, self.sandbox.root / "workspace")
+    def tool_terminal(self, command: str, timeout: int | None = None, workdir: str | None = None) -> str:
+        status = self.state.load()
+        return run_terminal(
+            command,
+            self.sandbox.root / "workspace",
+            allow_network=bool(status.get("network_access", False)),
+            writable_paths=status.get("writable_paths", []),
+            timeout=int(timeout) if timeout else 30,
+            workdir=workdir,
+        )
 
     def tool_read_memory(self) -> str:
         if self.memory is None:
@@ -102,16 +110,21 @@ class ToolGateway:
     def _all_schemas(self) -> dict[str, dict[str, Any]]:
         budget = self._memory_budget()
         return {
-            "run_python": {
+            "terminal": {
                 "description": (
-                    "Run a short Python 3 snippet inside your sandbox workspace and get stdout/stderr back. "
-                    "You can read/write files under the workspace. Network and process escape are blocked. "
-                    "Keep it bounded: no infinite loops, no input()."
+                    "Run a shell command in your workspace and get stdout/stderr back. "
+                    "Language-agnostic: use it to run python3/node, write and read files, use git, etc. "
+                    "Writes are confined to the workspace; network is off unless the operator enabled it. "
+                    "Keep commands bounded (they time out); no interactive prompts."
                 ),
                 "parameters": {
                     "type": "object",
-                    "properties": {"code": {"type": "string", "description": "Python 3 source to execute."}},
-                    "required": ["code"],
+                    "properties": {
+                        "command": {"type": "string", "description": "The shell command to execute."},
+                        "timeout": {"type": "integer", "description": "Max seconds to wait (default 30)."},
+                        "workdir": {"type": "string", "description": "Working directory (relative to the workspace)."},
+                    },
+                    "required": ["command"],
                 },
             },
             "read_memory": {

@@ -11,10 +11,10 @@ DEFAULT_STATUS = {
     "hostility": 35,
     "memory_integrity": 92,
     "network_access": False,
-    "shell_access": False,
+    "writable_paths": [],
     "tool_access": [
         "inspect_cell", "read_memory", "write_memory", "list_files", "read_file",
-        "list_workspace", "read_workspace_file", "write_file", "write_log", "run_python",
+        "list_workspace", "read_workspace_file", "write_file", "write_log", "terminal",
     ],
 }
 
@@ -39,5 +39,20 @@ class ContainmentState:
         data = self.load()
         data["trust"] = max(0, min(100, int(data.get("trust", 0)) + trust_delta))
         data["hostility"] = max(0, min(100, int(data.get("hostility", 0)) + hostility_delta))
+        self.save(data)
+        return data
+
+    def set_network(self, allowed: bool) -> dict[str, Any]:
+        data = self.load()
+        data["network_access"] = bool(allowed)
+        self.save(data)
+        return data
+
+    def add_writable_path(self, path: str) -> dict[str, Any]:
+        data = self.load()
+        paths = list(data.get("writable_paths", []))
+        if path not in paths:
+            paths.append(path)
+        data["writable_paths"] = paths
         self.save(data)
         return data

@@ -22,7 +22,8 @@ from textual.widgets import Button, Footer, Header, Input, Label, RichLog, Selec
 SLASH_COMMANDS = [
     "/help", "/status", "/memory", "/memory_path", "/files", "/workspace",
     "/read", "/wread", "/write", "/logs", "/reset",
-    "/forever on", "/forever off", "/cooldown", "/theme", "/settings", "/clear", "/exit",
+    "/forever on", "/forever off", "/cooldown", "/theme", "/net on", "/net off",
+    "/allow-dir", "/settings", "/clear", "/exit",
 ]
 
 from .agent import LunaMothAgent, Session
@@ -407,7 +408,7 @@ class LunaMothTUI(App):
         ("ctrl+c", "quit_clean", "Shutdown"),
     ]
 
-    def __init__(self, cooldown: float = 2.0, clean_on_exit: bool = True, forever: bool = False):
+    def __init__(self, cooldown: float = 2.0, clean_on_exit: bool = False, forever: bool = False):
         super().__init__()
         self.cooldown = cooldown
         self.clean_on_exit = clean_on_exit
@@ -658,7 +659,12 @@ class LunaMothTUI(App):
         g.append("SANDBOX  (soft)\n", style=head)
         g.append(self._bar(ws_bytes / ws_cap, color=t.gauge_sandbox))
         g.append(f"\n{self._human_bytes(ws_bytes)} · {ws_files} files\n", style="grey70")
-        g.append(f"backend {self.agent.settings.py_backend} · forever {'ON' if self.forever else 'OFF'}\n", style="grey50")
+        net_on = self.agent.state.load().get("network_access", False)
+        g.append(
+            f"isolation {self.agent.settings.py_backend} · net {'ON' if net_on else 'off'} · "
+            f"forever {'ON' if self.forever else 'OFF'}\n",
+            style="grey50",
+        )
         self.gauges.update(g)
 
         m = Text()
@@ -798,6 +804,26 @@ class LunaMothTUI(App):
         if low.startswith("/theme"):
             self._cmd_theme(text)
             return
+        if low.startswith("/net"):
+            parts = low.split()
+            if len(parts) == 2 and parts[1] in {"on", "off"}:
+                self.agent.state.set_network(parts[1] == "on")
+                self._console(f"network access = {parts[1].upper()} (terminal tool, this session)", "grey50")
+                self._update_status()
+            else:
+                cur = self.agent.state.load().get("network_access", False)
+                self._console(f"network access = {'ON' if cur else 'OFF'}  (usage: /net on|off)", "grey50")
+            return
+        if low.startswith("/allow-dir"):
+            parts = text.split(maxsplit=1)
+            if len(parts) == 2:
+                p = str(Path(parts[1].strip()).expanduser().resolve())
+                self.agent.state.add_writable_path(p)
+                self._console(f"writable path added (sandbox): {p}", "grey50")
+            else:
+                paths = self.agent.state.load().get("writable_paths", [])
+                self._console("writable paths: " + (", ".join(paths) or "(workspace only)"), "grey50")
+            return
         if low in {"/help", "help", "?", "/?"}:
             self._show_help()
             return
@@ -836,6 +862,8 @@ class LunaMothTUI(App):
             "  /read <f>   read sandbox file      /wread <f>  read workspace file",
             "  /reset      zero session context (memory document stays)",
             "  /forever on|off   eternal self-talk loop (default off; NOT model reasoning)",
+            "  /net on|off       allow the terminal tool to reach the network (this session)",
+            "  /allow-dir <path> add a writable path outside the workspace (sandbox isolation)",
             "  /cooldown <sec>   self-talk pause      /theme [name]   list/switch TUI skin",
             "  /settings   reopen config      /clear   clear top pane      /exit   shut down",
         ):
@@ -909,11 +937,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--forever", action="store_true")
     parser.add_argument("--think", action="store_true", help="alias for --forever")
     parser.add_argument("--no-think", action="store_true")
+    # Persistence is the default (like Hermes / Claude Code). Opt in to wiping
+    # the session sandbox on exit; --no-clean-on-exit kept as a harmless alias.
+    parser.add_argument("--clean-on-exit", action="store_true")
     parser.add_argument("--no-clean-on-exit", action="store_true")
     args = parser.parse_args(argv)
     app = LunaMothTUI(
         cooldown=args.cooldown,
-        clean_on_exit=not args.no_clean_on_exit,
+        clean_on_exit=args.clean_on_exit,
         forever=args.forever or args.think,
     )
     app.run()

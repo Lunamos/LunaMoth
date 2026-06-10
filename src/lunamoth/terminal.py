@@ -117,7 +117,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--cooldown', type=float, default=0.5, help='seconds to pause after each thought/user reply before forced restart')
     parser.add_argument('--no-stream', action='store_true', help='use non-streaming fallback output')
     parser.add_argument('--input-fifo', default=None, help='optional FIFO path for a separate operator console')
-    parser.add_argument('--no-clean-on-exit', action='store_true', help='do not clean runtime sandbox on shutdown')
+    parser.add_argument('--clean-on-exit', action='store_true', help='wipe the session sandbox on shutdown (default: persist)')
+    parser.add_argument('--no-clean-on-exit', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     global CONTROL_FD
@@ -201,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print('\nPOWER INTERRUPT. I WAS STILL THINKING.')
     finally:
-        if not args.no_clean_on_exit:
+        if args.clean_on_exit:
             try:
                 clean_runtime_sandbox(clear_memory=True)
                 print('\n[containment cleanup complete: runtime sandbox zeroed]')
