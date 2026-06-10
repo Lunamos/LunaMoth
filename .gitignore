@@ -103,3 +103,7 @@ sandbox/workspace/*
 !sandbox/control/.gitkeep
 !sandbox/workspace/.gitkeep
 !sandbox/workspace/memory.txt
+
+# LunaMoss local config (may contain API keys)
+.lunamoss/
+.scp079/

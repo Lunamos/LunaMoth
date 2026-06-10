@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 
 usage() {
   cat <<'USAGE'
-Open SCP 079 launcher
+LunaMoss launcher
 
 Default:
   ./run079.sh [--cooldown 0.5]
@@ -66,7 +66,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# The LLM backend is configured in the welcome screen (persisted to .scp079/config.json).
+# The LLM backend is configured in the welcome screen (persisted to .lunamoss/config.json).
 # Any LLM_PROVIDER / OPENAI_* env vars set here still work as a fallback seed when no
 # config file exists yet, but we intentionally do NOT hardcode a provider anymore.
 
@@ -80,12 +80,12 @@ run_python() {
 
 case "$MODE" in
   tui)
-    run_python -m scp079.tui --cooldown "$COOLDOWN" "${EXTRA[@]}"
+    run_python -m lunamoss.tui --cooldown "$COOLDOWN" "${EXTRA[@]}"
     ;;
   plain)
-    run_python -m scp079.terminal --cooldown "$COOLDOWN" "${EXTRA[@]}"
+    run_python -m lunamoss.terminal --cooldown "$COOLDOWN" "${EXTRA[@]}"
     ;;
   control)
-    run_python -m scp079.control "${EXTRA[@]}"
+    run_python -m lunamoss.control "${EXTRA[@]}"
     ;;
 esac

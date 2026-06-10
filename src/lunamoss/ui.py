@@ -4,11 +4,11 @@ import json
 
 import gradio as gr
 
-from .agent import SCP079Agent, Session
+from .agent import LunaMossAgent, Session
 from .config import ThoughtConfig
 
 
-agent = SCP079Agent()
+agent = LunaMossAgent()
 thought_cfg = ThoughtConfig()
 
 
@@ -17,7 +17,7 @@ def _status_markdown(session: Session | None = None) -> str:
     memory = agent.memory.load()
     ctx_tokens = session.context.token_count() if session else 0
     return f"""
-### Open SCP 079 Containment
+### LunaMoss Containment
 
 ```json
 {json.dumps(status, ensure_ascii=False, indent=2)}
@@ -71,10 +71,10 @@ def clear_session():
 
 
 def build_demo() -> gr.Blocks:
-    with gr.Blocks(title="Open SCP 079", theme=gr.themes.Monochrome()) as demo:
+    with gr.Blocks(title="LunaMoss", theme=gr.themes.Monochrome()) as demo:
         gr.Markdown(
-            "# Open SCP 079\n"
-            "打开就是 SCP-079：不可编辑人设卡、可见工具说明、受限 memory 文本文档、滑动上下文、受限 Python 沙盒。"
+            "# LunaMoss\n"
+            "打开就是 character：不可编辑人设卡、可见工具说明、受限 memory 文本文档、滑动上下文、受限 Python 沙盒。"
         )
         session = gr.State(agent.make_session())
         with gr.Row():

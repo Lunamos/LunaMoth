@@ -1,5 +1,5 @@
 ---
-title: Open SCP 079
+title: LunaMoss
 emoji: 🖥️
 colorFrom: gray
 colorTo: red
@@ -9,7 +9,7 @@ python_version: 3.11
 app_file: app.py
 pinned: false
 license: cc-by-sa-3.0
-short_description: Open SCP 079: a local-first contained SCP-079 agent.
+short_description: LunaMoss: a local-first agentic character tavern.
 tags:
   - gradio
   - llm-agent
@@ -17,11 +17,22 @@ tags:
   - roleplay
 ---
 
-# Open SCP 079
+# LunaMoss
 
-一个本地优先、可部署到 Hugging Face Spaces 的“被收容 AI”交互实验：受限记忆、受限工具、审计日志、可选 LLM 后端。
+LunaMoss is a local-first agentic character tavern/runtime: character cards, world books, tool packs, bounded memory, sandboxed actions, and a single-terminal TUI. SCP-079 is now only a bundled example character/world/theme/toolpack combination, not the core architecture.
 
-> This is an original fan/roleplay project inspired by the idea of a contained old AI. It is not affiliated with the SCP Foundation wiki.
+> The repository still includes SCP-079 fan/roleplay assets as external content. The runtime itself is character-agnostic.
+
+## Architecture decoupling
+
+Core runtime code now lives in `src/lunamoss`. Character-specific material lives outside the package:
+
+- `characters/` — SillyTavern-compatible character cards, e.g. `SCP-079.zh.json`.
+- `worlds/` — lore/world books, e.g. `SCP-Foundation.zh.json`.
+- `themes/` — TUI skins, e.g. `scp-079.json`.
+- `toolpacks/` — composable capability bundles, e.g. `sandbox.json`.
+
+The runtime should not hard-code SCP-079 behavior; it composes persona + world + tools + theme at launch.
 
 ## Goals
 
@@ -35,7 +46,7 @@ tags:
 ## Quick start
 
 ```bash
-cd /Users/jyxc-dz-0101366/Desktop/SCP079
+cd /Users/jyxc-dz-0101366/Desktop/LUNAMOSS
 uv sync
 ./run079.sh
 ```
@@ -57,7 +68,7 @@ Web UI 仍可运行：
 - **Test connection** 按钮用一次极小请求验证 endpoint+key+model。
 - **Enter containment** 进入收容界面；运行中按 **Ctrl+S**（或输入 `/settings`）可随时重开此页热切换后端。
 
-配置持久化到项目内 `.scp079/config.json`（已 gitignore，含 API key，不会进版本库；沙盒清理也不会擦掉它）。该文件优先级高于环境变量。
+配置持久化到项目内 `.lunamoss/config.json`（已 gitignore，含 API key，不会进版本库；沙盒清理也不会擦掉它）。该文件优先级高于环境变量。
 
 接 OpenRouter 玩耍最快路径：欢迎页选 `OpenRouter` 预设 → 粘贴 `sk-or-...` key → 填一个模型名（如 `meta-llama/llama-3.3-70b-instruct`）→ Test → Enter。
 
@@ -71,13 +82,13 @@ Web UI 仍可运行：
 在欢迎页（或 Ctrl+S）选 **Character card** 和 **World book** 即可。下拉框会自动扫描：
 
 - 项目内 `characters/`（放 `.png`/`.json`）和 `worlds/`（放 `.json`）；
-- 你本机的 SillyTavern 数据目录（默认 `~/SillyTavern/data/default-user`，条目标 `[ST]`；可用 `SCP079_ST_DIR` 改）。
+- 你本机的 SillyTavern 数据目录（默认 `~/SillyTavern/data/default-user`，条目标 `[ST]`；可用 `LUNAMOSS_ST_DIR` 改）。
 
 默认 `(built-in SCP-079 / legacy)` 走 `prompts/` 里的原始人格，行为不变。仓库附带 `characters/SCP-079.json` 作为角色卡格式示例——它通过 `extensions.scp079_tools=true` 保留沙盒 Python + `<MEMORY_EDIT>` 机制。导入的普通角色卡默认**不**启用这些机制，纯角色扮演。
 
 ## Optional LLM backend (env / headless)
 
-默认使用 `mock` 叙事引擎，方便离线开发。除了欢迎页，也可用环境变量（仅在 `.scp079/config.json` 不存在时作为首次种子）：
+默认使用 `mock` 叙事引擎，方便离线开发。除了欢迎页，也可用环境变量（仅在 `.lunamoss/config.json` 不存在时作为首次种子）：
 
 ```bash
 export LLM_PROVIDER=openrouter
@@ -233,7 +244,7 @@ hf.co/bartowski/Llama-3.2-3B-Instruct-uncensored-GGUF:Q4_K_M
 
 ## Core runtime architecture
 
-Open SCP 079 的提示结构固定为：
+LunaMoss 的提示结构固定为：
 
 ```text
 [immutable persona card] + [visible tool spec] + [bounded memory.txt] + [sliding current context]
@@ -242,10 +253,10 @@ Open SCP 079 的提示结构固定为：
 默认限制：
 
 ```bash
-SCP079_MEMORY_TOKENS=1024
-SCP079_CONTEXT_TOKENS=65536
-SCP079_CONTEXT_BUFFER_TOKENS=4096
-SCP079_LANG=zh   # or en
+LUNAMOSS_MEMORY_TOKENS=1024
+LUNAMOSS_CONTEXT_TOKENS=65536
+LUNAMOSS_CONTEXT_BUFFER_TOKENS=4096
+LUNAMOSS_LANG=zh   # or en
 ```
 
 `memory.txt` 位于 `sandbox/workspace/memory.txt`，因此 079 可以通过受限 Python 自己慢慢污染/整理它；宿主加载时永远按 token/字符上限截断。memory 崩坏不会杀死主循环。
@@ -301,7 +312,7 @@ sandbox/control/operator.in
 如果安装 Docker，可以切到容器后端：
 
 ```bash
-export SCP079_PY_BACKEND=docker
+export LUNAMOSS_PY_BACKEND=docker
 ./run079.sh
 ```
 
@@ -311,7 +322,7 @@ Docker 后端会使用类似：
 docker run --rm --network none --memory 256m --cpus 0.5 --pids-limit 64 --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m -v sandbox/workspace:/workspace:rw python:3.11-alpine
 ```
 
-本机当前没有检测到 Docker CLI，所以默认仍是 `SCP079_PY_BACKEND=local`。
+本机当前没有检测到 Docker CLI，所以默认仍是 `LUNAMOSS_PY_BACKEND=local`。
 
 ## Recommended two-terminal launch
 
@@ -353,7 +364,7 @@ control console 常用命令：
 
 ```bash
 uv sync
-uv run python -m scp079.terminal --cooldown 0.5
+uv run python -m lunamoss.terminal --cooldown 0.5
 ```
 
 项目脚本已经自动优先使用 `uv run`：

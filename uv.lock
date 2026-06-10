@@ -510,6 +510,30 @@ wheels = [
 ]
 
 [[package]]
+name = "lunamoss"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "gradio" },
+    { name = "requests" },
+    { name = "textual" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gradio", specifier = ">=5.0,<6" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
+    { name = "requests", specifier = ">=2.32" },
+    { name = "textual", specifier = ">=6.0,<7" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "markdown-it-py"
 version = "4.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -699,30 +723,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/1a/b0/413077f6b1153ed3cba361401c6783bbad6114804a000cc22eb71c13e190/numpy-2.4.6-pp311-pypy311_pp73-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8ad03c0965fb3c692200e74d458ca28c1dbb4ce96f9a479a8aa041ad5fabca02", size = 16747286, upload-time = "2026-05-18T23:37:06.327Z" },
     { url = "https://files.pythonhosted.org/packages/15/ce/e5ec180bc41812edcd8daeb8639d205622c0e8c02259d8ab25a0201b3c2a/numpy-2.4.6-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:2803abfebfc990042cd494d8ce2d5f82e9d847af6d35ec486923aa19dbad5e73", size = 12504263, upload-time = "2026-05-18T23:37:09.715Z" },
 ]
-
-[[package]]
-name = "open-scp-079"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "gradio" },
-    { name = "requests" },
-    { name = "textual" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "gradio", specifier = ">=5.0,<6" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
-    { name = "requests", specifier = ">=2.32" },
-    { name = "textual", specifier = ">=6.0,<7" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "orjson"

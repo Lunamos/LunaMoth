@@ -25,7 +25,7 @@ SLASH_COMMANDS = [
     "/forever on", "/forever off", "/cooldown", "/theme", "/settings", "/clear", "/exit",
 ]
 
-from .agent import SCP079Agent, Session
+from .agent import LunaMossAgent, Session
 from .cleanup import clean_runtime_sandbox
 from .config import ROOT
 from .llm import LLMClient
@@ -35,8 +35,8 @@ from .themes import TuiTheme, load_theme
 
 def _st_dir() -> Path | None:
     # External scanning is OPT-IN. By default we only look inside the project folder
-    # (no links outside it). Set SCP079_ST_DIR to also scan a SillyTavern data dir.
-    d = os.getenv("SCP079_ST_DIR", "").strip()
+    # (no links outside it). Set LUNAMOSS_ST_DIR to also scan a SillyTavern data dir.
+    d = os.getenv("LUNAMOSS_ST_DIR", os.getenv("SCP079_ST_DIR", "")).strip()
     if not d:
         return None
     p = Path(d).expanduser()
@@ -149,7 +149,7 @@ class WelcomeScreen(Screen):
             yield Static(self.skin.subtitle, id="title")
             yield Static(
                 "Configure the language model + persona + look, then enter containment.\n"
-                "Settings persist to .scp079/config.json (gitignored).",
+                "Settings persist to .lunamoss/config.json (gitignored).",
                 id="lore",
             )
             yield Label("Provider preset", classes="field-label")
@@ -172,7 +172,7 @@ class WelcomeScreen(Screen):
             worlds = _discover("worlds", (".json",))
             yield Label("Character card (persona)", classes="field-label")
             yield Select(
-                _picker_options(chars, self.draft.character_path, "(built-in SCP-079 / legacy)"),
+                _picker_options(chars, self.draft.character_path, "(built-in default persona)"),
                 value=self.draft.character_path or "",
                 allow_blank=False,
                 id="character",
@@ -201,7 +201,7 @@ class WelcomeScreen(Screen):
             themes = _discover("themes", (".json",))
             yield Label("TUI theme (cosmetic skin)", classes="field-label")
             yield Select(
-                _picker_options(themes, self.draft.tui_theme_path, "(built-in SCP-079 look)"),
+                _picker_options(themes, self.draft.tui_theme_path, "(built-in LunaMoss look)"),
                 value=self.draft.tui_theme_path or "",
                 allow_blank=False,
                 id="theme",
@@ -325,7 +325,7 @@ class WelcomeScreen(Screen):
         self.query_one("#conn_status", Static).update(f"[{color}]{mark} {msg}[/]")
 
 
-class OpenSCP079TUI(App):
+class LunaMossTUI(App):
     CSS = """
     Screen {
         background: #050505;
@@ -416,7 +416,7 @@ class OpenSCP079TUI(App):
         self.forever = forever
         self.settings = load_settings()
         self.skin = load_theme(self.settings.tui_theme_path)
-        self.agent = SCP079Agent(self.settings)
+        self.agent = LunaMossAgent(self.settings)
         self.session = self.agent.make_session()
         self.output: queue.Queue[tuple[str, str]] = queue.Queue()
         self.current_thread: threading.Thread | None = None
@@ -539,7 +539,7 @@ class OpenSCP079TUI(App):
 
     # ---- output routing ----------------------------------------------------------
     # Two surfaces, strictly separated:
-    #   _append_display -> top pane (#display): ONLY SCP-079's own output.
+    #   _append_display -> top pane (#display): ONLY the character output.
     #   _console        -> bottom pane (#console): operator input + system notices.
 
     def _append_display(self, text: str) -> None:
@@ -843,12 +843,12 @@ class OpenSCP079TUI(App):
         if len(parts) < 2:
             self._console(f"current theme: {self.skin.name}", "grey50")
             names = ", ".join(stem for stem, _ in themes) or "(none in themes/)"
-            self._console(f"available: {names}  ·  built-in: scp-079", "grey62")
+            self._console(f"available: {names}  ·  built-in: default", "grey62")
             self._console("usage: /theme <name>   (or pick one in /settings)", "grey62")
             return
         want = parts[1].strip().lower()
         match = next((p for stem, p in themes if stem.lower() == want), None)
-        if want in {"", "scp-079", "079", "default"}:
+        if want in {"", "default", "builtin"}:
             match = ""  # built-in default
         elif match is None:
             self._console(f"no theme '{parts[1].strip()}'. try /theme to list.", "red")
@@ -897,7 +897,7 @@ class OpenSCP079TUI(App):
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Open SCP 079 single-terminal TUI")
+    parser = argparse.ArgumentParser(description="LunaMoss single-terminal TUI")
     parser.add_argument("--cooldown", type=float, default=2.0)
     # `forever` = eternal self-talk loop, OFF by default; --forever opts in at boot.
     # --think/--no-think kept as harmless aliases for muscle memory / existing scripts.
@@ -906,7 +906,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-think", action="store_true")
     parser.add_argument("--no-clean-on-exit", action="store_true")
     args = parser.parse_args(argv)
-    app = OpenSCP079TUI(
+    app = LunaMossTUI(
         cooldown=args.cooldown,
         clean_on_exit=not args.no_clean_on_exit,
         forever=args.forever or args.think,
@@ -917,3 +917,7 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# Backward-compatible alias for older imports.
+OpenSCP079TUI = LunaMossTUI

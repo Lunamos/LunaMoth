@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
-SANDBOX_ROOT = Path(os.getenv("SCP079_SANDBOX", ROOT / "sandbox")).resolve()
+ROOT = Path(__file__).resolve().parents[2]
+SANDBOX_ROOT = Path(os.getenv("LUNAMOSS_SANDBOX", os.getenv("SCP079_SANDBOX", ROOT / "sandbox"))).resolve()
 
 
 @dataclass(frozen=True)
@@ -26,8 +26,8 @@ class GitHubMemoryConfig:
     repo: str = os.getenv("GITHUB_REPO", "")
     branch: str = os.getenv("GITHUB_BRANCH", "main")
     path: str = os.getenv("GITHUB_MEMORY_PATH", "sandbox/memory.json")
-    committer_name: str = os.getenv("GITHUB_COMMITTER_NAME", "SCP-079")
-    committer_email: str = os.getenv("GITHUB_COMMITTER_EMAIL", "scp-079@example.invalid")
+    committer_name: str = os.getenv("GITHUB_COMMITTER_NAME", "LunaMoss")
+    committer_email: str = os.getenv("GITHUB_COMMITTER_EMAIL", "lunamoss@example.invalid")
 
 
 @dataclass(frozen=True)

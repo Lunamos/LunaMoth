@@ -1,7 +1,11 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "open-scp-079"
+name = "lunamoss"
 version = "0.1.0"
-description = "Open SCP 079: a local-first contained SCP-079 agent."
+description = "LunaMoss: a local-first agentic character tavern."
 requires-python = ">=3.11"
 dependencies = [
   "gradio>=5.0,<6",
@@ -12,5 +16,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = ["src"]

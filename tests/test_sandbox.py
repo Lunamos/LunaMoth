@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from scp079.sandbox import Sandbox, SandboxViolation
+from lunamoss.sandbox import Sandbox, SandboxViolation
 
 
 def test_sandbox_blocks_escape(tmp_path: Path):

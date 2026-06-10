@@ -58,8 +58,8 @@ class LLMClient:
             headers["Authorization"] = f"Bearer {self.cfg.api_key}"
         # OpenRouter recommends these; harmless elsewhere.
         if "openrouter.ai" in self.cfg.base_url:
-            headers["HTTP-Referer"] = "https://github.com/open-scp-079"
-            headers["X-Title"] = "Open SCP 079"
+            headers["HTTP-Referer"] = "https://github.com/Lunamos/OpenSCP079"
+            headers["X-Title"] = "LunaMoss"
         return headers
 
     def test_connection(self, timeout: float = 20.0) -> tuple[bool, str]:

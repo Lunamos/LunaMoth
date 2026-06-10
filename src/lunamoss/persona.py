@@ -7,7 +7,7 @@ from .config import ROOT
 
 
 def language() -> str:
-    lang = os.getenv("SCP079_LANG", "zh").strip().lower()
+    lang = os.getenv("LUNAMOSS_LANG", os.getenv("SCP079_LANG", "zh")).strip().lower()
     return "en" if lang.startswith("en") else "zh"
 
 

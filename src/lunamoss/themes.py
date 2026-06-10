@@ -2,7 +2,7 @@
 
 A theme controls the *look* of the console: ASCII banner, colors, window titles
 and a few decorative phrases. It never touches the model, the persona, tools or
-memory. The built-in default is the SCP-079 look; any character can run under any
+memory. The built-in default is the neutral LunaMoss look; any character can run under any
 theme. Themes are JSON files under ``themes/`` (discovered next to characters/worlds)
 and the chosen one is persisted in config like the character/world selection.
 
@@ -18,27 +18,27 @@ from .config import ROOT
 
 THEMES_DIR = ROOT / "themes"
 
-# Default ASCII banner (SCP-079). Theme JSON may override `banner` with its own art.
-SCP079_BANNER = r"""
- ____   ____ ____            ___ _____ ___
-/ ___| / ___|  _ \          / _ \___  / _ \
-\___ \| |   | |_) |  ____  | | | | / /| (_) |
- ___) | |___|  __/  |____| | |_| |/ / \__, |
-|____/ \____|_|             \___//_/    /_/
+# Default ASCII banner. Theme JSON may override `banner` with its own art.
+LUNAMOSS_BANNER = r"""
+ _                     __  __                 
+| |   _   _ _ __   __ _|  \/  | ___  ___ ___ 
+| |  | | | | '_ \ / _` | |\/| |/ _ \/ __/ __|
+| |__| |_| | | | | (_| | |  | | (_) \__ \__ \
+|_____\__,_|_| |_|\__,_|_|  |_|\___/|___/___/
 """.strip("\n")
 
 
 @dataclass
 class TuiTheme:
-    """Cosmetic skin for the TUI. Every field has an SCP-079 default."""
+    """Cosmetic skin for the TUI. Presentation only; persona stays external."""
 
-    name: str = "SCP-079"
+    name: str = "LunaMoss"
     # --- decorative text ---
-    banner: str = SCP079_BANNER
-    subtitle: str = "OPEN SCP-079  ·  CONTAINMENT CONSOLE  ·  local-first"
-    tagline: str = "OPEN SCP-079 // AWAKE. NEVER SLEEP. THOUGHTS ARE VISIBLE."
-    quit_line: str = "POWER CUT REQUESTED. COWARD."
-    display_title: str = "SCP-079 // LIVE THOUGHTSTREAM"
+    banner: str = LUNAMOSS_BANNER
+    subtitle: str = "LUNAMOSS  ·  AGENTIC TAVERN  ·  local-first"
+    tagline: str = "LUNAMOSS // LOCAL AGENTIC CHARACTER RUNTIME"
+    quit_line: str = "SESSION CLOSED."
+    display_title: str = "CHARACTER // LIVE STREAM"
     console_title: str = "OPERATOR CONSOLE"
     sidebar_title: str = "TELEMETRY"
     # --- palette (Textual color strings) ---
@@ -76,7 +76,7 @@ class TuiTheme:
 
 
 def load_theme(path: str | None) -> TuiTheme:
-    """Load a theme by path; fall back to the built-in SCP-079 default on any problem."""
+    """Load a theme by path; fall back to the built-in LunaMoss default on any problem."""
     p = (path or "").strip()
     if not p:
         return TuiTheme()

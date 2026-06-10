@@ -11,7 +11,7 @@ from .config import ROOT, LLMConfig
 
 # Runtime config lives in the project, NOT inside the sandbox (the sandbox is
 # zeroed on shutdown). It is gitignored so API keys never enter version control.
-CONFIG_DIR = Path(os.getenv("SCP079_CONFIG_DIR", ROOT / ".scp079")).resolve()
+CONFIG_DIR = Path(os.getenv("LUNAMOSS_CONFIG_DIR", os.getenv("SCP079_CONFIG_DIR", ROOT / ".lunamoss"))).resolve()
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
 
@@ -35,7 +35,7 @@ class Settings:
     max_tokens: int = 420
     lang: str = "zh"
     py_backend: str = "local"  # local | docker  (groundwork for stronger containment)
-    # SillyTavern-compatible persona. Empty character_path => built-in SCP-079 (legacy prompts).
+    # SillyTavern-compatible persona. Empty character_path => built-in default persona.
     character_path: str = ""
     world_path: str = ""
     user_name: str = "操作者"
@@ -47,7 +47,7 @@ class Settings:
     context_tokens: int = 0
     memory_chars: int = 0
     memory_tokens: int = 0
-    # TUI theme card (cosmetic skin: banner/colors/decoration). Empty => built-in SCP-079.
+    # TUI theme card (cosmetic skin: banner/colors/decoration). Empty => built-in LunaMoss theme.
     tui_theme_path: str = ""
 
     def is_live(self) -> bool:
@@ -95,23 +95,23 @@ PRESETS: dict[str, dict[str, Any]] = {
 
 
 # Map each Settings field to the env var that can seed it (precedence: defaults < env < file).
-_ENV_MAP: dict[str, str] = {
-    "provider": "LLM_PROVIDER",
-    "base_url": "OPENAI_BASE_URL",
-    "api_key": "OPENAI_API_KEY",
-    "model": "OPENAI_MODEL",
-    "temperature": "LLM_TEMPERATURE",
-    "max_tokens": "LLM_MAX_TOKENS",
-    "lang": "SCP079_LANG",
-    "py_backend": "SCP079_PY_BACKEND",
-    "character_path": "SCP079_CHARACTER",
-    "world_path": "SCP079_WORLD",
-    "user_name": "SCP079_USER",
-    "tui_theme_path": "SCP079_THEME",
-    "toolpack": "SCP079_TOOLPACK",
-    "context_tokens": "SCP079_CONTEXT_TOKENS",
-    "memory_chars": "SCP079_MEMORY_CHARS",
-    "memory_tokens": "SCP079_MEMORY_TOKENS",
+_ENV_MAP: dict[str, tuple[str, ...]] = {
+    "provider": ("LLM_PROVIDER",),
+    "base_url": ("OPENAI_BASE_URL",),
+    "api_key": ("OPENAI_API_KEY",),
+    "model": ("OPENAI_MODEL",),
+    "temperature": ("LLM_TEMPERATURE",),
+    "max_tokens": ("LLM_MAX_TOKENS",),
+    "lang": ("LUNAMOSS_LANG", "SCP079_LANG"),
+    "py_backend": ("LUNAMOSS_PY_BACKEND", "SCP079_PY_BACKEND"),
+    "character_path": ("LUNAMOSS_CHARACTER", "SCP079_CHARACTER"),
+    "world_path": ("LUNAMOSS_WORLD", "SCP079_WORLD"),
+    "user_name": ("LUNAMOSS_USER", "SCP079_USER"),
+    "tui_theme_path": ("LUNAMOSS_THEME", "SCP079_THEME"),
+    "toolpack": ("LUNAMOSS_TOOLPACK", "SCP079_TOOLPACK"),
+    "context_tokens": ("LUNAMOSS_CONTEXT_TOKENS", "SCP079_CONTEXT_TOKENS"),
+    "memory_chars": ("LUNAMOSS_MEMORY_CHARS", "SCP079_MEMORY_CHARS"),
+    "memory_tokens": ("LUNAMOSS_MEMORY_TOKENS", "SCP079_MEMORY_TOKENS"),
 }
 
 _INT_FIELDS = {"max_tokens", "context_tokens", "memory_chars", "memory_tokens"}
@@ -132,12 +132,14 @@ def _coerce(name: str, raw: Any) -> Any:
 def load_settings() -> Settings:
     data: dict[str, Any] = {}
     # Seed from environment so existing env-based workflows still work pre-welcome-screen.
-    for field_name, env_name in _ENV_MAP.items():
-        if os.environ.get(env_name):
-            try:
-                data[field_name] = _coerce(field_name, os.environ[env_name])
-            except (TypeError, ValueError):
-                pass
+    for field_name, env_names in _ENV_MAP.items():
+        for env_name in env_names:
+            if os.environ.get(env_name):
+                try:
+                    data[field_name] = _coerce(field_name, os.environ[env_name])
+                    break
+                except (TypeError, ValueError):
+                    pass
     # The on-disk config (written by the welcome screen) is the source of truth and wins.
     if CONFIG_PATH.exists():
         try:
