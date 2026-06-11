@@ -104,23 +104,32 @@ Content (gitignore-allowlisted): `characters/` `worlds/` `toolpacks/` `themes/`.
 
 ## The prompt stack (key design)
 
-Built fresh each turn in `agent._build_system_messages`, in this order:
+Every API request is assembled as **three zones**:
 
-1. **Character card = the soul.** Identity/voice/autonomy come entirely from the
-   card. The engine injects NO identity of its own. (An earlier "soul" layer was
-   removed because it overlapped the card.)
-2. **Rules** (`rules.py`) — neutral, character-agnostic operating standard, **only
-   when the chara has tools**: you have authority over your sandbox; your work
-   must be REAL (anti-fabrication: don't claim a poem/file/page is done unless it
-   truly exists — fixes "claims it wrote a poem it never made"); act through
-   tools, not narration; an empty user message = nobody's talking, do as you wish.
-   A tool-less pure-roleplay chara gets NO rules → free to narrate fiction.
-3. Tool nudge + live env facts; world info.
-4. **Closer** — short post-history reminder (SillyTavern style), last = strongest,
-   only with tools.
+1. **Stable prefix** — computed once per session and reused byte-identically until
+   `make_session` / reconfigure / `/reset`: character card identity
+   (`render_system`, PHI-free), optional neutral Rules layer when tools are
+   enabled, the static tool-use nudge, toolpack note, frozen memory snapshot,
+   frozen SKILLS index, and constant world-info entries. The engine injects no
+   roleplay identity of its own; identity/voice/autonomy come from the card.
+2. **History** — the append-only `ContextBuffer` view: user/assistant/system/tool
+   messages that are actually part of the conversation. Compaction is the one
+   sanctioned rewrite: old head → one persisted summary + recent tail. Volatile
+   prompt text never enters this buffer or the transcript.
+3. **Volatile tail** — recomputed per turn and appended after history: live env
+   facts (isolation/network/operator/date), shallow-scanned keyword world info
+   with per-session sticky state and a 25% window cap, the mutable goals block,
+   then exactly one **post-history slot** as the final system message. Post-history
+   priority: card `post_history_instructions` > card
+   `extensions.lunamoth.rules_closer` > bundled rules closer (the latter two only
+   when tools are enabled).
 
-Override hooks (cards leave them empty by default): `extensions.lunamoth.rules`,
-`.rules_closer`; global `~/.lunamoth/rules.md`.
+World info is two-tier: `constant=true` entries are stable prefix material;
+keyword entries live only in the volatile tail and scan the last ~4 history
+messages plus current user text, not the whole context.
+
+Override hooks: `extensions.lunamoth.rules`, `.rules_closer`,
+`.goals`; global `~/.lunamoth/rules.md`.
 
 ## Charas, isolation, context
 

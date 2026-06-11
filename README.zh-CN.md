@@ -56,10 +56,11 @@
 - [x] **类型化事件协议** —— 后端流式输出冻结 dataclass 事件（`TextDelta`/`ThinkDelta`/`ToolStart`/`ToolEnd`/`Notice`），带内控制字符已删除；如何渲染（机械输出调暗、thinking 藏在 ✶ 指示器后）由各前端自行决定。`lunamoth run NAME -p "…" --stream-json` 以 JSONL 输出同一事件流——这就是未来所有客户端的线上格式
 - [x] **前后端分离** —— 域子包架构（`core/ protocol/ content/ tools/ obs/ session/ front/`），依赖方向由测试强制；前端只持有 `CharaHandle`（attach / 事件流 / 命令 / 状态快照），无法触及更深处；`/命令` 集中在一份注册表里、TUI 与纯终端共用。详见 `docs/refactor-plan.md`
 - [x] **自己的生活：说话信道 · 聊天优先 · 时间感** —— 无人陪伴时的输出属于 chara 自己（`muse` 信道）；`speak` 工具是它**决定**触达你的方式（未来消息前端的基础：Telegram/微信只投递它说出口的话）。你开口聊天时它会放下手头的事，等你安静 `/quiet <秒>`（默认 5 分钟）后再继续自己的生活。它感知真实时间但不污染上下文：自主 tick 只携带一个时钟时间戳（即用即弃）、长时间沉默后只注记一次、日期随环境事实行——它还能用 `rest` 工具给自己定闹钟（1–120 分钟；你一句话就能提前叫醒它）
+- [x] **三区提示词栈与卡片优先上下文** —— 每次 API 调用显式拼成稳定前缀 / 持久历史 / 易变尾部：前缀在会话内字节稳定、利于 prompt cache；角色卡 PHI 作为最后一个 post-history system 槽；常驻世界书进稳定区，关键词 lore 只浅扫最近尾部、带 sticky 回合和 25% 预算上限；压缩摘要持久写入 transcript，重启后直接从 checkpoint 续上。
 
 **兼容性与可扩展性**
 
-- [ ] **世界书功能对齐** —— 补齐与 SillyTavern 激活逻辑的差距：递归扫描、token 预算、sticky/cooldown/delay、插入位置/深度、触发概率、大小写与全词匹配。*涉及：`content/worldinfo.py`（调用方签名保持稳定）。*
+- [ ] **世界书功能对齐** —— 补齐与 SillyTavern 激活逻辑的剩余差距：递归扫描、cooldown/delay、插入位置/深度、触发概率、大小写与全词匹配。*涉及：`content/worldinfo.py`（调用方签名保持稳定）。*
 - [ ] **声明式工具注册表** —— 用 Hermes 式注册（名称、schema、handler、可用性检查）替换 `ToolGateway.tool_*` 硬编码方法 + 内联 schema，新工具只需一个自包含模块。*涉及：`tools/gateway.py` → 按模块注册的 `tools/builtin/`。*
 
 **远程接入**（有顺序——逐项递进）
