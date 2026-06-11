@@ -88,6 +88,14 @@ internal deps; `obs/` imports only `config`. Full design: `docs/refactor-plan.md
 - `session/` — `sessions.py` (named charas under ~/.lunamoth/sessions/<name>/;
   `SessionMeta.env()` is the activation interface), `settings.py`, `cleanup.py`.
 - `presence/` — attach/detach awareness + the `/mode live|chat` interaction mode.
+- `server/` — the remote/desktop gateway (imports protocol+session+content, never
+  core/tools directly): `dispatch.py` (per-session JSON-RPC over CharaHandle),
+  `stdio.py`/`ws.py` (transports for `lunamoth serve <name>`), `hub.py`
+  (board-level RPC: roster/cards/wake/export/defaults/key-test/transcribe; reads
+  session dirs + transcript SQLite directly — one process = one activated session,
+  so the hub NEVER hosts an agent), `desktop.py` (`lunamoth desktop`: static HTTP
+  for front/web + WS routing /hub and /chara/<name>, the latter a byte pipe to a
+  child `serve --stdio` with daemon pause/resume around it).
 - `front/` — ALL frontends; the only textual/rich importers:
   - `cli.py` — the `lunamoth` command (roster default; new/ls/attach/start/stop/rm/
     setup/update/doctor; `run -p [--stream-json]` headless; daemon helpers).
@@ -99,6 +107,12 @@ internal deps; `obs/` imports only `config`. Full design: `docs/refactor-plan.md
     breaks ESC sequences — every arrow read as bare Esc and quit the launcher).
   - `wizard.py` — plain-terminal first-run setup (runs BEFORE the full-screen TUI).
   - `art.py` — the blue LunaMoth wordmark (rich Text, gradient, moonlight sweep).
+  - `web/` — the desktop renderer (no build step: index.html/style.css/i18n.js/
+    rpc.js/app.js), a pure protocol client served by `lunamoth desktop`. Design
+    spec + implementation notes: `docs/desktop/design.md` (§9). UI chrome is
+    bilingual zh/en + light/dark; a chara's words stay in the card's language.
+    Idle driving MUST keep front/terminal.py's gating (quiet window + rest_until)
+    or it burns tokens nonstop.
 
 Content (gitignore-allowlisted): `characters/` `worlds/` `toolpacks/` `themes/`.
 
