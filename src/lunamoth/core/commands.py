@@ -37,12 +37,12 @@ def _persist(agent, **changes) -> None:
 def _status(agent, session, arg: str) -> Reply:
     data = agent.tools.call("inspect_env")
     data["context_tokens_est"] = session.context.token_count()
-    return Reply(True, agent.tools.as_json(data), data)
+    return Reply(True, agent.tools.as_json(data), data, verbose=True)
 
 
 def _memory(agent, session, arg: str) -> Reply:
     rendered = agent.memory.render()
-    return Reply(True, rendered if rendered.strip() else "(empty — the chara curates this via the `memory` tool)")
+    return Reply(True, rendered if rendered.strip() else "(empty — the chara curates this via the `memory` tool)", verbose=True)
 
 
 def _memory_path(agent, session, arg: str) -> Reply:
@@ -51,7 +51,7 @@ def _memory_path(agent, session, arg: str) -> Reply:
 
 def _tool_json(agent, name: str, **kwargs) -> Reply:
     result = agent.tools.call(name, **kwargs)
-    return Reply(bool(result.get("ok")), agent.tools.as_json(result), result)
+    return Reply(bool(result.get("ok")), agent.tools.as_json(result), result, verbose=True)
 
 
 def _files(agent, session, arg: str) -> Reply:
@@ -83,7 +83,7 @@ def _write(agent, session, arg: str) -> Reply:
 
 def _logs(agent, session, arg: str) -> Reply:
     tail = agent.audit.tail(20)
-    return Reply(True, agent.tools.as_json(tail), tail)
+    return Reply(True, agent.tools.as_json(tail), tail, verbose=True)
 
 
 def _compact(agent, session, arg: str) -> Reply:
@@ -119,7 +119,7 @@ def _goal(agent, session, arg: str) -> Reply:
                     for g in goals
                 ]
                 body = "\n".join(lines) + "\n\n○ active  ● done  ✕ dropped\n/goal <text> · /goal done|drop <id>"
-            return Reply(True, body, tuple(goals))
+            return Reply(True, body, tuple(goals), verbose=True)
         if parts[0] in {"done", "drop", "active"} and len(parts) == 2:
             status = {"done": "done", "drop": "dropped", "active": "active"}[parts[0]]
             goal = agent.goals.set_status(parts[1].strip(), status)
@@ -134,12 +134,13 @@ def _skills(agent, session, arg: str) -> Reply:
     skills = agent.skills.scan()
     if not skills:
         body = "(no skills yet)\n\nThe chara writes its own with create_skill;\nyou can drop SKILL.md dirs into ~/.lunamoth/skills/."
+        return Reply(True, body, (), verbose=True)
     else:
         tag = {"own": "✎", "user": "⌂", "bundled": "·"}
         body = "\n".join(
             f"{tag.get(sk['origin'], '?')} {sk['name']} — {sk['description']}" for sk in skills
         ) + "\n\n✎ the chara's own  ⌂ ~/.lunamoth/skills  · bundled"
-    return Reply(True, body, tuple(skills))
+    return Reply(True, body, tuple(skills), verbose=True)
 
 
 def _mcp(agent, session, arg: str) -> Reply:
@@ -151,14 +152,14 @@ def _mcp(agent, session, arg: str) -> Reply:
             '{"mcpServers": {"fetch": {"command": "uvx",\n  "args": ["mcp-server-fetch"]}}}\n\n'
             "Note: MCP servers run OUTSIDE the sandbox\njail — configuring one is a trust decision."
         )
-        return Reply(True, body, ())
+        return Reply(True, body, (), verbose=True)
     allowed = set(agent.tools.mcp_allowed)
     lines = [
         f"{'●' if name in allowed else '○ (not in this tool pack)'} {name} — {servers[name].get('command', '?')}"
         for name in sorted(servers)
     ]
     return Reply(True, "\n".join(lines) + "\n\nTools appear to the chara as mcp__<server>__<tool>.",
-                 tuple(sorted(servers)))
+                 tuple(sorted(servers)), verbose=True)
 
 
 def _net(agent, session, arg: str) -> Reply:
@@ -224,7 +225,7 @@ def _reasoning(agent, session, arg: str) -> Reply:
 
 def _help(agent, session, arg: str) -> Reply:
     lines = [f"{c.info.usage:<34} {c.info.help}" for c in _REGISTRY.values()]
-    return Reply(True, "\n".join(lines))
+    return Reply(True, "\n".join(lines), verbose=True)
 
 
 # ---- registry ------------------------------------------------------------------------
@@ -258,12 +259,21 @@ _REGISTRY: dict[str, Command] = dict([
 
 _ALIASES = {"presence": "mode", "skill": "skills"}
 
+# Pre-rename muscle memory, whole-line spellings (every frontend gets them).
+_LINE_ALIASES = {
+    "forever": "mode chat", "forever off": "mode chat", "pause": "mode chat",
+    "forever on": "mode live", "resume": "mode live",
+}
+
 
 def infos() -> "tuple[CommandInfo, ...]":
     return tuple(c.info for c in _REGISTRY.values())
 
 
 def execute(agent, session, line: str) -> Reply:
+    spelled = line.strip().lstrip("/").lower()
+    if spelled in _LINE_ALIASES:
+        line = "/" + _LINE_ALIASES[spelled]
     parts = line.strip().split(maxsplit=1)
     if not parts:
         return Reply(False, "empty command")

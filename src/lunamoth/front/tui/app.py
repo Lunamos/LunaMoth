@@ -29,7 +29,7 @@ from ...content.themes import load_theme
 from ...obs import broker, get_logger
 from ...presence import normalize_mode
 from ...protocol import Notice, TextDelta, ThinkDelta, ToolEnd, ToolStart
-from ...protocol.api import CharaHandle, estimate_tokens
+from ...protocol.api import GRANT_WORDS, CharaHandle, estimate_tokens
 from ...session.cleanup import clean_runtime_sandbox
 from ...session.settings import config_path, load_settings, save_settings
 from .welcome import WelcomeScreen, _discover
@@ -210,6 +210,7 @@ class LunaMothTUI(App):
         self.worker_lock = threading.Lock()
         self.shutdown_requested = False
         self.display_segments: list[tuple[str, str]] = []  # (style, text); "dim" = machinery
+        self._display_chars = 0  # running total — appends are per-token, keep them O(1)
         self.next_spont_at = time.monotonic() + 0.2
         # Attach grace: after the arrival greeting the chara leaves you room for
         # the first word; if you stay silent past this it returns to its work.
@@ -283,16 +284,6 @@ class LunaMothTUI(App):
         # during Chinese/Japanese composition. cursor_blink off too, belt-and-braces.
         self.input.cursor_blink = False
         self._show_terminal_cursor()
-
-    def _show_terminal_cursor(self) -> None:
-        """Un-hide the terminal's hardware cursor. Textual hides it at startup and
-        draws its own block; we hide the block (CSS) and reveal the real cursor,
-        which Textual already moves to the input caret each frame. Best-effort."""
-        try:
-            self._driver.write("\x1b[?25h")  # DECTCEM show cursor
-            self._driver.flush()
-        except Exception:
-            pass
         self.suggest = self.query_one("#suggest", Static)
         self.gauges = self.query_one("#gauges", Static)
         self.memview = self.query_one("#memview", Static)
@@ -323,6 +314,16 @@ class LunaMothTUI(App):
             self._welcome_done(None)
         else:
             self.push_screen(WelcomeScreen(self.settings), self._welcome_done)
+
+    def _show_terminal_cursor(self) -> None:
+        """Un-hide the terminal's hardware cursor. Textual hides it at startup and
+        draws its own block; we hide the block (CSS) and reveal the real cursor,
+        which Textual already moves to the input caret each frame. Best-effort."""
+        try:
+            self._driver.write("\x1b[?25h")  # DECTCEM show cursor
+            self._driver.flush()
+        except Exception:
+            pass
 
     def _apply_theme(self) -> None:
         """Paint the current theme card onto the fixed layout (borders/titles/colors)."""
@@ -378,35 +379,27 @@ class LunaMothTUI(App):
         self.set_interval(0.1, self._scheduler_tick)
         self.next_spont_at = time.monotonic() + 0.2
         # Presence: the chara now has an operator attached (the handle does the
-        # transcript restore + handoff bookkeeping).
+        # transcript restore + handoff bookkeeping AND decides the opening move —
+        # one greeting tree for every frontend; we only render it).
         info = self.handle.attach(present=True)
         self.char_name = info.char_name
         # Attach grace (live mode): after greeting, leave the operator room for the
         # first word; if they stay silent the chara simply returns to its work.
         self.grace_until = time.monotonic() + max(30.0, 2 * self.patience)
         self._update_status()
-        restored = bool(info.restored)
         self._render_restored_tail(info.char_name, info.restored)
-        if info.greeting and info.first_meeting:
-            # SillyTavern first_mes: the card's designed opener for a first meeting.
-            self._append_display(f"{self.skin.reply_pfx(info.char_name)}{info.greeting}\n")
-            self.handle.record_greeting(info.greeting)
+        if info.opening == "greeting":
+            self._append_display(f"{self.skin.reply_pfx(info.char_name)}{info.opening_text}\n")
+            self.handle.record_greeting(info.opening_text)
             self.next_spont_at = time.monotonic() + self.patience
-        elif info.attach_text:
-            # The card's on_attach prompt: a live arrival turn — the chara reacts
-            # to the operator coming back.
-            self._start_stream(StreamJob(kind="event", text=info.attach_text),
+        elif info.opening == "arrival":
+            self._start_stream(StreamJob(kind="event", text=info.opening_text),
                                prefix=self.skin.reply_pfx(info.char_name))
-        elif info.greeting and not restored:
-            # Card without an arrival prompt, fresh session: fall back to first_mes.
-            self._append_display(f"{self.skin.reply_pfx(info.char_name)}{info.greeting}\n")
-            self.handle.record_greeting(info.greeting)
-            self.next_spont_at = time.monotonic() + self.patience
-        elif not restored:
-            probe = "你是谁？只用一句话回答。" if info.lang == "zh" else "Who are you? Answer in one sentence."
-            self._start_stream(StreamJob(kind="user", text=probe), prefix=self.skin.reply_pfx(info.char_name))
-        # Restored history with no arrival prompt: continue silently — the
-        # restored tail above already says where things left off.
+        elif info.opening == "probe":
+            self._start_stream(StreamJob(kind="user", text=info.opening_text),
+                               prefix=self.skin.reply_pfx(info.char_name))
+        # opening == "none": restored history, no arrival prompt — continue
+        # silently; the restored tail above already says where things left off.
 
     def _render_restored_tail(self, name: str, rows, max_lines: int = 8) -> None:
         """Show the tail of the restored transcript so the operator sees what
@@ -537,9 +530,9 @@ class LunaMothTUI(App):
         if not text:
             return
         self.display_segments.append((style, text))
-        total = sum(len(t) for _, t in self.display_segments)
-        while total > 60000 and self.display_segments:  # bound UI memory
-            total -= len(self.display_segments.pop(0)[1])
+        self._display_chars += len(text)
+        while self._display_chars > 60000 and self.display_segments:  # bound UI memory
+            self._display_chars -= len(self.display_segments.pop(0)[1])
         self._display_dirty = True
 
     def _handle_event(self, ev: object) -> None:
@@ -818,7 +811,7 @@ class LunaMothTUI(App):
         low = text.lower()
         # ---- pending permission request: this input is the answer ----
         if self._perm_pending is not None:
-            if low in {"y", "yes", "allow", "ok", "同意", "允许", "是"}:
+            if low in GRANT_WORDS:
                 self._perm_answer = True
                 self._perm_event.set()
                 self._console(f"⚿ {self._perm_pending} → granted", "yellow")
@@ -880,19 +873,15 @@ class LunaMothTUI(App):
         if low in {"/help", "help", "?", "/?"}:
             self._show_help()
             return
-        # Pre-rename muscle memory: forever on/off were the old names for the modes.
-        if low in {"/forever off", "/forever", "/pause"}:
-            text, low = "/mode chat", "/mode chat"
-        elif low in {"/forever on", "/resume"}:
-            text, low = "/mode live", "/mode live"
         if text.startswith("/"):
             # ---- everything else: the SHARED backend command registry ----
-            # One implementation for every frontend (core/commands.py). Verbose
-            # output lights up the panel; one-liners stay in the console.
+            # One implementation for every frontend (core/commands.py, incl. the
+            # legacy /forever-style aliases). Verbose replies light up the panel;
+            # one-liners stay in the console.
             reply = self.handle.command(text)
             if not reply.ok:
                 self._console(reply.text, "red")
-            elif "\n" in reply.text:
+            elif reply.verbose:
                 self._console(f"{text} → panel", "green")
                 self._panel_out(text.split()[0].lstrip("/").upper(), reply.text)
             else:
@@ -1011,6 +1000,7 @@ class LunaMothTUI(App):
 
     async def action_clear_display(self) -> None:
         self.display_segments = []
+        self._display_chars = 0
         self._display_dirty = False
         self.transcript.update(Text(""))
         self._console("top pane cleared", "grey50")

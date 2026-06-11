@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from ..content.themes import LUNAMOTH_BANNER
 from ..presence import normalize_mode
 from ..protocol import Notice, TextDelta, ToolEnd
-from ..protocol.api import CharaHandle
+from ..protocol.api import GRANT_WORDS, CharaHandle
 from ..session.cleanup import clean_runtime_sandbox
 
 BANNER = (
@@ -80,9 +80,6 @@ def _cooldown(seconds: float) -> str | None:
     return None
 
 
-_GRANT_WORDS = {"y", "yes", "allow", "ok", "同意", "允许", "是"}
-
-
 def _stdin_permission_hook(kind: str, reason: str, detail: str, wait_seconds: int) -> bool:
     """request_permission hook for the plain terminal: ask on stdout, wait on stdin.
 
@@ -97,7 +94,7 @@ def _stdin_permission_hook(kind: str, reason: str, detail: str, wait_seconds: in
     while time.monotonic() < end:
         if _stdin_line_ready():
             line = (_read_line() or "").strip().lower()
-            granted = line in _GRANT_WORDS
+            granted = line in GRANT_WORDS
             print(f"  → {'granted' if granted else 'denied'}", flush=True)
             return granted
         time.sleep(0.05)
@@ -142,19 +139,15 @@ def main(argv: list[str] | None = None) -> int:
     if interactive:
         if restored:
             print(f"[restored {len(info.restored)} message(s) from the transcript]", flush=True)
-        if info.greeting and info.first_meeting:
-            # SillyTavern first_mes: the card's designed opener for a first meeting.
-            print(f"{reply_pfx}{info.greeting}", flush=True)
-            handle.record_greeting(info.greeting)
-        elif info.attach_text:
-            # The card's on_attach prompt: a live arrival turn.
-            _stream_with_interrupt(reply_pfx, handle.stream_event(info.attach_text), allow_interrupt=False)
-        elif info.greeting and not restored:
-            print(f"{reply_pfx}{info.greeting}", flush=True)
-            handle.record_greeting(info.greeting)
-        elif not restored:
-            probe = "你是谁？只用一句话回答。" if info.lang == "zh" else "Who are you? Answer in one sentence."
-            _stream_with_interrupt(reply_pfx, handle.stream_user(probe), allow_interrupt=False)
+        # The opening move is DECIDED by the handle (one tree for every frontend);
+        # this frontend only renders it.
+        if info.opening == "greeting":
+            print(f"{reply_pfx}{info.opening_text}", flush=True)
+            handle.record_greeting(info.opening_text)
+        elif info.opening == "arrival":
+            _stream_with_interrupt(reply_pfx, handle.stream_event(info.opening_text), allow_interrupt=False)
+        elif info.opening == "probe":
+            _stream_with_interrupt(reply_pfx, handle.stream_user(info.opening_text), allow_interrupt=False)
     pending_line: str | None = None
     if interactive:
         _prompt()

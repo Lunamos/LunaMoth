@@ -19,15 +19,21 @@ from typing import Any, Callable, Iterator
 from .events import Event
 
 # Re-exported for frontends (the UI shows token estimates without touching core).
-from ..core.context import estimate_tokens  # noqa: E402,F401
+from ..core.context import estimate_tokens  # noqa: F401
+
+# Operator words that grant a permission request — shared by every frontend.
+GRANT_WORDS = frozenset({"y", "yes", "allow", "ok", "同意", "允许", "是"})
 
 
 @dataclass(frozen=True)
 class Reply:
-    """Result of one /command: human-readable text + optional structured data."""
+    """Result of one /command: human-readable text + optional structured data.
+    `verbose` marks long-form output a frontend should give real estate
+    (the TUI's panel) instead of a console one-liner."""
     ok: bool
     text: str = ""
     data: Any = None
+    verbose: bool = False
 
 
 @dataclass(frozen=True)
@@ -39,15 +45,19 @@ class CommandInfo:
 
 @dataclass(frozen=True)
 class AttachInfo:
-    """Everything a frontend needs to open a session (greeting decision tree)."""
+    """Everything a frontend needs to open a session.
+
+    `opening` is the DECIDED first move (the greeting decision tree lives here,
+    not in each frontend): 'greeting' = display opening_text and call
+    record_greeting · 'arrival' = stream_event(opening_text) · 'probe' =
+    stream_user(opening_text) · 'none' = continue silently."""
     char_name: str
     lang: str
     mode: str
     show_thinking: bool
     restored: tuple          # restored transcript tail (message dicts, read-only)
-    greeting: str            # card first_mes ("" if none)
-    first_meeting: bool
-    attach_text: str         # card on_attach prompt ("" if none)
+    opening: str             # greeting | arrival | probe | none
+    opening_text: str
 
 
 @dataclass(frozen=True)
@@ -73,9 +83,9 @@ class StateSnapshot:
     memory_path: str
     sandbox_root: str
     workspace_root: str
-    goals: tuple
-    skills: tuple
-    mcp_servers: tuple       # (name, command, allowed)
+    # Goals/skills/MCP listings are NOT here on purpose: the snapshot feeds a
+    # status line polled several times a second, and those need disk walks.
+    # Rich UIs get them from /goal /skills /mcp Reply.data on demand.
 
 
 def test_connection(settings) -> tuple[bool, str]:
@@ -119,12 +129,29 @@ class CharaHandle:
                 m.get("role") == "system" and m.get("content") == handoff for m in recent
             ):
                 self._session.context.add("system", handoff)
+        # The greeting decision tree, decided ONCE for every frontend:
+        # first meeting gets the card's designed opener (SillyTavern first_mes);
+        # a return visit gets the card's on_attach arrival turn; a fresh session
+        # without either gets a probe; a restored session continues silently.
+        greeting = a.greeting() or ""
+        attach_text = a.attach_event_text() if present else ""
         first = a.presence.first_meeting() and not restored
+        if greeting and first:
+            opening, opening_text = "greeting", greeting
+        elif attach_text:
+            opening, opening_text = "arrival", attach_text
+        elif greeting and not restored:
+            opening, opening_text = "greeting", greeting
+        elif not restored:
+            opening, opening_text = "probe", (
+                "你是谁？只用一句话回答。" if a.lang == "zh" else "Who are you? Answer in one sentence."
+            )
+        else:
+            opening, opening_text = "none", ""
         info = AttachInfo(
             char_name=a.char_name(), lang=a.lang, mode=a.settings.mode,
             show_thinking=bool(a.settings.show_thinking),
-            restored=restored, greeting=a.greeting() or "",
-            first_meeting=first, attach_text=a.attach_event_text() if present else "",
+            restored=restored, opening=opening, opening_text=opening_text,
         )
         a.presence.mark_met()
         return info
@@ -174,10 +201,6 @@ class CharaHandle:
         a = self._agent
         status = a.state.load()
         mem = a.memory
-        servers = tuple(
-            (name, str(a.mcp.servers[name].get("command", "?")), name in a.tools.mcp_allowed)
-            for name in sorted(a.mcp.servers)
-        )
         snap = StateSnapshot(
             char_name=a.char_name(), lang=a.lang, mode=a.settings.mode,
             provider=a.settings.provider, model=a.settings.model,
@@ -196,9 +219,6 @@ class CharaHandle:
             memory_path=str(mem.root),
             sandbox_root=str(a.sandbox.root),
             workspace_root=str(a.sandbox.root / "workspace"),
-            goals=tuple(a.goals.all()),
-            skills=tuple(a.skills.scan()),
-            mcp_servers=servers,
         )
         self._snap = (time.monotonic(), snap)
         return snap

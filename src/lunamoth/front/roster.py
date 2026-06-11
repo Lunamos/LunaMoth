@@ -150,7 +150,7 @@ def _menu(rows: list[S.SessionMeta], sel: int, interactive: bool) -> Group:
 
 
 def _interactive(console: Console):
-    from . import cli# lazy: cli imports roster, so import here not at module load
+    from . import cli  # lazy: cli imports roster, so import here not at module load
     from rich.live import Live
 
     sel = 0

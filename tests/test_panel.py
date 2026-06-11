@@ -42,7 +42,7 @@ def test_panel_routing(tui_env):
             app.input.value = "/goal 给月蛾织一首夜曲"
             await pilot.press("enter")
             await pilot.pause()
-            active = [g for g in app.handle.snapshot(fresh=True).goals if g["status"] == "active"]
+            active = [g for g in app.handle.command("/goal").data if g["status"] == "active"]
             gid = active[-1]["id"]
             assert active[-1]["by"] == "operator"
             await cmd("/goal", "out")         # the list lights up the panel
@@ -50,8 +50,8 @@ def test_panel_routing(tui_env):
             await pilot.press("enter")
             await pilot.pause()
             # (SANDBOX_ROOT is shared across the test run — assert only OUR goal.)
-            snap = app.handle.snapshot(fresh=True)
-            assert gid not in [g["id"] for g in snap.goals if g["status"] == "active"]
+            now_active = [g["id"] for g in app.handle.command("/goal").data if g["status"] == "active"]
+            assert gid not in now_active
             await cmd("/memory", "memory")
             await cmd("/status", "out")       # one-shot command output -> OUTPUT view
             await cmd("/files", "files")
