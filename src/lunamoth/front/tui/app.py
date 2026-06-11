@@ -17,9 +17,12 @@ import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from rich.cells import cell_len
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.expand_tabs import expand_tabs_inline
+from textual.geometry import Offset
 from textual.suggester import SuggestFromList
 from textual.widgets import (
     ContentSwitcher, DirectoryTree, Footer, Header, Input, RichLog, Static,
@@ -47,6 +50,22 @@ _FRONT_COMMANDS = [
 class StreamJob:
     kind: str
     text: str | None = None
+
+
+class ConsoleInput(Input):
+    """Input whose reported screen cursor sits ON the insertion cell.
+
+    Textual's Input.cursor_screen_offset adds +1 whenever the caret is at the
+    end of the value (the normal typing position), which parks the REAL
+    terminal cursor — and the IME composition window that follows it — one
+    cell to the right of where the next character will appear."""
+
+    @property
+    def cursor_screen_offset(self) -> Offset:
+        x, y, _width, _height = self.content_region
+        scroll_x, _ = self.scroll_offset
+        cell = cell_len(expand_tabs_inline(self.value[: self.cursor_position], 4))
+        return Offset(x + cell - scroll_x, y)
 
 
 class LunaMothTUI(App):
@@ -250,8 +269,10 @@ class LunaMothTUI(App):
                     yield Static("", id="status")
                     yield RichLog(id="console", wrap=True, auto_scroll=True, markup=False)
                     yield Static("", id="suggest")
-                    yield Input(
-                        placeholder="operator console — talk to your character, or /help",
+                    # No placeholder: the cursor cell is styled as plain text
+                    # (see .input--cursor) so a placeholder's first character
+                    # renders bright, looking like a typed-but-undeletable glyph.
+                    yield ConsoleInput(
                         id="input",
                         suggester=SuggestFromList(self.slash_commands, case_sensitive=False),
                     )
