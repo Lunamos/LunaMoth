@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import ROOT
+from ..config import ROOT
 
 
 # Tool packs are an LunaMoth concept (SillyTavern cards stay pure persona).

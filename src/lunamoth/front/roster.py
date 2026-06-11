@@ -19,7 +19,7 @@ from rich.console import Console, Group
 from rich.text import Text
 
 from . import art
-from . import sessions as S
+from ..session import sessions as S
 
 _STATUS = {
     "attached": ("◆", "#eafaff"),   # a live TUI is open
@@ -150,7 +150,7 @@ def _menu(rows: list[S.SessionMeta], sel: int, interactive: bool) -> Group:
 
 
 def _interactive(console: Console):
-    from . import cli  # lazy: cli imports roster, so import here not at module load
+    from . import cli# lazy: cli imports roster, so import here not at module load
     from rich.live import Live
 
     sel = 0

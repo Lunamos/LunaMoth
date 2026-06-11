@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 
-from .config import SANDBOX_ROOT
+from ..config import SANDBOX_ROOT
 
 
 def clean_runtime_sandbox(clear_memory: bool = True) -> None:

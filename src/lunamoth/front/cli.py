@@ -33,10 +33,10 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__
-from . import sessions as S
+from .. import __version__
+from ..session import sessions as S
 
-APP_DIR = Path(__file__).resolve().parents[2]  # repo checkout (dev or ~/.lunamoth/app)
+APP_DIR = Path(__file__).resolve().parents[3]  # repo checkout (dev or ~/.lunamoth/app)
 
 # session isolation level -> python tool execution backend
 _ISOLATION_TO_BACKEND = {"dir": "local", "sandbox": "sandbox", "docker": "docker"}
@@ -66,7 +66,7 @@ def _start_daemon(meta: S.SessionMeta, patience: float = 2.0) -> bool:
     env.setdefault("LUNAMOTH_PY_BACKEND", _ISOLATION_TO_BACKEND[meta.isolation])
     log = meta.daemon_log.open("ab")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "lunamoth.terminal", "--patience", str(patience)],
+        [sys.executable, "-m", "lunamoth.front.terminal", "--patience", str(patience)],
         stdin=subprocess.DEVNULL, stdout=log, stderr=log,
         start_new_session=True, env=env, cwd=str(APP_DIR),
     )
@@ -117,7 +117,7 @@ def _launch_tui(meta: S.SessionMeta, args: argparse.Namespace) -> int:
         argv += ["--mode", mode]
     if args.clean_on_exit:
         argv.append("--clean-on-exit")
-    module = "lunamoth.terminal" if args.plain else "lunamoth.tui"
+    module = "lunamoth.front.terminal" if args.plain else "lunamoth.front.tui"
     meta.mark_running()
     old_argv = sys.argv
     try:
@@ -287,8 +287,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"error: chara {args.name!r} isn't set up yet — `lunamoth attach {args.name}` first", file=sys.stderr)
         return 1
     _activate(meta)
-    from .agent import LunaMothAgent
-    from .protocol import TextDelta, to_json
+    from ..core.agent import LunaMothAgent
+    from ..protocol import TextDelta, to_json
 
     agent = LunaMothAgent()
     session = agent.make_session()

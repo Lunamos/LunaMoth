@@ -1,8 +1,8 @@
 """Context management: interrupt-safe commits, think windowing, tool-aware trim."""
 import pytest
 
-from lunamoth.context import THINK_WINDOW, ContextBuffer
-from lunamoth.settings import Settings
+from lunamoth.core.context import THINK_WINDOW, ContextBuffer
+from lunamoth.session.settings import Settings
 
 
 def test_render_sanitizes_and_withholds_reasoning():
@@ -57,7 +57,7 @@ def agent(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     monkeypatch.setenv("LUNAMOTH_SANDBOX", str(tmp_path / "sandbox"))
     monkeypatch.setenv("LUNAMOTH_CONFIG_DIR", str(tmp_path / "cfg"))
-    from lunamoth.agent import LunaMothAgent
+    from lunamoth.core.agent import LunaMothAgent
 
     def make(**kw):
         kw.setdefault("toolpack", "")
@@ -119,7 +119,7 @@ def test_commit_keeps_speech_and_drops_machinery_events(agent, monkeypatch):
 
 def test_reasoning_policy_openrouter_and_deepseek():
     from lunamoth.config import LLMConfig
-    from lunamoth.llm import LLMClient
+    from lunamoth.core.llm import LLMClient
 
     def client(base_url, model):
         return LLMClient(LLMConfig(provider="openai_compatible", base_url=base_url, model=model))

@@ -1,5 +1,5 @@
-from lunamoth import compaction
-from lunamoth.context import ContextBuffer
+from lunamoth.core import compaction
+from lunamoth.core.context import ContextBuffer
 
 
 class FakeLLM:

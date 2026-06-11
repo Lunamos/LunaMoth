@@ -1,7 +1,7 @@
 
 import pytest
 
-from lunamoth.runner import os_sandbox_available, run_terminal
+from lunamoth.tools.runner import os_sandbox_available, run_terminal
 
 
 def test_dir_runs_any_command(tmp_path):

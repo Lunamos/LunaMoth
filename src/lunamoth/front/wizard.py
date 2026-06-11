@@ -14,8 +14,8 @@ from __future__ import annotations
 import getpass
 import sys
 
-from .config import ROOT
-from .settings import PRESETS, Settings, load_settings, save_settings
+from ..config import ROOT
+from ..session.settings import PRESETS, Settings, load_settings, save_settings
 
 
 def _say(text: str = "") -> None:
@@ -49,7 +49,7 @@ def _discover_characters() -> list[tuple[str, str]]:
     base = ROOT / "characters"
     if not base.is_dir():
         return out
-    from .cards import CharacterCard
+    from ..content.cards import CharacterCard
 
     for p in sorted(base.iterdir()):
         if p.suffix.lower() not in (".json", ".png") or p.name.startswith("."):
@@ -75,7 +75,7 @@ def _choose_character(settings: Settings) -> None:
 
 
 def _test(settings: Settings) -> bool:
-    from .llm import LLMClient
+    from ..core.llm import LLMClient
 
     if not settings.is_live():
         _say("  (offline/mock provider — nothing to test)")

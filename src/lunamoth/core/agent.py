@@ -7,37 +7,37 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .settings import Settings
+    from ..session.settings import Settings
 
 import json as _json
 
-from .audit import AuditLog
-from .cards import CharacterCard
-from .obs import get_logger, setup_logging
-from .config import ROOT, SANDBOX_ROOT, ThoughtConfig
+from ..obs.audit import AuditLog
+from ..content.cards import CharacterCard
+from ..obs import get_logger, setup_logging
+from ..config import ROOT, SANDBOX_ROOT, ThoughtConfig
 from .context import ContextBuffer
-from .goals import GoalStore
+from ..tools.goals import GoalStore
 from .llm import LLMClient
-from .protocol import MUSE, TextDelta
-from .memory import MemoryLimits, MemoryStore
-from .persona import (
+from ..protocol import MUSE, TextDelta
+from ..tools.memory import MemoryLimits, MemoryStore
+from ..content.persona import (
     DEFAULT_NAME,
     default_character_path,
     default_world_path,
     fallback_persona,
     system_language,
 )
-from . import presence
+from .. import presence
 from . import providers
-from . import rules as rules_layer
-from .mcp import McpManager
-from .sandbox import Sandbox
-from .skills import SkillStore
+from ..content import rules as rules_layer
+from ..tools.mcp import McpManager
+from ..tools.sandbox import Sandbox
+from ..tools.skills import SkillStore
 from .state import EnvState
-from .toolpacks import ToolPack, load_toolpack
-from .tools import ToolGateway
+from ..tools.toolpacks import ToolPack, load_toolpack
+from ..tools.gateway import ToolGateway
 from .transcript import TranscriptStore
-from .worldinfo import Lorebook, apply_macros
+from ..content.worldinfo import Lorebook, apply_macros
 
 _log = get_logger("agent")
 
@@ -60,7 +60,7 @@ class Session:
 
 class LunaMothAgent:
     def __init__(self, settings: "Settings | None" = None):
-        from .settings import load_settings
+        from ..session.settings import load_settings
 
         setup_logging()  # idempotent — whoever builds an agent gets diagnostics
         self.settings = settings or load_settings()

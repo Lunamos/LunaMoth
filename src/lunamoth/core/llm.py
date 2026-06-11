@@ -5,10 +5,10 @@ import random
 import time
 from typing import Any, Callable, Iterator
 
-from .config import LLMConfig
-from .obs import get_logger
-from .persona import fallback_persona
-from .protocol import Notice, TextDelta, ThinkDelta, ToolEnd, ToolStart
+from ..config import LLMConfig
+from ..obs import get_logger
+from ..content.persona import fallback_persona
+from ..protocol import Notice, TextDelta, ThinkDelta, ToolEnd, ToolStart
 
 _log = get_logger("llm")
 

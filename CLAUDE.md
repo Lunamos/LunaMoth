@@ -50,61 +50,55 @@ uvx ruff check --select F src/lunamoth tests   # lint (unused imports, undefined
   `/clear`, `/mode`, `/net`, `/reset`, `/exit`, …). Ctrl+C is the only key (safety quit).
 - README is split EN (`README.md`) / zh (`README.zh-CN.md`).
 
-## Module map (src/lunamoth/)
+## Module map (src/lunamoth/ — domain subpackages since the 2026-06 refactor)
 
-- `cli.py` — the `lunamoth` command. Default opens the **roster** (resume-first);
-  `new/ls/attach/start/start-all/stop/rm/setup/update/doctor`. Owns the daemon
-  helpers (`_start_daemon`/`_stop_daemon`) and session env activation.
-- `roster.py` — the launcher. Plain-terminal, inline (never full-screen): blue
-  splash + arrow-key (↑/↓/Enter) menu, line-input fallback on non-tty.
-  - Uses the **compact block wordmark** (the figlet `standard` "LunaMoth") — this
-    is the preferred look; do NOT switch the launcher to the wide serif one.
-  - Reads keys via raw-mode **`os.read(fd)`**, NOT `sys.stdin.read` — the text
-    buffer swallows the `[A` after ESC and makes every arrow key read as a bare
-    Esc (which quit the launcher). Don't reintroduce that. Verified with a
-    `pty.fork()` test (arrows decode to up/down).
-- `sessions.py` — named charas under `~/.lunamoth/sessions/<name>/` (config.json,
-  sandbox, transcript.db). `SessionMeta.env()` is the stable activation interface.
-- `wizard.py` — plain-terminal first-run setup (provider → key → model → test →
-  character menu). Runs BEFORE the full-screen TUI; only `/settings` mid-session
-  uses the Textual welcome screen.
-- `tui.py` — the split TUI (character stream / operator console / spotlight
-  sidebar). Steady (non-blinking) caret. **Actively evolving; a sibling agent
-  often edits this — read it fresh before touching.**
-- `terminal.py` — legacy plain-terminal loop; also what the background daemon runs.
-- `agent.py` — `LunaMothAgent`: composes persona + world + tools + rules into the
-  system prompt (`_build_system_messages`), runs the streaming agent loop, owns
-  memory/state/transcript/context_limit.
-- `llm.py` — OpenAI-compatible streaming client + the tool-calling agent loop
-  (tool_calls retention, reasoning_content captured-not-replayed, truncation
-  handling, interrupt-safe record()).
-- `cards.py` — SillyTavern V2/V3 card loader (PNG/JSON). `.defaults()` reads
-  `extensions.lunamoth` (world / toolpack / memory_chars / rules / rules_closer).
-- `worldinfo.py` — world book / lorebook activation + `{{char}}`/`{{user}}` macros.
-- `rules.py` — the **Rules layer** (see Prompt stack below).
-- `tools.py` — `ToolGateway`: the allowlisted tool dispatch (`terminal`,
-  read/write files, memory, inspect_env). Validates required args.
-- `runner.py` — runs the `terminal` tool's shell command under the isolation
-  mechanism (dir / sandbox-exec|bwrap / docker); reads net/writable perms per call.
-- `state.py` — `EnvState`: neutral per-session runtime state (env_status.json:
-  isolation, network_access, writable_paths, tool_access). No SCP framing.
-- `providers.py` — model **context window** from the provider (OpenRouter
-  `/models` lookup, cached; default 32768 elsewhere). NOT a setting.
-- `context.py` — `ContextBuffer`: sliding window of full message dicts (tool_calls
-  survive). `THINK_WINDOW` limits idle self-talk in the API view.
-- `transcript.py` — per-chara SQLite conversation log (WAL+fallback, epochs for
-  /reset), restored on attach. The durable source of truth.
-- `memory.py` — `MemoryStore`: Hermes-style durable memory. Two `§`-delimited
-  stores (`memory` = notes-to-self, `user` = facts about the operator), file-backed
-  under `SANDBOX_ROOT/memory/`. Edited via the one `memory` tool (add/replace/remove
-  × memory/user). The agent injects a FROZEN snapshot (taken at session start, see
-  `agent._freeze_memory`) into the system prompt — mid-session writes hit disk + the
-  tool response but NOT the prompt, so the cache prefix stays stable. `memory_chars`
-  is still card-settable (079's tiny memory is characterful).
+Dependency direction is ENFORCED by `tests/test_architecture.py`: nothing
+outside `front/` may import `front/` or textual/rich; `protocol/` has zero
+internal deps; `obs/` imports only `config`. Full design: `docs/refactor-plan.md`.
+
+- `config.py` — root constants (ROOT, SANDBOX_ROOT, LLMConfig). The only flat module.
+- `core/` — the agent backend (never imports front/ or UI libraries):
+  - `agent.py` — `LunaMothAgent`: composes persona + world + tools + rules into
+    the system prompt (`_build_system_messages`), runs the streaming agent loop.
+  - `llm.py` — OpenAI-compatible streaming client + tool-calling loop. **Yields
+    protocol events** (TextDelta/ThinkDelta/ToolStart/ToolEnd/Notice), never
+    styled strings; the old \x01-\x04 marker channels are gone. Retry 5s×5;
+    reasoning policy (OpenRouter-only unified param; echo-back for DeepSeek).
+  - `context.py` — `ContextBuffer` (full message dicts; THINK_WINDOW pruning).
+  - `compaction.py` — Hermes-style summary compaction.
+  - `transcript.py` — per-chara SQLite log (WAL+fallback, epochs for /reset).
+  - `providers.py` — model's REAL context window (never a setting).
+  - `state.py` — `EnvState` (env_status.json: isolation/network/writable/tools).
+- `protocol/` — **the contract layer**; frontends import this and nothing deeper:
+  - `events.py` — frozen dataclasses. `TextDelta.channel` is say|muse — laid in
+    for the speak-tool / engagement feature (plan §9).
+  - `codec.py` — JSON wire format (`lunamoth run -p --stream-json`, future server).
+- `content/` — SillyTavern compat, pure data loading: `cards.py` (V2/V3 PNG/JSON),
+  `worldinfo.py` (lorebook + {{char}}/{{user}} macros), `persona.py`,
+  `rules.py` (the Rules layer), `themes.py` (TUI skins).
+- `tools/` — the tool domain: `gateway.py` (`ToolGateway`, allowlisted dispatch,
+  `call(name, /)` positional-only), `runner.py` (terminal under dir/sandbox/docker),
+  `sandbox.py`, `mcp.py` (stdio JSON-RPC client), `skills.py` (SKILL.md,
+  create_skill self-improvement), `goals.py`, `memory.py` (frozen-snapshot
+  two-store), `toolpacks.py`.
+- `obs/` — diagnostics (leaf infra): `log.py` (rotating sandbox/logs/lunamoth.log
+  + errors.log, credential redaction, session tag, `--debug`), `broker.py`
+  (in-memory ring → `/panel log`), `audit.py` (the SECURITY trail — a separate
+  record from diagnostics; never merge them).
+- `session/` — `sessions.py` (named charas under ~/.lunamoth/sessions/<name>/;
+  `SessionMeta.env()` is the activation interface), `settings.py`, `cleanup.py`.
 - `presence/` — attach/detach awareness + the `/mode live|chat` interaction mode.
-- `art.py` — the blue LunaMoth wordmark (rich Text, gradient, moonlight sweep).
-- `themes.py`, `toolpacks.py`, `audit.py`, `cleanup.py`, `config.py`,
-  `settings.py`, `persona.py`, `sandbox.py` — supporting layers.
+- `front/` — ALL frontends; the only textual/rich importers:
+  - `cli.py` — the `lunamoth` command (roster default; new/ls/attach/start/stop/rm/
+    setup/update/doctor; `run -p [--stream-json]` headless; daemon helpers).
+  - `tui.py` — the split TUI (character stream / operator console / spotlight
+    panel). Steady caret. Renders protocol events in `_handle_event`.
+  - `terminal.py` — plain-terminal loop; also what the background daemon runs.
+  - `roster.py` — the launcher. Compact block wordmark (do NOT switch to the wide
+    serif one). Raw-mode **`os.read(fd)`** key reads, NOT `sys.stdin.read` (that
+    breaks ESC sequences — every arrow read as bare Esc and quit the launcher).
+  - `wizard.py` — plain-terminal first-run setup (runs BEFORE the full-screen TUI).
+  - `art.py` — the blue LunaMoth wordmark (rich Text, gradient, moonlight sweep).
 
 Content (gitignore-allowlisted): `characters/` `worlds/` `toolpacks/` `themes/`.
 

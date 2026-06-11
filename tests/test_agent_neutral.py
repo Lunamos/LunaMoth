@@ -3,7 +3,7 @@ leaks into a character's system prompt. (Regression for the 'noble moth says it
 is in a containment cell' bug.)"""
 import pytest
 
-from lunamoth.settings import Settings
+from lunamoth.session.settings import Settings
 
 
 @pytest.fixture
@@ -11,7 +11,7 @@ def agent(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     monkeypatch.setenv("LUNAMOTH_SANDBOX", str(tmp_path / "sandbox"))
     monkeypatch.setenv("LUNAMOTH_CONFIG_DIR", str(tmp_path / "cfg"))
-    from lunamoth.agent import LunaMothAgent
+    from lunamoth.core.agent import LunaMothAgent
 
     def make(**kw):
         return LunaMothAgent(Settings(character_path="", world_path="", toolpack="", **kw))
@@ -41,7 +41,7 @@ def test_card_defaults_drive_toolpack_and_memory(agent):
     assert a.toolpack is not None and a.toolpack.name == "sandbox"
     assert a.memory.limits.memory_chars == 8000  # moth's card-declared memory size
     # Context window is the model's real window (default for mock/unknown), NOT the card.
-    from lunamoth.providers import DEFAULT_WINDOW
+    from lunamoth.core.providers import DEFAULT_WINDOW
     assert a.context_limit() == DEFAULT_WINDOW
 
 

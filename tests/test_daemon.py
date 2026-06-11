@@ -4,8 +4,8 @@ import time
 
 import pytest
 
-from lunamoth import sessions as S
-from lunamoth import cli
+from lunamoth.session import sessions as S
+from lunamoth.front import cli
 
 
 @pytest.fixture(autouse=True)

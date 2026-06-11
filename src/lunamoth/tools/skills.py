@@ -28,7 +28,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .config import ROOT, SANDBOX_ROOT
+from ..config import ROOT, SANDBOX_ROOT
 
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _FRONT_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.S)

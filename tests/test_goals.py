@@ -1,8 +1,8 @@
 """Goals: charas are goal-driven — operator ⭑ + the chara's own, self-managed."""
 import pytest
 
-from lunamoth.goals import GoalStore
-from lunamoth.settings import Settings
+from lunamoth.tools.goals import GoalStore
+from lunamoth.session.settings import Settings
 
 
 def test_store_roundtrip_and_states(tmp_path):
@@ -44,7 +44,7 @@ def agent(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     monkeypatch.setenv("LUNAMOTH_SANDBOX", str(tmp_path / "sandbox"))
     monkeypatch.setenv("LUNAMOTH_CONFIG_DIR", str(tmp_path / "cfg"))
-    from lunamoth.agent import LunaMothAgent
+    from lunamoth.core.agent import LunaMothAgent
 
     def make(**kw):
         kw.setdefault("toolpack", "sandbox")

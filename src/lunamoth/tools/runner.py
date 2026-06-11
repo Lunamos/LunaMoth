@@ -26,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-from .obs import get_logger
+from ..obs import get_logger
 
 _log = get_logger("runner")
 

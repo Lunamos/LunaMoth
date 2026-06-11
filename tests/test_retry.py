@@ -6,8 +6,8 @@ import urllib.request
 import pytest
 
 from lunamoth.config import LLMConfig
-from lunamoth.llm import LLMClient
-from lunamoth.settings import Settings
+from lunamoth.core.llm import LLMClient
+from lunamoth.session.settings import Settings
 
 
 def _client():
@@ -26,7 +26,7 @@ def _drive(gen):
 
 @pytest.fixture
 def no_sleep(monkeypatch):
-    import lunamoth.llm as llm_mod
+    import lunamoth.core.llm as llm_mod
 
     monkeypatch.setattr(llm_mod.time, "sleep", lambda _s: None)
 
@@ -76,7 +76,7 @@ def agent(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     monkeypatch.setenv("LUNAMOTH_SANDBOX", str(tmp_path / "sandbox"))
     monkeypatch.setenv("LUNAMOTH_CONFIG_DIR", str(tmp_path / "cfg"))
-    from lunamoth.agent import LunaMothAgent
+    from lunamoth.core.agent import LunaMothAgent
 
     def make(**kw):
         kw.setdefault("toolpack", "")

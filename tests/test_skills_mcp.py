@@ -5,9 +5,9 @@ import textwrap
 
 import pytest
 
-from lunamoth.mcp import McpManager
-from lunamoth.skills import SkillStore, parse_frontmatter
-from lunamoth.settings import Settings
+from lunamoth.tools.mcp import McpManager
+from lunamoth.tools.skills import SkillStore, parse_frontmatter
+from lunamoth.session.settings import Settings
 
 
 # ---- skills ---------------------------------------------------------------------------
@@ -119,7 +119,7 @@ def agent(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     monkeypatch.setenv("LUNAMOTH_SANDBOX", str(tmp_path / "sandbox"))
     monkeypatch.setenv("LUNAMOTH_CONFIG_DIR", str(tmp_path / "cfg"))
-    from lunamoth.agent import LunaMothAgent
+    from lunamoth.core.agent import LunaMothAgent
 
     def make(**kw):
         kw.setdefault("toolpack", "sandbox")

@@ -2,7 +2,7 @@
 handoff file, and the presence-gated request_permission tool."""
 import pytest
 
-from lunamoth.settings import Settings
+from lunamoth.session.settings import Settings
 
 
 @pytest.fixture
@@ -10,7 +10,7 @@ def agent(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     monkeypatch.setenv("LUNAMOTH_SANDBOX", str(tmp_path / "sandbox"))
     monkeypatch.setenv("LUNAMOTH_CONFIG_DIR", str(tmp_path / "cfg"))
-    from lunamoth.agent import LunaMothAgent
+    from lunamoth.core.agent import LunaMothAgent
 
     def make(**kw):
         kw.setdefault("toolpack", "")
@@ -26,7 +26,7 @@ def test_default_card_declares_presence_prompts(agent):
 
 
 def test_card_without_prompts_means_no_events():
-    from lunamoth.cards import CharacterCard
+    from lunamoth.content.cards import CharacterCard
     from lunamoth import presence
 
     bare = CharacterCard(name="Visitor")

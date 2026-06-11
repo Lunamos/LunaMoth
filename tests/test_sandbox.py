@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-from lunamoth.sandbox import Sandbox, SandboxViolation
+from lunamoth.tools.sandbox import Sandbox, SandboxViolation
 
 
 def test_sandbox_blocks_escape(tmp_path: Path):

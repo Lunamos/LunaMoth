@@ -78,7 +78,7 @@ class TranscriptStore:
                 conn.executescript(_SCHEMA)
         except (sqlite3.Error, OSError) as e:
             self.available = False
-            from .obs import get_logger
+            from ..obs import get_logger
 
             get_logger("transcript").error(
                 "transcript db unavailable at %s (%s) — conversation will NOT survive restarts", path, e

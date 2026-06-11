@@ -4,7 +4,7 @@ import locale
 import os
 from pathlib import Path
 
-from .config import ROOT
+from ..config import ROOT
 
 # Name shown only when no character card can be loaded at all.
 DEFAULT_NAME = "LunaMoth"

@@ -1,6 +1,6 @@
 import pytest
 
-from lunamoth.memory import MemoryLimits, MemoryStore
+from lunamoth.tools.memory import MemoryLimits, MemoryStore
 
 
 def test_add_replace_remove(tmp_path):
@@ -82,8 +82,8 @@ def test_frozen_snapshot_decouples_prompt_from_writes(tmp_path):
     # The system-prompt memory block is FROZEN at session start: a mid-session
     # write changes disk + the tool response, but NOT the injected block — until
     # the next session reloads. This is the prompt-cache fix.
-    from lunamoth.settings import Settings
-    from lunamoth.agent import LunaMothAgent
+    from lunamoth.session.settings import Settings
+    from lunamoth.core.agent import LunaMothAgent
 
     a = LunaMothAgent(Settings(provider="mock", character_path="", toolpack="sandbox"))
     a.memory = MemoryStore(tmp_path / "mem")  # hermetic, empty store

@@ -16,7 +16,7 @@ declares them) and the user_present flag that gates permission requests.
 """
 from __future__ import annotations
 
-from ..worldinfo import apply_macros
+from ..content.worldinfo import apply_macros
 
 MODES = ("live", "chat")
 DEFAULT_MODE = "live"

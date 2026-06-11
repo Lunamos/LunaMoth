@@ -5,15 +5,15 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from .audit import AuditLog
-from .obs import get_logger
+from ..obs.audit import AuditLog
+from ..obs import get_logger
 from .goals import GoalStore
 from .mcp import McpError, McpManager
 from .memory import MemoryLimits, MemoryStore
 from .skills import SkillStore
 from .runner import run_terminal
 from .sandbox import Sandbox, SandboxViolation
-from .state import EnvState
+from ..core.state import EnvState
 
 _log = get_logger("tools")
 

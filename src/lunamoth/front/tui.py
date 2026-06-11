@@ -32,17 +32,17 @@ SLASH_COMMANDS = [
 ]
 
 from . import art
-from .agent import LunaMothAgent
-from .cleanup import clean_runtime_sandbox
-from .obs import broker, get_logger
-from .context import estimate_tokens
-from .config import ROOT
-from .llm import LLMClient
-from .presence import MODES, normalize_mode
-from .protocol import Notice, TextDelta, ThinkDelta, ToolEnd, ToolStart
-from .runner import run_terminal
-from .settings import PRESETS, Settings, config_path, load_settings, save_settings
-from .themes import TuiTheme, load_theme
+from ..core.agent import LunaMothAgent
+from ..session.cleanup import clean_runtime_sandbox
+from ..obs import broker, get_logger
+from ..core.context import estimate_tokens
+from ..config import ROOT
+from ..core.llm import LLMClient
+from ..presence import MODES, normalize_mode
+from ..protocol import Notice, TextDelta, ThinkDelta, ToolEnd, ToolStart
+from ..tools.runner import run_terminal
+from ..session.settings import PRESETS, Settings, config_path, load_settings, save_settings
+from ..content.themes import TuiTheme, load_theme
 
 _log = get_logger("tui")
 
@@ -312,8 +312,8 @@ class WelcomeScreen(Screen):
         The fields stay editable, so this is "here are the card's defaults, change
         them if you want" rather than a hard binding. Empty path = bundled default.
         """
-        from .cards import CharacterCard
-        from .persona import default_character_path, default_world_path
+        from ..content.cards import CharacterCard
+        from ..content.persona import default_character_path, default_world_path
 
         path = char_path or (str(default_character_path() or ""))
         if not path:
@@ -814,7 +814,7 @@ class LunaMothTUI(App):
 
     def _render_log_view(self) -> None:
         """Recent diagnostics from the in-memory ring (files: sandbox/logs/)."""
-        from .obs.log import log_dir
+        from ..obs.log import log_dir
 
         lines = broker.tail(120)
         t = Text()

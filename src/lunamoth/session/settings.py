@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
-from .config import ROOT, LLMConfig
+from ..config import ROOT, LLMConfig
 
 
 # Runtime config lives in the project, NOT inside the sandbox (the sandbox is
@@ -153,7 +153,7 @@ def _coerce(name: str, raw: Any) -> Any:
     if name == "provider":
         return str(raw).strip().lower()
     if name == "mode":
-        from .presence import normalize_mode
+        from ..presence import normalize_mode
 
         return normalize_mode(str(raw))
     if name == "reasoning":

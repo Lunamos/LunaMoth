@@ -1,6 +1,6 @@
 import json
 
-from lunamoth.cards import CharacterCard, detect_language
+from lunamoth.content.cards import CharacterCard, detect_language
 
 
 def test_language_from_filename():

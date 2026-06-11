@@ -6,11 +6,11 @@ import sys
 import time
 from dataclasses import dataclass
 
-from .agent import LunaMothAgent
-from .cleanup import clean_runtime_sandbox
-from .presence import normalize_mode
-from .protocol import Notice, TextDelta, ToolEnd
-from .themes import LUNAMOTH_BANNER
+from ..core.agent import LunaMothAgent
+from ..session.cleanup import clean_runtime_sandbox
+from ..presence import normalize_mode
+from ..protocol import Notice, TextDelta, ToolEnd
+from ..content.themes import LUNAMOTH_BANNER
 
 BANNER = (
     LUNAMOTH_BANNER

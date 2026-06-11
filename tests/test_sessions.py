@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from lunamoth import sessions as S
+from lunamoth.session import sessions as S
 
 
 @pytest.fixture(autouse=True)
@@ -58,7 +58,7 @@ def test_default_session_idempotent():
 def test_cli_new_ls_rm(temp_home):
     def run(*argv):
         return subprocess.run(
-            [sys.executable, "-m", "lunamoth.cli", *argv],
+            [sys.executable, "-m", "lunamoth.front.cli", *argv],
             capture_output=True, text=True,
             env={"PATH": "/usr/bin:/bin", "LUNAMOTH_HOME": str(temp_home), "PYTHONPATH": "src"},
         )

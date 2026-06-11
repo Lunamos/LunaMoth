@@ -2,8 +2,8 @@
 soul), included only when the chara has tools."""
 import pytest
 
-from lunamoth import rules
-from lunamoth.settings import Settings
+from lunamoth.content import rules
+from lunamoth.session.settings import Settings
 
 
 def test_rules_are_neutral_no_identity_claims():
@@ -24,7 +24,7 @@ def test_global_override_file(tmp_path, monkeypatch):
 def test_card_override_hook_beats_global(tmp_path, monkeypatch):
     monkeypatch.setenv("LUNAMOTH_HOME", str(tmp_path))
     (tmp_path / "rules.md").write_text("global rules", encoding="utf-8")
-    # extensions.lunamoth.rules / rules_closer override both, beating the global file
+    # extensions.lunamoth.content.rules / rules_closer override both, beating the global file
     assert rules.rules("en", card_override="card rules") == "card rules"
     assert rules.closer("en", card_override="card closer") == "card closer"
     # empty/blank override falls through to the default chain
@@ -37,7 +37,7 @@ def agent(tmp_path, monkeypatch):
     monkeypatch.setenv("LUNAMOTH_SANDBOX", str(tmp_path / "sb"))
     monkeypatch.setenv("LUNAMOTH_CONFIG_DIR", str(tmp_path / "cfg"))
     monkeypatch.setenv("LUNAMOTH_HOME", str(tmp_path / "home"))
-    from lunamoth.agent import LunaMothAgent
+    from lunamoth.core.agent import LunaMothAgent
 
     return lambda toolpack: LunaMothAgent(Settings(character_path="", world_path="", toolpack=toolpack))
 

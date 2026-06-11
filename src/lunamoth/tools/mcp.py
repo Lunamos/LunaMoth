@@ -30,8 +30,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from .config import ROOT
-from .obs import get_logger
+from ..config import ROOT
+from ..obs import get_logger
 
 _log = get_logger("mcp")
 

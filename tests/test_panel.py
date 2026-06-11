@@ -14,7 +14,7 @@ def tui_env(tmp_path, monkeypatch):
     # run an earlier test already pinned it, so write the config wherever it
     # ACTUALLY points (otherwise the TUI boots into the welcome screen and the
     # keystrokes land there instead of the console input).
-    from lunamoth.settings import config_path
+    from lunamoth.session.settings import config_path
 
     config_path().parent.mkdir(parents=True, exist_ok=True)
     config_path().write_text(json.dumps({"provider": "mock"}))
@@ -22,7 +22,7 @@ def tui_env(tmp_path, monkeypatch):
 
 
 def test_panel_routing(tui_env):
-    from lunamoth.tui import LunaMothTUI
+    from lunamoth.front.tui import LunaMothTUI
 
     async def scenario():
         app = LunaMothTUI(patience=999, mode_override="chat")
