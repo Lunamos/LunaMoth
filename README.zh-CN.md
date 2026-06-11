@@ -52,15 +52,18 @@
 - [x] **MCP 客户端** —— 在 chara 配置旁放一个 Claude Code 格式的 `mcp.json`（stdio 服务器）；工具以 `mcp__server__tool` 进网关、同一套审计，工具包用 `mcp_servers` 选择接入。注意：MCP 服务器运行在沙盒牢笼之外——配置即信任决定
 - [x] **目标驱动的 chara** —— 按 chara 持久化的目标列表（操作员用 `/goal` 设 ⭑ 目标；chara 用 `add_goal`/`set_goal_status` 工具管自己的）注入每一轮提示词，让无人陪伴的时间有方向；完成与否由 chara 在诚实规则约束下自报——不做酒馆 Objective 式的双倍 API 检查
 - [x] **诚实的失败策略** —— 瞬时连接失败每 5 秒重试一次、最多 5 次（Claude Code 式，重试提示暗色显示），之后错误如实暴露；永久性错误（鉴权、请求非法）立即暴露。全局无降级模型、无任何编造的兜底输出——请求失败就是请求失败
+- [x] **诊断日志系统** —— 每个 chara 有自己的 `sandbox/logs/lunamoth.log` + `errors.log`（滚动、密钥脱敏、记录带 chara 名），内存环形缓冲供 `/panel log` 查看，所有入口支持 `--debug`，`lunamoth doctor` 列出各 chara 的日志目录。诊断日志、审计轨迹（audit.jsonl）与对话记录（transcript.db）三种记录职责互斥
+- [x] **类型化事件协议** —— 后端流式输出冻结 dataclass 事件（`TextDelta`/`ThinkDelta`/`ToolStart`/`ToolEnd`/`Notice`），带内控制字符已删除；如何渲染（机械输出调暗、thinking 藏在 ✶ 指示器后）由各前端自行决定。`lunamoth run NAME -p "…" --stream-json` 以 JSONL 输出同一事件流——这就是未来所有客户端的线上格式
+- [x] **前后端分离** —— 域子包架构（`core/ protocol/ content/ tools/ obs/ session/ front/`），依赖方向由测试强制；前端只持有 `CharaHandle`（attach / 事件流 / 命令 / 状态快照），无法触及更深处；`/命令` 集中在一份注册表里、TUI 与纯终端共用。详见 `docs/refactor-plan.md`
 
 **兼容性与可扩展性**
 
-- [ ] **世界书功能对齐** —— 补齐与 SillyTavern 激活逻辑的差距：递归扫描、token 预算、sticky/cooldown/delay、插入位置/深度、触发概率、大小写与全词匹配。*涉及：`worldinfo.py`（调用方签名保持稳定）。*
-- [ ] **声明式工具注册表** —— 用 Hermes 式注册（名称、schema、handler、可用性检查）替换 `ToolGateway.tool_*` 硬编码方法 + 内联 schema，新工具只需一个自包含模块。*涉及：`tools.py`、新增 `tools/` 包。*
+- [ ] **世界书功能对齐** —— 补齐与 SillyTavern 激活逻辑的差距：递归扫描、token 预算、sticky/cooldown/delay、插入位置/深度、触发概率、大小写与全词匹配。*涉及：`content/worldinfo.py`（调用方签名保持稳定）。*
+- [ ] **声明式工具注册表** —— 用 Hermes 式注册（名称、schema、handler、可用性检查）替换 `ToolGateway.tool_*` 硬编码方法 + 内联 schema，新工具只需一个自包含模块。*涉及：`tools/gateway.py` → 按模块注册的 `tools/builtin/`。*
 
 **远程接入**（有顺序——逐项递进）
 
-- [ ] **远程 TUI** —— 在 `ssh host -t lunamoth attach NAME` 保底方案之外，做公网 IP / VPS 的网关接入（高优先级）。*涉及：新增 `gateway/` 包；基于 `SessionMeta.env()`。*
+- [ ] **远程 TUI** —— 在 `ssh host -t lunamoth attach NAME` 保底方案之外，做公网 IP / VPS 的网关接入（高优先级）。*涉及：新增 `server/` 包，把协议事件 + `CharaHandle` 用 stdio/WebSocket JSON-RPC 暴露出去；基于 `SessionMeta.env()`。*
 - [ ] **网页端** —— 浏览器远程访问运行中的会话（低优先级）。*涉及：新增 web 模块；消费网关。*
 
 ## 特性
