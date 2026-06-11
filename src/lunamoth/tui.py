@@ -437,12 +437,16 @@ class LunaMothTUI(App):
     #input {
         background: #050505;
     }
-    /* Steady solid block caret (cursor_blink=False on the widget). Textual hides
-       this block automatically when the input loses focus, so an unfocused input
-       shows no caret — close to the terminal's transparent-on-blur behavior. */
+    /* We DON'T draw Textual's own block caret. Instead we show the REAL terminal
+       cursor at the input position (see _show_terminal_cursor): the terminal then
+       owns the caret natively — non-blinking per the terminal, and crucially it
+       yields to the IME during CJK composition (a drawn block would sit on top of
+       the composition and never disappear). So style the cursor cell to look like
+       normal text — no visible block. */
     #input > .input--cursor {
-        background: #e8f2fb;
-        color: #050505;
+        background: #050505;
+        color: #d6e6f0;
+        text-style: none;
     }
     /* Right 1/4: the spotlight panel — one frame, many views (telemetry is the
        default; /help, /memory, /files, !cmd and friends light up the others).
@@ -600,10 +604,21 @@ class LunaMothTUI(App):
         self.console_log = self.query_one("#console", RichLog)
         self.status = self.query_one("#status", Static)
         self.input = self.query_one("#input", Input)
-        # Steady (non-blinking) block caret, like a terminal / Claude Code — the
-        # blink is distracting while typing. Styled white via the #input cursor CSS;
-        # Textual hides it when the input loses focus (transparent-on-blur).
+        # Use the REAL terminal cursor (see _show_terminal_cursor) instead of a
+        # drawn block: native, non-blinking per terminal, and it yields to the IME
+        # during Chinese/Japanese composition. cursor_blink off too, belt-and-braces.
         self.input.cursor_blink = False
+        self._show_terminal_cursor()
+
+    def _show_terminal_cursor(self) -> None:
+        """Un-hide the terminal's hardware cursor. Textual hides it at startup and
+        draws its own block; we hide the block (CSS) and reveal the real cursor,
+        which Textual already moves to the input caret each frame. Best-effort."""
+        try:
+            self._driver.write("\x1b[?25h")  # DECTCEM show cursor
+            self._driver.flush()
+        except Exception:
+            pass
         self.suggest = self.query_one("#suggest", Static)
         self.gauges = self.query_one("#gauges", Static)
         self.memview = self.query_one("#memview", Static)
