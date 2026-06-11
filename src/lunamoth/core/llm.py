@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import random
 import time
-from typing import Any, Callable, Iterator
+from typing import Any, Iterator
 
 from ..config import LLMConfig
 from ..obs import get_logger
@@ -32,11 +32,8 @@ _REASONING_PREFIXES = (
 
 
 class LLMClient:
-    def __init__(self, cfg: LLMConfig, system_provider: "Callable[[str], list[str]] | None" = None):
+    def __init__(self, cfg: LLMConfig):
         self.cfg = cfg
-        # When set, builds the system messages (persona + tools + status/memory + world info).
-        # Lets the agent drive persona from a SillyTavern card instead of the legacy files.
-        self.system_provider = system_provider
 
     def is_live(self) -> bool:
         return self.cfg.provider in LIVE_PROVIDERS and bool(self.cfg.base_url)
@@ -169,20 +166,22 @@ class LLMClient:
             return ""
 
     def stream_complete(
-        self, user_text: str, memory: str, status: dict[str, Any], context: list[dict],
+        self, user_text: str, context: list[dict], stable: list[str], volatile: list[str],
         in_context: bool = True, reasoning: "str | None" = None, channel: str = "say",
     ) -> "Iterator[Any]":
         if self.is_live():
-            yield from self._openai_compatible_stream(user_text, memory, status, context, in_context, reasoning, channel)
+            yield from self._openai_compatible_stream(
+                user_text, context, stable, volatile, in_context, reasoning, channel
+            )
             return
         # Fake streaming for mock mode.
-        text = self._mock(user_text, memory, status)
+        text = self._mock(user_text, "", {})
         for ch in text:
             yield TextDelta(ch, channel)
 
     def _messages(
-        self, user_text: str, memory: str, status: dict[str, Any], context: list[dict],
-        in_context: bool = True,
+        self, user_text: str, context: list[dict], stable: list[str] | None = None,
+        volatile: list[str] | None = None, in_context: bool = True,
     ) -> list[dict[str, Any]]:
         """Build the chat-completions message list.
 
@@ -192,16 +191,10 @@ class LLMClient:
         the context (interrupt-safety: commit before streaming), so it is not
         appended again; ephemeral prompts (idle think cycles) pass False.
         """
-        if self.system_provider is not None:
-            scan_text = "\n".join(str(m.get("content") or "") for m in context) + "\n" + user_text
-            messages: list[dict[str, Any]] = [
-                {"role": "system", "content": m} for m in self.system_provider(scan_text) if m and m.strip()
-            ]
-        else:
-            # Only hit when no system_provider is wired (bare client). Keep it neutral.
-            messages = [{"role": "system", "content": fallback_persona()}]
-            if memory.strip():
-                messages.append({"role": "system", "content": f"Your saved memory:\n{memory}"})
+        stable_blocks = stable if stable is not None else [fallback_persona()]
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": m} for m in stable_blocks if m and m.strip()
+        ]
         for msg in context:
             role = msg.get("role")
             if role not in {"user", "assistant", "system", "tool"}:
@@ -213,7 +206,13 @@ class LLMClient:
             messages.append(msg)
         if not in_context:
             messages.append({"role": "user", "content": user_text})
+        messages.extend(
+            {"role": "system", "content": m} for m in (volatile or []) if m and m.strip()
+        )
         return messages
+
+    def _system_messages(self, blocks: list[str]) -> list[dict[str, Any]]:
+        return [{"role": "system", "content": m} for m in blocks if m and m.strip()]
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -260,13 +259,13 @@ class LLMClient:
             return False, f"error: {e}"
 
     def _openai_compatible_stream(
-        self, user_text: str, memory: str, status: dict[str, Any], context: list[dict],
+        self, user_text: str, context: list[dict], stable: list[str], volatile: list[str],
         in_context: bool = True, reasoning: "str | None" = None, channel: str = "say",
     ) -> "Iterator[Any]":
         url = f"{self.cfg.base_url}/chat/completions"
         body = self._reasoning_body({
             "model": self.cfg.model,
-            "messages": self._messages(user_text, memory, status, context, in_context),
+            "messages": self._messages(user_text, context, stable, volatile, in_context),
             "temperature": self.cfg.temperature,
             **self._max_tokens_param(),
             "stream": True,
@@ -322,7 +321,7 @@ class LLMClient:
     INTERRUPT_MARK = "\n[cut off mid-reply by the operator's next message]"
 
     def stream_agent(
-        self, user_text, memory, status, context, tools, execute,
+        self, user_text, context, stable, volatile, tools, execute,
         record=None, max_steps: int = 8, in_context: bool = True,
         reasoning: "str | None" = None, channel: str = "say",
     ):
@@ -340,18 +339,24 @@ class LLMClient:
         remembers what it was doing.
         """
         if not self.is_live():
-            for ch in self._mock(user_text, memory, status):
+            for ch in self._mock(user_text, "", {}):
                 yield TextDelta(ch, channel)
             return
         record = record or (lambda _msg: None)
-        messages = self._messages(user_text, memory, status, context, in_context=in_context)
+        # Keep the growing tool-loop transcript free of volatile tail messages.
+        # Each API call appends a fresh copy of the volatile tail after all
+        # history/tool results, so the post-history slot is literally last.
+        messages = self._messages(user_text, context, stable, [], in_context=in_context)
+        volatile_messages = self._system_messages(volatile)
         acc: list[str] = []  # text of the in-flight turn, readable by `finally`
         finished = False
         try:
             for step in range(max_steps):
                 acc.clear()
                 t0 = time.monotonic()
-                tool_calls, thinking_text, finish = yield from self._stream_turn(messages, tools, acc, reasoning, channel)
+                tool_calls, thinking_text, finish = yield from self._stream_turn(
+                    messages + volatile_messages, tools, acc, reasoning, channel
+                )
                 text = "".join(acc).strip()
                 acc.clear()  # committed below — must not re-commit as "interrupted"
                 truncated = finish == "length"

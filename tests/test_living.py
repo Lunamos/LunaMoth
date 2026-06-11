@@ -116,7 +116,7 @@ def test_say_event_flows_through_stream_agent(agent, monkeypatch):
 
     monkeypatch.setattr(LLMClient, "_stream_turn", gen_wrapper)
     events = list(a.llm.stream_agent(
-        "", "", {}, [], a.tools.schemas(), a._execute_tool, channel=MUSE,
+        "", [], [], [], a.tools.schemas(), a._execute_tool, channel=MUSE,
     ))
     says = [e for e in events if isinstance(e, TextDelta) and e.channel == "say"]
     assert says and "给你听一段。" in says[0].text

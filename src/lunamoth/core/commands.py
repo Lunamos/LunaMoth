@@ -100,6 +100,10 @@ def _reset(agent, session, arg: str) -> Reply:
     session.context.messages.clear()
     session.thoughts.clear()
     session.ticks = 0
+    session.wi_sticky.clear()
+    agent._freeze_memory()
+    agent._freeze_skills()
+    agent._invalidate_stable_prefix()
     # New transcript epoch: old history stays on disk, no longer reloaded.
     agent.transcript.reset()
     return Reply(True, "session context zeroed (new transcript epoch). durable memory remains.")

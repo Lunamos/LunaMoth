@@ -15,7 +15,7 @@ from ..obs.audit import AuditLog
 from ..content.cards import CharacterCard
 from ..obs import get_logger, setup_logging
 from ..config import ROOT, SANDBOX_ROOT, ThoughtConfig
-from .context import ContextBuffer
+from .context import ContextBuffer, _msg_text, estimate_tokens
 from ..tools.goals import GoalStore
 from .llm import LLMClient
 from ..protocol import MUSE, TextDelta
@@ -56,6 +56,7 @@ class Session:
     ))
     thoughts: list[str] = field(default_factory=list)
     ticks: int = 0
+    wi_sticky: dict[str, int] = field(default_factory=dict)
 
 
 class LunaMothAgent:
@@ -83,9 +84,11 @@ class LunaMothAgent:
         # steers every turn — and gives unattended time (empty user messages) a
         # direction without any engine-authored prompt.
         self.goals = GoalStore(SANDBOX_ROOT / "goals.json")
+        self._seed_card_goals()
         # Skills: know-how the chara reads on demand AND writes for itself
         # (workspace/skills/ shadows user + bundled — hermes's local-first rule).
         self.skills = SkillStore()
+        self._skills_snapshot: str | None = None
         # MCP: operator-configured external tool servers (mcp.json); packs opt in.
         self.mcp = McpManager(config_dir=Path(os.getenv("LUNAMOTH_CONFIG_DIR", "")) if os.getenv("LUNAMOTH_CONFIG_DIR") else None)
         self.tools = ToolGateway(
@@ -93,7 +96,8 @@ class LunaMothAgent:
             skills=self.skills, mcp=self.mcp,
         )
         self._load_toolpack()
-        self.llm = LLMClient(self.settings.to_llm_config(), self._build_system_messages)
+        self._stable_prefix_cache: list[str] | None = None
+        self.llm = LLMClient(self.settings.to_llm_config())
         self.thought_cfg = ThoughtConfig()
         self.presence = presence.PresenceState(SANDBOX_ROOT)
         # Durable conversation log: every context line lands here as it happens,
@@ -111,7 +115,10 @@ class LunaMothAgent:
             self.audit.write("memory_shrunk", detail=w)
         self._freeze_memory()  # a reconfigure starts a fresh prompt — reload the snapshot
         self._load_toolpack()
-        self.llm = LLMClient(settings.to_llm_config(), self._build_system_messages)
+        self._seed_card_goals()
+        self._freeze_skills()
+        self._invalidate_stable_prefix()
+        self.llm = LLMClient(settings.to_llm_config())
         self.audit.write(
             "reconfigure",
             provider=settings.provider,
@@ -128,11 +135,11 @@ class LunaMothAgent:
     def _load_cards(self) -> None:
         """Load the persona card + its paired world book.
 
-        An empty character path means the bundled default character (LunaMoth
-        月蛾). Language is taken from the chosen card (a .zh card speaks zh, a
-        .en card speaks en) — not from a separate toggle. The world book is
-        the card's declared default (extensions.lunamoth.world), then the
-        same-stem convention, unless the operator picked one explicitly.
+        An empty character path means the bundled default character. Language is
+        taken from the chosen card (a .zh card speaks zh, a .en card speaks en)
+        — not from a separate toggle. The world book is the card's declared
+        default (extensions.lunamoth.world), then the same-stem convention,
+        unless the operator picked one explicitly.
         """
         self.character = None
         self.world = None
@@ -188,6 +195,12 @@ class LunaMothAgent:
             mcp_servers=self.toolpack.mcp_servers if self.toolpack else None,
         )
 
+    def _seed_card_goals(self) -> None:
+        defaults = self.character.defaults() if self.character else {}
+        goals = defaults.get("goals") if isinstance(defaults, dict) else None
+        if isinstance(goals, list):
+            self.goals.seed_once([str(g) for g in goals], by="card")
+
     def _card_limit(self, key: str) -> int | None:
         """A limit declared by the card, in extensions.lunamoth or top-level extensions."""
         if not self.character:
@@ -214,7 +227,7 @@ class LunaMothAgent:
 
     def _memory_limits(self) -> MemoryLimits:
         # Both stores are card-settable (extensions.lunamoth.{memory_chars,user_chars})
-        # and overridable at runtime via settings; 079's tiny memory is characterful.
+        # and overridable at runtime via settings.
         return MemoryLimits(
             memory_chars=self._effective_limit("memory_chars", 4000),
             user_chars=self._effective_limit("user_chars", 2000),
@@ -265,6 +278,8 @@ class LunaMothAgent:
         """
         session = Session()
         self._freeze_memory()  # a new session = a fresh prompt → reload the memory snapshot
+        self._freeze_skills()
+        self._invalidate_stable_prefix()
         ctx = self.context_limit()
         session.context.max_tokens = ctx
         session.context.trim_buffer_tokens = min(100_000, max(4096, ctx // 8))
@@ -311,15 +326,17 @@ class LunaMothAgent:
         speech — it is audited as a presence event, never as a user message.
         """
         self.audit.write("presence_event", kind="attach", text=event_text[:300])
-        status = self.state.load()
         # Commit the event line BEFORE streaming (interrupt-safe).
+        scan_text = self._scan_text(session, event_text)
         session.context.add("system", event_text)
+        stable = self._stable_prefix()
+        volatile = self._volatile_tail(scan_text, session)
         agent_loop = self._agent_loop_active()
         speech: list[str] = []  # TextDelta only — events make machinery/speech explicit
         committed = False
         try:
             stream = self._reply_stream(
-                event_text, self._memory_text(), status, self._context_view(session),
+                event_text, self._context_view(session), stable, volatile,
                 in_context=True, record=session.context.add_message,
             )
             for ev in stream:
@@ -347,8 +364,18 @@ class LunaMothAgent:
         session.context.add("system", text)
         self.presence.queue_event(text)
 
-    def _build_system_messages(self, scan_text: str) -> list[str]:
-        status = self.state.load()
+    def _invalidate_stable_prefix(self) -> None:
+        self._stable_prefix_cache = None
+
+    def _freeze_skills(self) -> None:
+        self._skills_snapshot = self.skills.render_block()
+
+    def _stable_prefix(self) -> list[str]:
+        """Session-stable prompt prefix. The same list object is reused until a
+        session boundary/reconfigure/reset explicitly invalidates it."""
+        if self._stable_prefix_cache is not None:
+            return self._stable_prefix_cache
+
         memory = self._memory_text()  # FROZEN snapshot (see _freeze_memory), not live — cache-stable
         char, user = self.char_name(), self.settings.user_name
         tools_on = self._tools_active()
@@ -357,7 +384,6 @@ class LunaMothAgent:
         # rules_closer}. Bundled cards leave these empty — it's just an open hook.
         card_ext = self.character.defaults() if self.character else {}
         card_rules = str(card_ext.get("rules", "") or "")
-        card_closer = str(card_ext.get("rules_closer", "") or "")
 
         # 1) Who it is — the character card IS the soul. Identity, voice and
         #    autonomy all come from the card; the engine adds no identity of its own.
@@ -371,47 +397,112 @@ class LunaMothAgent:
         #    the chara actually has tools; a tool-less chara is free to narrate.
         if tools_on:
             msgs.append(apply_macros(rules_layer.rules(self.lang, card_rules), char, user))
-            # Native tool schemas already describe each tool, so no prose tool spec —
-            # just a short, neutral nudge + the live env facts.
-            net = "on" if status.get("network_access") else "off"
-            who = "present" if status.get("user_present") else "away"
-            # Day-level date only: precise time rides the unattended ticks and
-            # gap notes; a per-minute clock here would churn the prompt cache.
-            today = datetime.now().strftime("%Y-%m-%d %a")
+            # Native tool schemas already describe each tool, so no prose tool spec.
+            # Dynamic env facts are volatile and appended after history instead.
             msgs.append(
                 "You have tools available via native function calling. Call them directly when "
-                "you want to act; never paste code in prose or claim a result before the tool returns.\n"
-                f"Environment: isolation={status.get('isolation', 'sandbox')}, network={net}, "
-                f"operator={who}, date={today}, workspace is your read/write directory."
+                "you want to act; never paste code in prose or claim a result before the tool returns."
             )
             if self.toolpack and self.toolpack.note.strip():
                 msgs.append(self.toolpack.note.strip())
-            if memory.strip():
-                msgs.append(memory)  # already headed (memory / user blocks)
-            # Goals steer every turn — and give unattended time its direction.
-            goals_block = self.goals.render_block()
-            if goals_block:
-                msgs.append(goals_block)
+        if memory.strip():
+            msgs.append(memory)  # already headed (memory / user blocks)
+        if tools_on:
             # Skill index: names + one-liners only (progressive disclosure —
-            # the full text is a read_skill call away).
-            skills_block = self.skills.render_block()
+            # the full text is a read_skill call away). Frozen at session start.
+            skills_block = self._skills_snapshot if self._skills_snapshot is not None else self.skills.render_block()
             if skills_block:
                 msgs.append(skills_block)
 
-        # World info: card-embedded book + explicit standalone world book.
+        # Constant world info is stable; keyword world info lives in the volatile tail.
         world_blocks: list[str] = []
         if self.character and self.character.character_book:
-            world_blocks += self.character.character_book.activate(scan_text, char, user)
+            world_blocks += self.character.character_book.constant_blocks(char, user)
         if self.world:
-            world_blocks += self.world.activate(scan_text, char, user)
+            world_blocks += self.world.constant_blocks(char, user)
         if world_blocks:
             msgs.append("[World Info / 世界书]\n" + "\n\n".join(world_blocks))
 
-        # 3) Closer — the last, strongest steer (SillyTavern post-history style),
-        #    only when tools are on. Placed last so it weighs most before generation.
-        if tools_on:
-            msgs.append(apply_macros(rules_layer.closer(self.lang, card_closer), char, user))
+        self._stable_prefix_cache = msgs
         return msgs
+
+    def _post_history_slot(self) -> str:
+        """SillyTavern-style post-history system slot. One non-empty winner."""
+        char, user = self.char_name(), self.settings.user_name
+        if self.character and self.character.post_history_instructions.strip():
+            return apply_macros(self.character.post_history_instructions.strip(), char, user)
+        if not self._tools_active():
+            return ""
+        card_ext = self.character.defaults() if self.character else {}
+        card_closer = str(card_ext.get("rules_closer", "") or "")
+        return apply_macros(rules_layer.closer(self.lang, card_closer), char, user)
+
+    def _keyword_world_info_blocks(self, scan_text: str, session: Session) -> list[str]:
+        char, user = self.char_name(), self.settings.user_name
+        active: list[tuple[int, int, str]] = []
+        seq = 0
+        if self.character and self.character.character_book:
+            for entry in self.character.character_book.keyword_entries(
+                scan_text, sticky=session.wi_sticky, namespace="card"
+            ):
+                block = apply_macros(entry.content, char, user).strip()
+                if block:
+                    active.append((entry.order, seq, block))
+                    seq += 1
+        if self.world:
+            namespace = f"world:{self.world.name or 'default'}"
+            for entry in self.world.keyword_entries(scan_text, sticky=session.wi_sticky, namespace=namespace):
+                block = apply_macros(entry.content, char, user).strip()
+                if block:
+                    active.append((entry.order, seq, block))
+                    seq += 1
+        active.sort(key=lambda item: (item[0], item[1]))
+
+        budget = max(1, int(self.context_limit() * 0.25))
+        out: list[str] = []
+        used = 0
+        for _order, _seq, block in active:
+            cost = estimate_tokens(block) + 2
+            if used + cost > budget:
+                break
+            out.append(block)
+            used += cost
+        return out
+
+    def _volatile_tail(self, scan_text: str, session: Session) -> list[str]:
+        status = self.state.load()
+        msgs: list[str] = []
+        if self._tools_active():
+            net = "on" if status.get("network_access") else "off"
+            who = "present" if status.get("user_present") else "away"
+            today = datetime.now().strftime("%Y-%m-%d %a")
+            msgs.append(
+                f"Environment: isolation={status.get('isolation', 'sandbox')}, network={net}, "
+                f"operator={who}, date={today}, workspace is your read/write directory."
+            )
+
+        world_blocks = self._keyword_world_info_blocks(scan_text, session)
+        if world_blocks:
+            msgs.append("[World Info / 世界书]\n" + "\n\n".join(world_blocks))
+
+        goals_block = self.goals.render_block()
+        if goals_block:
+            msgs.append(goals_block)
+
+        post_history = self._post_history_slot()
+        if post_history:
+            msgs.append(post_history)
+        return msgs
+
+    def _build_system_messages(self, scan_text: str, session: Session | None = None) -> list[str]:
+        session = session or Session()
+        return self._stable_prefix() + self._volatile_tail(scan_text, session)
+
+    def _scan_text(self, session: Session, user_text: str = "") -> str:
+        parts = [_msg_text(m) for m in session.context.messages[-4:]]
+        if user_text:
+            parts.append(user_text)
+        return "\n".join(p for p in parts if p)
 
 
     def _agent_loop_active(self) -> bool:
@@ -445,18 +536,18 @@ class LunaMothAgent:
         return False
 
     def _reply_stream(
-        self, user_text: str, memory: str, status: dict[str, Any], context: list[dict],
+        self, user_text: str, context: list[dict], stable: list[str], volatile: list[str],
         *, in_context: bool = True, record=None, reasoning: "str | None" = None,
         channel: str = "say",
     ):
         """Pick the tool-enabled agent loop or a plain stream depending on pack/backend."""
         if self._agent_loop_active():
             return self.llm.stream_agent(
-                user_text, memory, status, context, self.tools.schemas(), self._execute_tool,
+                user_text, context, stable, volatile, self.tools.schemas(), self._execute_tool,
                 record=record, in_context=in_context, reasoning=reasoning, channel=channel,
             )
         return self.llm.stream_complete(
-            user_text, memory, status, context, in_context=in_context, reasoning=reasoning, channel=channel,
+            user_text, context, stable, volatile, in_context=in_context, reasoning=reasoning, channel=channel,
         )
 
     def _execute_tool(self, tool_call: dict[str, Any]) -> dict[str, str]:
@@ -506,20 +597,21 @@ class LunaMothAgent:
             yield TextDelta(commands.execute(self, session, text).text)
             return
         self.state.clear_rest()  # a word from the user always wakes the chara
-        status = self.state.load()
-        memory_text = self._memory_text()
         # After a long real-world silence, note the gap once — the chara should
         # feel time passing without timestamps littering every message.
         self._note_time_gap(session)
+        scan_text = self._scan_text(session, text)
         # Commit the operator's message BEFORE streaming: an interrupted reply
         # must never lose the instruction that caused it.
         session.context.add("user", text)
+        stable = self._stable_prefix()
+        volatile = self._volatile_tail(scan_text, session)
         agent_loop = self._agent_loop_active()
         speech: list[str] = []
         committed = False
         try:
             stream = self._reply_stream(
-                text, memory_text, status, self._context_view(session),
+                text, self._context_view(session), stable, volatile,
                 in_context=True, record=session.context.add_message,
             )
             for ev in stream:
@@ -578,7 +670,6 @@ class LunaMothAgent:
 
     def stream_think(self, session: Session):
         session.ticks += 1
-        status = self.state.load()
         cycle = session.ticks
         agent_loop = self._agent_loop_active()
         speech: list[str] = []
@@ -617,8 +708,12 @@ class LunaMothAgent:
                 import time as _time
 
                 self._last_turn_wall = _time.time()
+                tick_text = f"[{self._now_text()}]"
+                scan_text = self._scan_text(session, tick_text)
+                stable = self._stable_prefix()
+                volatile = self._volatile_tail(scan_text, session)
                 stream = self._reply_stream(
-                    f"[{self._now_text()}]", self._memory_text(), status, self._context_view(session),
+                    tick_text, self._context_view(session), stable, volatile,
                     in_context=False, record=self._record_think(session), channel=MUSE,
                 )
                 try:
@@ -640,4 +735,3 @@ class LunaMothAgent:
     def think(self, session: Session) -> str:
         # Non-streaming convenience (used by tests).
         return "".join(ev.text for ev in self.stream_think(session) if isinstance(ev, TextDelta)).strip()
-
