@@ -159,6 +159,33 @@ class LLMClient:
             yield dim(f"\n⚠ {err} — retry {attempt}/{self._RETRY_LIMIT} in {int(self._RETRY_DELAY)}s\n")
             time.sleep(self._RETRY_DELAY)
 
+    def raw_complete(self, messages: list[dict[str, Any]], max_tokens: int = 1024, timeout: float = 60.0) -> str:
+        """One-off NON-streaming completion for engine-internal use (context
+        compaction summaries). Returns the assistant text, or "" on ANY failure —
+        compaction must degrade to a no-op, never crash or block the turn."""
+        if not self.is_live():
+            return ""
+        import urllib.request
+
+        body = {
+            "model": self.cfg.model,
+            "messages": messages,
+            "temperature": 0.3,           # factual, low-variance summaries
+            "max_tokens": int(max_tokens),
+            "stream": False,
+        }
+        body = self._reasoning_body(body, override="off")  # summaries don't need thinking
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.cfg.base_url}/chat/completions", data=data, headers=self._headers(), method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return str(payload.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+        except Exception:
+            return ""
+
     def stream_complete(
         self, user_text: str, memory: str, status: dict[str, Any], context: list[dict],
         in_context: bool = True, reasoning: "str | None" = None,

@@ -139,13 +139,16 @@ Override hooks (cards leave them empty by default): `extensions.lunamoth.rules`,
 
 ## Parked work (decided, not yet built)
 
-1. **Context compaction (Hermes-style)** — biggest gap. trim() currently hard-drops
-   oldest; Hermes summarizes. Agreed design: trigger at ~75% of the **real model
-   window**; cheap tool-output pruning first, then ONE LLM summary in a
-   **neutral factual voice** (not the chara's); protect the tail; fold old
-   self-talk into the summary; write the summary into the transcript so restore
-   loads "summary + tail"; auto + a `/compact` command. Build in a `compaction.py`
-   owned by the agent (ContextBuffer is a dumb data structure; it can't call the LLM).
+1. ✅ **Context compaction (Hermes-style)** — DONE (`compaction.py`). When the
+   window nears its usable budget (`max_tokens − trim_buffer`, ~75%), the old head
+   is summarized into one `kind="summary"` system message (neutral factual voice
+   via `llm.raw_complete`), the recent tail kept verbatim; the prior summary sits
+   at messages[0] so it folds into the next one (iterative for free). Tied to the
+   ContextBuffer's own budget so it fires BEFORE `trim()` hard-drops. Runs auto in
+   `agent._context_view` and via `/compact`. Best-effort (offline/failure → no-op,
+   trim is the backstop). Remaining polish (optional): a cheap tool-output-pruning
+   pass before the LLM call; persist the summary into the transcript so restore
+   loads "summary + tail" instead of re-compacting.
 2. **Remove the durable-memory document** (`memory.py`, read_memory/write_memory
    tools, the sidebar gauge, memory_chars/memory_tokens, the always-injected
    "Your saved memory" block). Rationale: it mutates the system prompt → breaks

@@ -346,8 +346,26 @@ class LunaMothAgent:
 
     def _context_view(self, session: Session) -> list[dict]:
         """The API view of the context — reasoning echoed back only for providers
-        that demand it (DeepSeek thinking mode)."""
+        that demand it (DeepSeek thinking mode). Compaction runs first so the view
+        never overflows the model's real window."""
+        self._maybe_compact(session)
         return session.context.render(include_reasoning=self.llm.reasoning_echoback_required())
+
+    def _maybe_compact(self, session: Session, *, force: bool = False) -> bool:
+        """Summarize the old part of the window when it nears the model's real
+        context limit (compaction.py). Runs on the streaming worker thread, so a
+        blocking summary call is fine. Best-effort; never raises."""
+        try:
+            from . import compaction
+
+            if force or compaction.should_compact(session.context, self.llm):
+                changed = compaction.compact(session.context, self.lang, self.llm, force=force)
+                if changed:
+                    self.audit.write("compacted", tokens=session.context.token_count())
+                return changed
+        except Exception as e:  # compaction must never break a turn
+            self.audit.write("compact_error", error=str(e)[:200])
+        return False
 
     def _reply_stream(
         self, user_text: str, memory: str, status: dict[str, Any], context: list[dict],
@@ -529,7 +547,15 @@ class LunaMothAgent:
             if cmd == "/logs":
                 return self.tools.as_json(self.audit.tail(20))
             if cmd == "/help":
-                return "/status /memory /memory_path /files /workspace /read <filename> /wread <filename> /write <filename> <text> /logs /reset /exit"
+                return "/status /memory /memory_path /files /workspace /read <filename> /wread <filename> /write <filename> <text> /logs /compact /reset /exit"
+            if cmd == "/compact":
+                before = session.context.token_count()
+                if not self.llm.is_live():
+                    return "compaction needs a live model (offline/mock can't summarize)."
+                if self._maybe_compact(session, force=True):
+                    after = session.context.token_count()
+                    return f"compacted: ~{before} → ~{after} tokens (older turns folded into a summary; full history stays on disk)."
+                return "nothing to compact yet (the window isn't long enough to be worth summarizing)."
             if cmd == "/reset":
                 session.context.messages.clear()
                 session.thoughts.clear()
