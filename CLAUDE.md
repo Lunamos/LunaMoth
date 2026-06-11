@@ -191,6 +191,17 @@ dashboard (FastAPI+React) and the Electron desktop (`apps/desktop`, a thin shell
 that spawns the backend subprocess + embeds the web UI/PTY) are just clients of
 that one dispatch — zero logic duplication.
 
+The official **Hermes Desktop** (`apps/desktop`, Electron, shipped v0.15.2) is
+NOT a separate product — it's a thin native shell that installs the same runtime
+into `~/.hermes` and whose renderer talks to a `hermes dashboard` backend over
+the standard gateway APIs. Hermes's model is THREE pieces: (a) the **agent
+backend** (`hermes dashboard` server — clients attach, local OR remote over
+`/api/ws`+auth, e.g. VPS/Tailscale); (b) the **messaging gateway** (Telegram/etc,
+a separate long-running process); (c) the **clients** (TUI / web / desktop). The
+desktop attaching to a *remote* backend IS exactly LunaMoth's "remote TUI /
+public-IP gateway" goal — so the JSON-RPC seam + a `lunamoth serve`-style backend
+is the prerequisite for ALL of it (remote, web, and desktop).
+
 **Build order for LunaMoth:** (1) wrap the agent in a small JSON-RPC dispatch
 (stdio + WebSocket) so the current Textual TUI becomes a client of it; (2)
 Telegram adapter; (3) Official-Account / WeChat-Work; (4) web panel (backend
