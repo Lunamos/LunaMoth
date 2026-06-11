@@ -162,3 +162,37 @@ Override hooks (cards leave them empty by default): `extensions.lunamoth.rules`,
 
 Persistent server sessions (detached + reattach) → remote TUI / public-IP gateway
 (builds on `SessionMeta.env()`) → web UI (low priority). No Hugging Face.
+
+### Messaging gateway + desktop — design to adopt (studied AstrBot + Hermes)
+
+Two reference projects clone into `reference/` (gitignored): `AstrBot` (multi-
+platform chatbot framework — WeChat/QQ/Telegram/…) and `hermes-agent`.
+
+**Connecting to bots (WeChat etc.) — copy AstrBot's adapter pattern**
+(`AstrBot/astrbot/core/platform/`): a `Platform` base class (impl `run()` —
+push events to a shared `asyncio.Queue` — and `meta()`), registered via a
+`@register_platform_adapter("name", ...)` decorator; one gateway process loads
+the enabled adapters from config and an EventBus consumes the queue. Incoming
+messages normalize to one `AstrBotMessage` + a `MessageChain` of components
+(Plain/Image/Record/File/At/…). This maps cleanly onto LunaMoth: a message →
+route to a chara session (cf. `unified_msg_origin`); the chara's reply →
+`adapter.send`. Our per-chara sandbox/transcript IS that session.
+  - WeChat reality: **personal WeChat (`weixin_oc`) uses an unofficial QR-bridge
+    (OpenClaw) → ban risk** — make it opt-in only. Prefer the SAFE official paths:
+    Official Account (`weixin_official_account`, webhook+wechatpy), WeChat Work
+    (`wecom`). Start with Telegram/Discord (official, easiest to verify).
+
+**Desktop / web — copy Hermes's protocol seam, NOT AstrBot's monolith.**
+AstrBot's Quart web dashboard IS the core (tightly coupled → hard to add other
+UIs). Hermes keeps the core headless and exposes ONE protocol —
+newline-delimited JSON-RPC via `tui_gateway.dispatch`, served over BOTH stdio
+(the TUI) AND WebSocket (`/api/ws`, `hermes_cli/web_server.py`). The web
+dashboard (FastAPI+React) and the Electron desktop (`apps/desktop`, a thin shell
+that spawns the backend subprocess + embeds the web UI/PTY) are just clients of
+that one dispatch — zero logic duplication.
+
+**Build order for LunaMoth:** (1) wrap the agent in a small JSON-RPC dispatch
+(stdio + WebSocket) so the current Textual TUI becomes a client of it; (2)
+Telegram adapter; (3) Official-Account / WeChat-Work; (4) web panel (backend
+serves static, AstrBot-style); (5) only then an Electron shell. Do NOT start with
+personal WeChat (ban risk) or with Electron (premature).
