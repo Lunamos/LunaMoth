@@ -16,6 +16,9 @@ not change until the next session reloads. See agent._freeze_memory.
 """
 from __future__ import annotations
 
+import os
+import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -52,7 +55,59 @@ class MemoryStore:
             return []
         return [e.strip() for e in raw.split(ENTRY_DELIM) if e.strip()] if raw else []
 
-    def _write(self, target: str, entries: list[str]) -> None:
+    def _detect_drift(self, target: str) -> str | None:
+        """External-edit drift guard (hermes memory_tool.py:522-575, scar #26045).
+
+        The file is supposed to be a list of small tool-written entries joined
+        by §. Two drift signals, both meaning an external writer (shell append,
+        manual edit, sister session) put content here that a rewrite would
+        mangle or truncate:
+
+        1. Round-trip mismatch — parse + re-join doesn't reproduce the bytes on
+           disk (tool writes are normalized, so they always round-trip).
+        2. Entry-size overflow — a single parsed entry exceeds the store's
+           whole-file cap, which no tool-written entry can.
+
+        On drift: snapshot the file to `<name>.bak.<ts>` and return that path
+        so the caller can refuse the clobber. None = the file looks tool-shaped.
+        """
+        path = self._path(target)
+        try:
+            raw = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None  # missing/unreadable: nothing external to protect
+        if not raw.strip():
+            return None
+        parsed = [e.strip() for e in raw.split(ENTRY_DELIM) if e.strip()]
+        cap = self.limits.cap(target)
+        max_entry = max((len(e) for e in parsed), default=0)
+        if raw.strip() == ENTRY_DELIM.join(parsed) and max_entry <= cap:
+            return None
+        bak = path.with_name(path.name + f".bak.{int(time.time())}")
+        try:
+            bak.write_text(raw, encoding="utf-8")
+        except OSError:
+            return str(bak) + " (backup FAILED — the file was left unchanged on disk)"
+        return str(bak)
+
+    def _write(self, target: str, entries: list[str], *, trust_disk: bool = False) -> None:
+        """Persist one store: drift-guarded, fsynced, atomically replaced.
+
+        A failed write RAISES (the gateway boundary turns it into an error
+        result) — the chara must never be told "saved" when nothing landed.
+        `trust_disk=True` skips the drift guard for explicit operator re-caps
+        (set_limits), where oversized entries are the input, not drift.
+        """
+        path = self._path(target)
+        if not trust_disk:
+            bak = self._detect_drift(target)
+            if bak is not None:
+                raise RuntimeError(
+                    f"refusing to overwrite the {target} store: the file on disk was "
+                    f"edited outside the memory tool, and rewriting it would discard that "
+                    f"content. It was backed up to {bak}; ask your user to review/merge "
+                    f"it, then try again."
+                )
         cap = self.limits.cap(target)
         text = ENTRY_DELIM.join(entries)
         # Over budget: drop OLDEST entries until it fits (keep the newest).
@@ -60,12 +115,25 @@ class MemoryStore:
             entries = entries[1:]
             text = ENTRY_DELIM.join(entries)
         text = text[:cap]
-        tmp = self._path(target).with_suffix(".tmp")
+        # Normalize so the written bytes always round-trip (a cap cut landing
+        # mid-delimiter would otherwise read back as drift next write).
+        text = ENTRY_DELIM.join(e.strip() for e in text.split(ENTRY_DELIM) if e.strip())
         try:
-            tmp.write_text(text, encoding="utf-8")
-            tmp.replace(self._path(target))  # atomic
-        except OSError:
-            pass  # a memory write must never kill the host loop
+            fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{target}-", suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(text)
+                    f.flush()
+                    os.fsync(f.fileno())  # durable BEFORE the rename makes it visible
+                os.replace(tmp, path)  # atomic
+            except BaseException:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+        except OSError as e:
+            raise RuntimeError(f"memory write failed — nothing was saved: {e}") from e
 
     def add(self, target: str, content: str) -> list[str]:
         content = (content or "").strip()
@@ -122,7 +190,9 @@ class MemoryStore:
         warnings: list[str] = []
         for target in TARGETS:
             before = self.chars(target)
-            self._write(target, self.entries(target))  # re-cap to the new limit
+            # trust_disk: an operator-chosen shrink may leave entries over the
+            # NEW cap on disk — that is the input to re-cap, not external drift.
+            self._write(target, self.entries(target), trust_disk=True)  # re-cap to the new limit
             after = self.chars(target)
             if after < before:
                 warnings.append(
