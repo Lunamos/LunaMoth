@@ -146,15 +146,36 @@ async function openAvatarEditor(deckCard) {
 
 /* ============================ GATEWAY（右侧面板「网关」页） ============================ */
 const GW_MASK = "••••••••"; // hub.py _SECRET_MASK：后端给秘密字段回显的掩码
+/* GW_PLATFORMS — 纯数据注册表（Hermes field-copy 三件套：label/help/placeholder）。
+   字段形状：{key, label, secret, help, ph}。label/help/ph 一律过 t()：是 i18n key
+   就翻译，是字面量（如 "CorpID"）原样显示。help 渲染为 label 下那行 .why——一句
+   大白话讲清「为什么/在哪拿」。
+   平台级 pending=<i18n key>：后端 adapter 未落地——渲染琥珀横幅、禁用启用开关与
+   启动按钮；保存仍可用（hub.py messaging.save 对 adapters 做通用字段级合并，
+   预存配置安全且落地即用）。
+   注意：allowed_senders 是顶层共享字段（每个平台的「建议」区都渲染那一行，带
+   gw-allowed-why 的安全理由），不要重复进 per-platform 字段列表。 */
 const GW_PLATFORMS = {
   wecom: {
     label: "WeCom 企业微信",
     blurb: "gw-wecom-blurb",
     steps: ["gw-wecom-s1", "gw-wecom-s2", "gw-wecom-s3"],
-    required: [["corp_id", "CorpID", false], ["secret", "Secret", true], ["agent_id", "AgentId", false],
-               ["token", "Token", true], ["encoding_aes_key", "EncodingAESKey", true]],
-    recommended: [["to_user", "to_user", false]],
-    advanced: [["host", "host", false], ["port", "port (8128)", false], ["path", "path", false], ["api_base", "api_base", false]],
+    required: [
+      { key: "corp_id", label: "CorpID", secret: false, help: "gw-h-corpid" },
+      { key: "secret", label: "Secret", secret: true, help: "gw-h-wecom-secret" },
+      { key: "agent_id", label: "AgentId", secret: false, help: "gw-h-agentid" },
+      { key: "token", label: "Token", secret: true, help: "gw-h-wecom-token" },
+      { key: "encoding_aes_key", label: "EncodingAESKey", secret: true, help: "gw-h-aeskey" },
+    ],
+    recommended: [
+      { key: "to_user", label: "to_user", secret: false, help: "gw-h-touser" },
+    ],
+    advanced: [
+      { key: "host", label: "host", secret: false, help: "gw-h-wecom-host", ph: "0.0.0.0" },
+      { key: "port", label: "port", secret: false, help: "gw-h-wecom-port", ph: "8128" },
+      { key: "path", label: "path", secret: false, help: "gw-h-wecom-path", ph: "/callback/command" },
+      { key: "api_base", label: "api_base", secret: false, help: "gw-h-wecom-api-base" },
+    ],
   },
   weixin: {
     label: "微信 · iLink",
@@ -163,16 +184,38 @@ const GW_PLATFORMS = {
     note: "gw-weixin-note",
     required: [],
     recommended: [],
-    advanced: [["base_url", "base_url", false], ["bot_type", "bot_type (3)", false],
-               ["long_poll_timeout_ms", "long_poll_timeout_ms", false], ["api_timeout_ms", "api_timeout_ms", false]],
+    advanced: [
+      { key: "base_url", label: "base_url", secret: false, help: "gw-h-wx-base", ph: "https://ilinkai.weixin.qq.com" },
+      { key: "bot_type", label: "bot_type", secret: false, help: "gw-h-wx-bot-type", ph: "3" },
+      { key: "long_poll_timeout_ms", label: "long_poll_timeout_ms", secret: false, help: "gw-h-wx-poll", ph: "35000" },
+      { key: "api_timeout_ms", label: "api_timeout_ms", secret: false, help: "gw-h-wx-api-timeout", ph: "15000" },
+    ],
   },
   qq: {
     label: "QQ · OneBot",
     blurb: "gw-qq-blurb",
     steps: ["gw-qq-s1", "gw-qq-s2", "gw-qq-s3"],
-    required: [["url", "ws://… (forward WebSocket)", false], ["peer_id", "", false]],
-    recommended: [["access_token", "access_token", true]],
+    required: [
+      { key: "url", label: "gw-f-qq-url", secret: false, help: "gw-h-qq-url", ph: "ws://127.0.0.1:3001" },
+      { key: "peer_id", label: "gw-f-peer-id", secret: false, help: "gw-h-peer-id" },
+    ],
+    recommended: [
+      { key: "access_token", label: "access_token", secret: true, help: "gw-h-qq-token" },
+    ],
     advanced: [],
+  },
+  telegram: {
+    label: "Telegram",
+    blurb: "gw-tg-blurb",
+    steps: ["gw-tg-s1", "gw-tg-s2"],
+    pending: "gw-telegram-wait", // 后端 adapter 未落地（roadmap C2 NEXT）：可填可存，不能启动
+    required: [
+      { key: "bot_token", label: "gw-f-tg-token", secret: true, help: "gw-h-tg-token", ph: "gw-ph-tg-token" },
+    ],
+    recommended: [], // allowed_senders 走顶层共享行（安全理由见 gw-allowed-why）
+    advanced: [
+      { key: "proxy_url", label: "gw-f-tg-proxy", secret: false, help: "gw-h-tg-proxy", ph: "socks5://… / http://…" },
+    ],
   },
 };
 
@@ -1110,7 +1153,7 @@ class ChatController {
       const a = adaptersOf()[p] || {};
       return spec.required.length === 0
         ? Object.keys(a).length > 0 || p === "weixin"
-        : spec.required.every(([f]) => String(a[f] ?? "").length > 0);
+        : spec.required.every((fd) => String(a[fd.key] ?? "").length > 0);
     }
 
     function chips() {
@@ -1122,21 +1165,23 @@ class ChatController {
         el("span", { class: "gw-chip " + (run ? "ok" : "") }, run ? t("gw-running") : t("gw-stopped")));
     }
 
-    function fieldRow(plat2, f, label, secret, why) {
+    function fieldRow(plat2, fd) {
+      // fd = {key, label, secret, help, ph}（GW_PLATFORMS 注册表条目；label/help/ph 过 t()）
       const a = adaptersOf()[plat2] || {};
+      const f = fd.key;
       const value = a[f] !== undefined && a[f] !== null ? String(a[f]) : "";
       const input = el("input", {
         value,
-        placeholder: secret ? GW_MASK : "",
-        type: secret ? "password" : "text",
+        placeholder: fd.ph ? t(fd.ph) : (fd.secret ? GW_MASK : ""),
+        type: fd.secret ? "password" : "text",
       });
       inputs[f] = input;
       initial[f] = value;
       return el("div", { class: "gw-field" },
-        el("label", null, label || f),
-        why ? el("div", { class: "why" }, why) : null,
+        el("label", null, fd.label ? t(fd.label) : f),
+        fd.help ? el("div", { class: "why" }, t(fd.help)) : null,
         input,
-        secret ? el("div", { class: "why" }, t("gw-secret-keep")) : null);
+        fd.secret ? el("div", { class: "why" }, t("gw-secret-keep")) : null);
     }
 
     /* —— weixin 扫码登录：weixin.qr → 轮询 weixin.qr_status（~2.5s，有上限；
@@ -1213,6 +1258,10 @@ class ChatController {
           GW_PLATFORMS[k].label))));
       root.appendChild(chips());
       root.appendChild(el("div", { class: "gw-blurb" }, t(spec.blurb)));
+      if (spec.pending) {
+        // 等待后端的视觉模式：琥珀横幅。配置可填可存，启用/启动在下面禁掉。
+        root.appendChild(el("div", { class: "gw-banner draft-note" }, t(spec.pending)));
+      }
 
       if (spec.steps) {
         root.appendChild(el("div", { class: "gw-sec" },
@@ -1226,11 +1275,10 @@ class ChatController {
       if (spec.required.length) {
         root.appendChild(el("div", { class: "gw-sec" },
           el("h4", null, t("gw-required")),
-          ...spec.required.map(([f, label, secret]) =>
-            fieldRow(plat, f, f === "peer_id" ? t("gw-f-peer-id") : label, secret))));
+          ...spec.required.map((fd) => fieldRow(plat, fd))));
       }
       const recSec = el("div", { class: "gw-sec" }, el("h4", null, t("gw-recommended")));
-      for (const [f, label, secret] of spec.recommended) recSec.appendChild(fieldRow(plat, f, label, secret));
+      for (const fd of spec.recommended) recSec.appendChild(fieldRow(plat, fd));
       // allowed_senders 顶层，带安全理由
       allowedInput = el("input", { value: (Array.isArray(cfg.allowed_senders) ? cfg.allowed_senders.join(", ") : "") });
       recSec.appendChild(el("div", { class: "gw-field" },
@@ -1242,7 +1290,7 @@ class ChatController {
       if (spec.advanced.length) {
         root.appendChild(el("details", { class: "gw-adv" },
           el("summary", null, `${t("gw-advanced")} (${spec.advanced.length})`),
-          ...spec.advanced.map(([f, label, secret]) => fieldRow(plat, f, label, secret))));
+          ...spec.advanced.map((fd) => fieldRow(plat, fd))));
       }
 
       const enableSwitch = el("button", { class: "switch" + (enabled ? " on" : ""), onclick: () => {
@@ -1257,13 +1305,19 @@ class ChatController {
           render();
         } catch (e) { runBtn.disabled = false; toast(rpcErrText(e), true); }
       } }, run ? t("gw-stop") : t("gw-start"));
+      if (spec.pending) {
+        // adapter 未落地：启用/启动禁用，保存保持可用（messaging.save 通用合并）。
+        enableSwitch.disabled = true;
+        runBtn.disabled = true;
+      }
       const saveBtn = el("button", { class: "btn primary", onclick: async () => {
         saveBtn.disabled = true;
         try {
           // 后端按字段合并：没动的字段省略（掩码回显也省略）、清空的发 null 删除。
           const fields = {};
           const spec2 = GW_PLATFORMS[plat];
-          for (const [f] of [...spec2.required, ...spec2.recommended, ...spec2.advanced]) {
+          for (const fd of [...spec2.required, ...spec2.recommended, ...spec2.advanced]) {
+            const f = fd.key;
             if (!inputs[f]) continue;
             const v = inputs[f].value.trim();
             const init = initial[f] ?? "";
