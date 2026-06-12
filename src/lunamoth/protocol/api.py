@@ -112,6 +112,11 @@ class CharaHandle:
         self._agent = agent or LunaMothAgent(settings)
         self._session = None
         self._snap: "tuple[float, StateSnapshot] | None" = None
+        # Visit bookkeeping: a visit is presence-true → presence-false. If the
+        # operator never says a word, the visit leaves NO trace in context —
+        # the arrival ceremony is rolled back and no departure note is added.
+        self._visit_mark: "int | None" = None
+        self._visit_spoke = False
 
     # ---- lifecycle -------------------------------------------------------------
 
@@ -141,6 +146,7 @@ class CharaHandle:
         # for itself whether your visit deserves a word.
         if present and float(a.state.load().get("rest_until", 0.0) or 0.0) > time.time():
             a.presence.mark_met()
+            self._begin_visit()
             return AttachInfo(
                 char_name=a.char_name(), lang=a.lang, mode=a.settings.mode,
                 show_thinking=bool(a.settings.show_thinking),
@@ -171,24 +177,46 @@ class CharaHandle:
             restored=restored, opening=opening, opening_text=opening_text,
         )
         a.presence.mark_met()
+        if present:
+            self._begin_visit()
         return info
+
+    def _begin_visit(self) -> None:
+        if self._session is not None and self._visit_mark is None:
+            self._visit_mark = len(self._session.context.messages)
+            self._visit_spoke = False
 
     def record_greeting(self, text: str) -> None:
         """Commit a displayed card greeting (first_mes) to the conversation."""
         self._session.context.add("assistant", text)
 
     def detach(self) -> None:
-        """Presence bookkeeping on the way out (idempotence is the caller's job)."""
-        if self._session is not None:
-            self._agent.note_detach(self._session)
+        """Presence bookkeeping on the way out (idempotence is the caller's job).
+
+        A wordless visit leaves no trace: the arrival ceremony (kind="visit")
+        is rolled back off the context tail and the card's on_detach note is
+        skipped — entering and leaving the room are not conversation."""
+        s = self._session
+        if s is not None:
+            if self._visit_mark is not None and not self._visit_spoke:
+                dropped = s.context.drop_visit_tail(self._visit_mark)
+                if dropped:
+                    self._agent.audit.write("presence_event", kind="silent_visit", dropped=dropped)
+            else:
+                self._agent.note_detach(s)
+        self._visit_mark = None
+        self._visit_spoke = False
         self._agent.state.set_present(False)
 
     def set_present(self, present: bool) -> None:
+        if present and self._session is not None:
+            self._begin_visit()
         self._agent.state.set_present(present)
 
     # ---- conversation (generators of protocol events) ---------------------------
 
     def stream_user(self, text: str) -> "Iterator[Event]":
+        self._visit_spoke = True
         return self._agent.stream_handle(text, self._session)
 
     def stream_event(self, text: str) -> "Iterator[Event]":

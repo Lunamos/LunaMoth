@@ -182,9 +182,13 @@ class JsonRpcDispatcher:
             # Adoption-safe: a second attach to a live session is just presence
             # bookkeeping and returns the original AttachInfo shape. The
             # supervisor relies on this when a browser reconnects to a long-lived
-            # child process.
+            # child process. The opening is neutered: a resident greets once per
+            # life, not once per page-load — re-entering the room is a presence
+            # fact, and the chara sees user_present at its next own cycle.
             self.handle.set_present(present)
-            return info if info is not None else self.handle.attach(present=present)
+            if info is not None:
+                return dataclasses.replace(info, opening="none", opening_text="")
+            return self.handle.attach(present=present)
         info = self.handle.attach(present=present)
         with self._lock:
             self._attached = True

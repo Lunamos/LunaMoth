@@ -344,9 +344,11 @@ class LunaMothAgent:
         speech — it is audited as a presence event, never as a user message.
         """
         self.audit.write("presence_event", kind="attach", text=event_text[:300])
-        # Commit the event line BEFORE streaming (interrupt-safe).
+        # Commit the event line BEFORE streaming (interrupt-safe). kind="visit"
+        # marks the arrival ceremony so a wordless visit can be rolled back out
+        # of the context tail (drop_visit_tail) — no trace, cache intact.
         scan_text = self._scan_text(session, event_text)
-        session.context.add("system", event_text)
+        session.context.add("system", event_text, kind="visit")
         stable = self._stable_prefix()
         volatile = self._volatile_tail(scan_text, session)
         agent_loop = self._agent_loop_active()
@@ -365,12 +367,12 @@ class LunaMothAgent:
             if not agent_loop:
                 reply = "".join(speech).strip()
                 if reply:
-                    session.context.add("assistant", reply)
+                    session.context.add("assistant", reply, kind="visit")
         finally:
             if not committed and not agent_loop:
                 partial = "".join(speech).strip()
                 if partial:
-                    session.context.add("assistant", partial + self.llm.INTERRUPT_MARK)
+                    session.context.add("assistant", partial + self.llm.INTERRUPT_MARK, kind="visit")
 
     def note_detach(self, session: Session) -> None:
         """Record the operator leaving: context line, audit, and a handoff event
