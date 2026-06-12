@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import queue
 import random
+import re
 import threading
 import time
 from typing import Any, Iterator, NoReturn
@@ -31,6 +32,180 @@ _REASONING_PREFIXES = (
     "deepseek/", "anthropic/", "openai/", "x-ai/", "google/gemini-2", "google/gemma-4",
     "qwen/qwen3", "tencent/hy3-preview", "xiaomi/", "nousresearch/",
 )
+
+
+# ---- tool-call argument repair (audit #2, hermes message_sanitization) -----------------
+# Local/aggregated models (GLM via Ollama, hermes #12068) emit truncated JSON,
+# trailing commas, Python None, literal control chars. Before this, a parse
+# failure became `{}` → the gateway's missing-required-args error — a fair
+# model-visible error, but REPAIRABLE calls were needlessly failed, and broken
+# args persisted into history were replayed broken on every later request.
+
+
+def _escape_control_chars_in_strings(raw: str) -> str:
+    """Escape unescaped control chars (0x00-0x1F) inside JSON string values;
+    pass-through outside strings (hermes _escape_invalid_chars_in_json_strings,
+    #12093 — catches what strict=False alone can't when other malformations
+    are present too)."""
+    out: list[str] = []
+    in_string = False
+    i, n = 0, len(raw)
+    while i < n:
+        ch = raw[i]
+        if in_string:
+            if ch == "\\" and i + 1 < n:
+                out.append(ch)
+                out.append(raw[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_string = False
+                out.append(ch)
+            elif ord(ch) < 0x20:
+                out.append(f"\\u{ord(ch):04x}")
+            else:
+                out.append(ch)
+        else:
+            if ch == '"':
+                in_string = True
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _repair_tool_args(raw_args: str, tool_name: str = "?") -> str:
+    """Repair malformed tool_call argument JSON (hermes
+    message_sanitization._repair_tool_call_arguments, four passes).
+
+    Already-valid JSON returns BYTE-IDENTICAL (no re-serialization) so replayed
+    history stays byte-stable for prompt caching. Then: (0) strict=False
+    reparse + re-serialize (literal control chars — the most common local-model
+    case); (1) strip trailing commas, close unclosed braces/brackets; (2) pop
+    excess closers, bounded; (3) escape raw control chars inside strings. Last
+    resort "{}": the gateway then reports the real missing-args failure to the
+    model — an honest error, far better than a crashed turn (the GLM-via-Ollama
+    scar). Every repair is logged at WARNING.
+    """
+    raw_stripped = raw_args.strip() if isinstance(raw_args, str) else ""
+    if not raw_stripped:
+        return "{}"
+    try:
+        json.loads(raw_stripped)
+        return raw_stripped  # valid — keep the model's exact bytes
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+
+    if raw_stripped == "None":  # Python-literal None
+        _log.warning("repaired Python-None tool_call arguments for %s", tool_name)
+        return "{}"
+
+    # Pass 0: strict=False accepts literal control chars inside strings and
+    # lets us re-serialize into wire-valid JSON without string surgery.
+    try:
+        parsed = json.loads(raw_stripped, strict=False)
+        fixed = json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+        _log.warning("repaired unescaped control chars in tool_call arguments for %s", tool_name)
+        return fixed
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+
+    fixed = raw_stripped
+    # Pass 1: strip trailing commas (before a closer, or dangling at the cut
+    # point of a truncated stream), then close unclosed structures. Hermes
+    # counts braces and appends `}` before `]`, which mis-orders the closers
+    # for `{"a": [1, 2`; a string-aware stack walk closes in nesting order
+    # and also terminates an unclosed string.
+    fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
+    fixed = re.sub(r",\s*$", "", fixed)
+    stack: list[str] = []
+    in_string = False
+    i = 0
+    while i < len(fixed):
+        ch = fixed[i]
+        if in_string:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]" and stack and stack[-1] == ("{" if ch == "}" else "["):
+            stack.pop()
+        i += 1
+    if in_string:
+        fixed += '"'
+    for opener in reversed(stack):
+        fixed += "}" if opener == "{" else "]"
+    # Pass 2: pop excess closing braces/brackets (bounded).
+    for _ in range(50):
+        try:
+            json.loads(fixed)
+            break
+        except json.JSONDecodeError:
+            if fixed.endswith("}") and fixed.count("}") > fixed.count("{"):
+                fixed = fixed[:-1]
+            elif fixed.endswith("]") and fixed.count("]") > fixed.count("["):
+                fixed = fixed[:-1]
+            else:
+                break
+    try:
+        json.loads(fixed)
+        _log.warning("repaired malformed tool_call arguments for %s: %s -> %s",
+                     tool_name, raw_stripped[:80], fixed[:80])
+        return fixed
+    except json.JSONDecodeError:
+        pass
+
+    # Pass 3: escape raw control chars inside strings, then retry — catches
+    # control chars combined with the structural damage passes 1-2 fixed.
+    try:
+        escaped = _escape_control_chars_in_strings(fixed)
+        if escaped != fixed:
+            json.loads(escaped)
+            _log.warning("repaired control-char-laced tool_call arguments for %s: %s -> %s",
+                         tool_name, raw_stripped[:80], escaped[:80])
+            return escaped
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+
+    _log.warning("unrepairable tool_call arguments for %s — replaced with {} (was: %s)",
+                 tool_name, raw_stripped[:80])
+    return "{}"
+
+
+def _preflight_history_tool_calls(msg: dict) -> dict:
+    """Repair unparseable tool_call arguments on a REPLAYED history message
+    (hermes conversation_loop pre-flight): one bad turn persisted to the
+    transcript must not be replayed broken on every later request forever.
+    Valid arguments pass through byte-identical; the durable history is never
+    mutated (copy-on-repair, this is a per-request view only)."""
+    tcs = msg.get("tool_calls")
+    if not tcs:
+        return msg
+    fixed: "list[Any] | None" = None
+    for i, tc in enumerate(tcs):
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function")
+        if not isinstance(fn, dict):
+            continue
+        raw = fn.get("arguments")
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        try:
+            json.loads(raw)
+            continue
+        except (json.JSONDecodeError, ValueError):
+            pass
+        if fixed is None:
+            fixed = list(tcs)
+        fixed[i] = {**tc, "function": {**fn, "arguments": _repair_tool_args(raw, str(fn.get("name") or "?"))}}
+    if fixed is None:
+        return msg
+    return {**msg, "tool_calls": fixed}
 
 
 # ---- stream stall watchdog (audit #1, hermes chat_completion_helpers) ------------------
@@ -293,6 +468,11 @@ class LLMClient:
                 # Strict OpenAI-compatible providers reject null content even on
                 # tool-call messages; "" is accepted everywhere.
                 msg = {**msg, "content": ""}
+            if msg.get("tool_calls"):
+                # Pre-flight repair over replayed history (audit #2): a bad
+                # turn already in the durable context must not poison every
+                # later request.
+                msg = _preflight_history_tool_calls(msg)
             messages.append(msg)
         if not in_context:
             messages.append({"role": "user", "content": user_text})
@@ -653,7 +833,10 @@ class LLMClient:
                 tool_calls.append({
                     "id": s["id"] or f"call_{idx}",
                     "type": "function",
-                    "function": {"name": s["name"], "arguments": s["args"] or "{}"},
+                    # Repair at stream end (audit #2): trailing commas, unclosed
+                    # braces, raw control chars — fixable args must not become a
+                    # missing-args error, and only repaired args enter history.
+                    "function": {"name": s["name"], "arguments": _repair_tool_args(s["args"], s["name"])},
                 })
         return tool_calls, "".join(reasoning_parts), finish_reason
 
