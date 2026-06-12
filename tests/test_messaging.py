@@ -7,7 +7,7 @@ from xml.etree import ElementTree as ET
 import pytest
 
 from lunamoth.messaging.base import Adapter, InboundMessage
-from lunamoth.messaging.gateway import MessagingGateway
+from lunamoth.messaging.gateway import MessageDeduplicator, MessagingGateway
 from lunamoth.messaging.text import split_text
 from lunamoth.messaging.wecom import parse_message_xml
 from lunamoth.messaging.wecom_crypto import (
@@ -631,3 +631,144 @@ def test_qq_reconnect_backoff_resets_after_success():
     assert msg.sender_id == "123"
     assert msg.text == "ping"
     assert all(sock.entered and sock.exited for sock in sockets)
+
+
+# ---- inbound dedup (audit #30; hermes gateway/platforms/helpers.py) -----------------
+
+
+def test_dedup_ttl_window_with_fake_clock():
+    now = [1000.0]
+    d = MessageDeduplicator(ttl_seconds=300, clock=lambda: now[0])
+    assert d.is_duplicate("wecom:m1") is False   # first sight: recorded
+    assert d.is_duplicate("wecom:m1") is True    # redelivery inside the TTL
+    now[0] += 299
+    assert d.is_duplicate("wecom:m1") is True    # still inside
+    now[0] += 2
+    assert d.is_duplicate("wecom:m1") is False   # expired: treated as new
+    assert d.is_duplicate("") is False
+    assert d.is_duplicate("") is False           # empty ids are never deduped
+
+
+def test_dedup_max_size_evicts_oldest_when_all_fresh():
+    now = [0.0]
+    d = MessageDeduplicator(max_size=3, ttl_seconds=300, clock=lambda: now[0])
+    for i, key in enumerate(["a", "b", "c", "d"]):
+        now[0] = float(i)
+        assert d.is_duplicate(key) is False
+    assert d.is_duplicate("a") is False  # evicted (oldest) to honor the bound
+    assert d.is_duplicate("d") is True   # newest survived
+
+
+def test_gateway_drops_redelivered_message_one_llm_turn():
+    handle = FakeHandle()
+    adapter = FakeAdapter()
+    gateway = MessagingGateway(handle=handle, adapters=[adapter], allowed_senders=["u1"], patience=999)
+
+    msg = InboundMessage("u1", "Alice", "hi", message_id="MSG-42")
+    gateway.enqueue(adapter, msg)
+    gateway.enqueue(adapter, msg)  # the platform redelivery
+    assert gateway.tick(timeout=0)
+    gateway.tick(timeout=0)
+
+    assert handle.user_calls == ["hi"]   # exactly one turn ran
+    assert adapter.sent == ["reply"]     # and one reply went out
+
+
+def test_gateway_without_message_id_never_dedups():
+    # No platform id = nothing safe to key on: identical texts are two messages.
+    handle = FakeHandle()
+    adapter = FakeAdapter()
+    gateway = MessagingGateway(handle=handle, adapters=[adapter], allowed_senders=["u1"], patience=999)
+
+    gateway.enqueue(adapter, InboundMessage("u1", "Alice", "hi"))
+    gateway.enqueue(adapter, InboundMessage("u1", "Alice", "hi"))
+    gateway.tick(timeout=0)
+    gateway.tick(timeout=0)
+
+    assert handle.user_calls == ["hi", "hi"]
+
+
+def test_gateway_dedup_is_keyed_per_platform():
+    handle = FakeHandle()
+    a1, a2 = FakeAdapter("qq"), FakeAdapter("wecom")
+    gateway = MessagingGateway(handle=handle, adapters=[a1, a2], allowed_senders=["u1"], patience=999)
+
+    gateway.enqueue(a1, InboundMessage("u1", "Alice", "hi", message_id="7"))
+    gateway.enqueue(a2, InboundMessage("u1", "Alice", "hi", message_id="7"))
+    gateway.tick(timeout=0)
+    gateway.tick(timeout=0)
+
+    assert handle.user_calls == ["hi", "hi"]  # same id on two platforms = two messages
+
+
+def test_qq_event_carries_message_id_for_dedup():
+    from lunamoth.messaging.qq import parse_onebot_event
+
+    raw = json.dumps(
+        {
+            "post_type": "message",
+            "message_type": "private",
+            "user_id": 123456,
+            "message_id": 778899,
+            "message": [{"type": "text", "data": {"text": "hello"}}],
+        }
+    )
+    msg = parse_onebot_event(raw)
+    assert msg is not None and msg.message_id == "778899"
+
+
+def test_wecom_callback_carries_msgid_for_dedup(monkeypatch):
+    # The crypto layer is covered by its own (cryptography-gated) tests; here
+    # the decrypt seam is stubbed so the MsgId -> InboundMessage.message_id
+    # wiring in the callback handler is exercised without the optional extra.
+    import socket
+    import threading
+    import urllib.request
+
+    import lunamoth.messaging.wecom as wecom_mod
+    from lunamoth.messaging.wecom import WeComAdapter
+
+    monkeypatch.setattr(
+        wecom_mod, "decrypt_message",
+        lambda body, sig, ts, nonce, **kw: body.decode("utf-8"),
+    )
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    adapter = WeComAdapter(
+        {
+            "corp_id": "corp", "secret": "s", "agent_id": "1000002",
+            "token": "t", "encoding_aes_key": "k",
+            "host": "127.0.0.1", "port": port,
+        }
+    )
+    inbox = queue.Queue()
+    thread = threading.Thread(target=adapter.run, args=(inbox,), daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:  # wait for the server to bind
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                    break
+            except OSError:
+                time.sleep(0.02)
+
+        plain = (
+            "<xml><ToUserName><![CDATA[corp]]></ToUserName>"
+            "<FromUserName><![CDATA[u1]]></FromUserName>"
+            "<MsgType><![CDATA[text]]></MsgType><Content><![CDATA[hello]]></Content>"
+            "<MsgId>1456453720</MsgId><AgentID>1000002</AgentID></xml>"
+        )
+        url = f"http://127.0.0.1:{port}/callback/command?msg_signature=x&timestamp=1&nonce=2"
+        req = urllib.request.Request(url, data=plain.encode("utf-8"), method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            assert resp.status == 200
+
+        msg = inbox.get(timeout=5)
+        assert msg.text == "hello"
+        assert msg.message_id == "1456453720"  # MsgId wired through for the gateway dedup
+    finally:
+        adapter.close()

@@ -238,6 +238,9 @@ class WeComAdapter(Adapter):
                             sender_name=msg.sender_name,
                             text=msg.text,
                             reply=msg.raw,
+                            # WeCom retries this callback if we don't answer in
+                            # time; MsgId lets the gateway drop the redelivery.
+                            message_id=msg.raw.get("MsgId", ""),
                         )
                     )
                 self._write(200, "success")

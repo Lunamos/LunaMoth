@@ -65,7 +65,15 @@ def parse_onebot_event(raw: str | bytes | bytearray) -> InboundMessage | None:
     sender_name = sender_id
     if isinstance(sender, dict):
         sender_name = str(sender.get("nickname") or sender.get("card") or sender_id)
-    return InboundMessage(sender_id=sender_id, sender_name=sender_name, text=text, reply={"user_id": sender_id})
+    return InboundMessage(
+        sender_id=sender_id,
+        sender_name=sender_name,
+        text=text,
+        reply={"user_id": sender_id},
+        # NapCat/Lagrange can redeliver events after a reconnect; message_id
+        # lets the gateway drop the duplicate instead of running a second turn.
+        message_id=str(event.get("message_id") or ""),
+    )
 
 
 class QQAdapter(Adapter):

@@ -30,6 +30,48 @@ DEFAULT_REFUSAL = (
 # (hermes stream_consumer.py: failed sends retried once after 3 s, then degrade).
 _SEND_RETRY_DELAY = 3.0
 
+# Inbound dedup window (audit #30; hermes gateway/platforms/helpers.py
+# MessageDeduplicator): WeCom retries callbacks that aren't answered in time
+# and OneBot/NapCat redelivers after a reconnect — well inside 300 s.
+_DEDUP_TTL = 300.0
+_DEDUP_MAX = 2000
+
+
+class MessageDeduplicator:
+    """TTL cache over platform message ids, on a monotonic clock.
+
+    `is_duplicate(key)` returns True when *key* was already seen within the
+    TTL; otherwise it records the key and returns False. Bounded: expired
+    entries are pruned when the cache overflows, and if everything is still
+    fresh the oldest entries are evicted to honor `max_size`.
+    """
+
+    def __init__(self, max_size: int = _DEDUP_MAX, ttl_seconds: float = _DEDUP_TTL,
+                 clock=time.monotonic) -> None:
+        self._seen: dict[str, float] = {}
+        self._max_size = int(max_size)
+        self._ttl = float(ttl_seconds)
+        self._clock = clock
+
+    def is_duplicate(self, key: str) -> bool:
+        if not key:
+            return False  # no platform id: nothing safe to dedup on
+        now = self._clock()
+        seen_at = self._seen.get(key)
+        if seen_at is not None:
+            if now - seen_at < self._ttl:
+                return True
+            del self._seen[key]  # expired — treat as new
+        self._seen[key] = now
+        if len(self._seen) > self._max_size:
+            cutoff = now - self._ttl
+            self._seen = {k: v for k, v in self._seen.items() if v > cutoff}
+            if len(self._seen) > self._max_size:
+                # Everything still fresh: keep the newest to enforce the bound.
+                newest = sorted(self._seen.items(), key=lambda kv: kv[1])[-self._max_size:]
+                self._seen = dict(newest)
+        return False
+
 
 def config_path() -> Path:
     root = os.getenv("LUNAMOTH_CONFIG_DIR")
@@ -120,6 +162,7 @@ class MessagingGateway:
         self._last_user_at = 0.0
         self._present = False
         self._next_idle_at = time.monotonic()
+        self._dedup = MessageDeduplicator()
 
     @classmethod
     def from_config(cls, config: dict[str, Any], *, handle: CharaHandle | None = None, patience: float = 2.0) -> "MessagingGateway":
@@ -208,6 +251,12 @@ class MessagingGateway:
         return sender_id in self.allowed_senders or "*" in self.allowed_senders
 
     def _process_inbound(self, adapter: Adapter, msg: InboundMessage) -> None:
+        # Audit #30: WeCom retries unanswered callbacks, OneBot redelivers
+        # after reconnect — a redelivered message must not run a second turn.
+        if msg.message_id and self._dedup.is_duplicate(f"{adapter.name}:{msg.message_id}"):
+            _log.info("dropped duplicate inbound %s message %s (platform redelivery)",
+                      adapter.name, msg.message_id)
+            return
         adapter.set_reply_target(msg)
         try:
             sender = str(msg.sender_id)
