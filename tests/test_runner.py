@@ -1,7 +1,7 @@
 
 import pytest
 
-from lunamoth.tools.runner import os_sandbox_available, run_terminal, truncate_middle
+from lunamoth.tools.runner import os_sandbox_available, run_terminal, strip_ansi, truncate_middle
 
 
 def test_dir_runs_any_command(tmp_path):
@@ -81,6 +81,34 @@ def test_long_output_truncated_head_and_tail(tmp_path):
     assert "HEADMARK" in out                  # the head is no longer thrown away
     assert "TAILMARK" in out
     assert "chars omitted out of" in out      # explicit marker, no silent cut
+
+
+@pytest.mark.parametrize("dirty,clean", [
+    ("\x1b[31mred\x1b[0m text", "red text"),                       # CSI colors
+    ("\x1b[?25l\x1b[2Khidden cursor", "hidden cursor"),            # CSI private mode
+    ("\x1b]0;window title\x07body", "body"),                       # OSC, BEL terminator
+    ("\x1b]8;;http://x\x1b\\link\x1b]8;;\x1b\\", "link"),          # OSC, ST terminator
+    ("\x1bPq#0;2;0;0;0\x1b\\sixel gone", "sixel gone"),            # DCS string
+    ("\x1b(Bcharset", "charset"),                                  # nF escape
+    ("\x9b31mbright\x9b0m", "bright"),                             # 8-bit CSI
+    ("\x9d0;title\x9cafter", "after"),                             # 8-bit OSC
+    ("a\x85b\x90c", "abc"),                                        # bare 8-bit C1
+])
+def test_strip_ansi_full_ecma48(dirty, clean):
+    assert strip_ansi(dirty) == clean
+
+
+def test_strip_ansi_fast_path_returns_same_object():
+    s = "plain text, no escapes — 中文 too"
+    assert strip_ansi(s) is s   # fast path: untouched, not even copied
+    assert strip_ansi("") == ""
+
+
+def test_terminal_output_reaches_model_ansi_free(tmp_path):
+    ws = tmp_path / "workspace"
+    out = run_terminal("printf '\\033[1;32mGREEN\\033[0m\\n\\033]0;title\\007BODY\\n'", ws, isolation="dir", timeout=10)
+    assert "GREEN" in out and "BODY" in out
+    assert "\x1b" not in out and "title" not in out
 
 
 def test_credentials_are_stripped(tmp_path, monkeypatch):

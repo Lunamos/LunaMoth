@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -48,6 +49,44 @@ _OUTPUT_CAP = 12000
 _STDERR_CAP = 2000
 _KILL_GRACE = 1.0    # seconds between SIGTERM and SIGKILL on timeout
 _DRAIN_DEADLINE = 1.0  # bounded non-blocking pipe drain after the group is killed
+
+
+# ---- ANSI/control stripping (audit #16; ported from hermes tools/ansi_strip.py) ----
+# Command output is cleaned before it reaches the model: escape codes waste
+# tokens, can derail weaker models, and — the hermes root cause — get copied
+# verbatim into file writes. Covers the full ECMA-48 spec: CSI (including
+# private-mode `?` prefix, colon-separated params, intermediate bytes), OSC
+# (BEL and ST terminators), DCS/SOS/PM/APC string sequences, nF multi-byte
+# escapes, Fp/Fe/Fs single-byte escapes, and 8-bit C1 control characters.
+_ANSI_ESCAPE_RE = re.compile(
+    r"\x1b"
+    r"(?:"
+        r"\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]"       # CSI sequence
+        r"|\][\s\S]*?(?:\x07|\x1b\\)"                  # OSC (BEL or ST terminator)
+        r"|[PX^_][\s\S]*?(?:\x1b\\)"                   # DCS/SOS/PM/APC strings
+        r"|[\x20-\x2f]+[\x30-\x7e]"                    # nF escape sequences
+        r"|[\x30-\x7e]"                                # Fp/Fe/Fs single-byte
+    r")"
+    r"|\x9b[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]"        # 8-bit CSI
+    r"|\x9d[\s\S]*?(?:\x07|\x9c)"                      # 8-bit OSC
+    r"|[\x80-\x9f]",                                   # Other 8-bit C1 controls
+    re.DOTALL,
+)
+
+# Fast-path check — skip the full regex when no escape-like bytes are present.
+_HAS_ESCAPE = re.compile(r"[\x1b\x80-\x9f]")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text.
+
+    Returns the input unchanged (fast path) when no ESC or C1 bytes are
+    present. Safe to call on any string — clean text passes through with
+    negligible overhead.
+    """
+    if not text or not _HAS_ESCAPE.search(text):
+        return text
+    return _ANSI_ESCAPE_RE.sub("", text)
 
 
 def truncate_middle(text: str, cap: int) -> str:
@@ -206,8 +245,10 @@ def run_terminal(
             out_b = _drain_nonblocking(proc.stdout, _DRAIN_DEADLINE)
             err_b = _drain_nonblocking(proc.stderr, _DRAIN_DEADLINE)
         parts = [f"[timed out after {timeout}s]"]
-        out = truncate_middle(out_b.decode("utf-8", errors="replace"), _OUTPUT_CAP).strip()
-        err = truncate_middle(err_b.decode("utf-8", errors="replace"), _STDERR_CAP).strip()
+        # Strip BEFORE truncating so the cap budgets clean text and the cut
+        # can't land mid-escape-sequence and leave fragments behind.
+        out = truncate_middle(strip_ansi(out_b.decode("utf-8", errors="replace")), _OUTPUT_CAP).strip()
+        err = truncate_middle(strip_ansi(err_b.decode("utf-8", errors="replace")), _STDERR_CAP).strip()
         if out:
             parts.append(f"partial STDOUT:\n{out}")
         if err:
@@ -216,8 +257,8 @@ def run_terminal(
     _log.info("terminal (%s, net=%s) exit=%d in %.1fs: %.120s",
               isolation, "on" if allow_network else "off", proc.returncode, time.monotonic() - t0, command)
 
-    out = truncate_middle((out_b or b"").decode("utf-8", errors="replace"), _OUTPUT_CAP)
-    err = truncate_middle((err_b or b"").decode("utf-8", errors="replace"), _STDERR_CAP)
+    out = truncate_middle(strip_ansi((out_b or b"").decode("utf-8", errors="replace")), _OUTPUT_CAP)
+    err = truncate_middle(strip_ansi((err_b or b"").decode("utf-8", errors="replace")), _STDERR_CAP)
     parts = [f"exit={proc.returncode}"]
     if out:
         parts.append(f"STDOUT:\n{out}")
