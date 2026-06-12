@@ -41,9 +41,42 @@
    prompt，需要 wake/activation 接到 persona 机制。触及 prompt 栈，
    Track A 做，字段语义需 owner 点头。
 
+## 10. 多 key 管理（owner 2026-06-12 点名："我的多key呢？"——从 v2 提级）
+
+維护多把命名 key、任选其一做默认、唤醒时可指定。建议契约（UI 将按此编码）：
+
+- 存储进 `~/.lunamoth/desktop.json`（已 0600）：`"keys": {label: {provider,
+  base_url, api_key, model?}}`。
+- `keys.list {}` → `[{label, provider, base_url, model, has_key, active}]`
+  ——**key 值永不回传**（has_key only，沿用 defaults 的纪律）。
+- `keys.save {label, provider, base_url, api_key?, model?}`（更新时省略
+  api_key = 保留原值）；`keys.delete {label}`；
+- `defaults.use_key {label}` → 把该 key 拷入顶层 defaults（=defaults.set 的
+  字段），回传 public defaults；
+- `session.wake` 增加可选 `key: <label>`，用该 key 的 provider/base_url/
+  api_key 唤醒（wake 未传 model 时用 key 自带 model）。
+
+落地前 UI：设置·模型 只有单 key 表单（现状）；唤醒 sheet 不出现 key 选择。
+
+## 11. 复制卡片的展示语义：`list_cards` 按 name+lang 去重（owner 报的"复制很怪"的根）
+
+现象：复制副本后"卡片位置奇怪移动、原本锁定的卡解锁了"。根因不在写入
+（save_card 会给文件名加 -2 后缀，不覆盖）而在**列表去重**：`list_cards`
+以 `name+lang` 为 key 去重且用户卡目录先扫——同名副本把内置/原卡**顶出
+列表**，看起来就像原卡"被移动并解锁"。前端本轮先用「<name> 副本」自动改名
+绕开同名；但语义问题留给后端定夺：去重 key 改 path？还是保留 name 级
+shadow（用户卡覆盖同名内置卡）作为特性但在 entry 上标注 `shadows: <path>`
+让前端能如实展示？
+
+## 12. `/model`、`toolpacks.list` 重申（owner 2026-06-12 点名："我的每个chara都能改模型呢？"）
+
+#6、#8 仍未落地，owner 已直接催。契约维持 #6/#8 原文；`/model` 落地后
+右侧面板模型弹层即点亮（前端已留好接缝）。
+
 ## v2 / 暂不做（登记免得丢）
 
 - **卡片自定义状态词**：`extensions.lunamoth` 允许卡片覆盖 life.state 的
-  展示词（石像的 resting 可以叫"风化"）。保留的状态文案只许事实陈述。
+  展示词（石像的 resting 可以叫"风化"）。引擎侧的【听着】这类姿态文案
+  已在前端全部删除，保留的状态文案只许事实陈述。
 - **作品 → 会话消息回溯**（Hermes Artifacts 的 session 列）：需要后端记录
   文件 ↔ 工具调用映射。
