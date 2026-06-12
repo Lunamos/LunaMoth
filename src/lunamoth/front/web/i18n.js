@@ -44,6 +44,7 @@ const I18N = {
   "st-arrived": ["· 你来了 ·", "· you are here ·"],
   "life-working": ["在做自己的事", "Working on its own"],
   "life-waiting": ["等你回复", "Waiting for you"],
+  "life-waiting-back": ["等你回复 · ~{n} 分钟后回去做自己的事", "Waiting for you · back to its own work in ~{n} min"],
   "life-resting-until": ["休息到 {time}", "Resting until {time}"],
   "life-backoff": ["自发循环退避", "Idle backoff"],
   "next-cycle-at": ["下一周期 ~{time}", "Next cycle ~{time}"],

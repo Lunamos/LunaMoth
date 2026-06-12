@@ -755,7 +755,8 @@ class ChatController {
     await this.runStream(() => this.client.send(text));
   }
 
-  /* ---- mood layer：状态即氛围（waiting 进度条 / working 流光 / resting 灯暗） ---- */
+  /* ---- mood layer v2：安静的在场 ----
+     状态由事实文字承载（分钟数逐分钟更新），视觉只做静态基色变化。 */
   onLifeState(life) {
     this.life = life || null;
     this.renderLifeState();
@@ -768,31 +769,27 @@ class ChatController {
     if (!life) return;
     if (this.client.streaming) {
       root.setAttribute("data-life", "working");
-      this.renderEngageBar(null);
       return;
     }
     root.setAttribute("data-life", lifeAttr(life));
-    this.setStatusWord(lifeText(life));
+    this.setStatusWord(this.lifeWord(life));
     const resting = life.state === "resting";
     $("composer-input").placeholder = resting
       ? t("composer-resting-ph")
       : t("composer-ph", { name: this.charName });
-    this.renderEngageBar(life.state === "waiting" ? life : null);
     if (isTechnical() && life.next_cycle_at) {
       const rowVal = $("p-next-cycle-val");
       if (rowVal) rowVal.textContent = t("next-cycle-at", { time: fmtClock(life.next_cycle_at) });
     }
   }
 
-  renderEngageBar(life) {
-    const bar = $("engage-bar");
-    if (!life || !life.engaged_until) { bar.hidden = true; return; }
-    const quiet = (this.snap && this.snap.quiet) || 300;
-    const left = life.engaged_until - Date.now() / 1000;
-    if (left <= 0) { bar.hidden = true; return; }
-    bar.hidden = false;
-    const pct = Math.max(0, Math.min(100, (left / quiet) * 100));
-    bar.firstElementChild.style.width = pct + "%";
+  /* 比 board 版 lifeText 多一层事实：等你回复时，说清还有约几分钟回去做自己的事。 */
+  lifeWord(life) {
+    if (life.state === "waiting" && life.engaged_until) {
+      const leftMin = Math.ceil((life.engaged_until - Date.now() / 1000) / 60);
+      if (leftMin >= 1) return t("life-waiting-back", { n: leftMin });
+    }
+    return lifeText(life);
   }
 
   async command(line, quiet) {

@@ -203,7 +203,7 @@ body.col-resizing *{cursor:col-resize !important}
 .avatar-s img{width:100%;height:100%;object-fit:contain;border-radius:inherit}
 .avatar-s[style*="--card-theme"]{background:linear-gradient(160deg, rgba(8,23,39,.85), var(--card-theme))}
 .avatar-btn{border:none;cursor:pointer;padding:0}
-.avatar-btn:hover{box-shadow:0 0 0 2px color-mix(in srgb, var(--chara-accent) 45%, transparent)}
+.avatar-btn:hover{box-shadow:0 0 0 2px color-mix(in srgb, var(--chara-accent) 28%, transparent)}
 .avatar-s .mini-dot{
   position:absolute; right:-2px; bottom:-2px; width:8px;height:8px;border-radius:50%;
   background:var(--green); border:1.5px solid var(--bg); animation:breathe 2.6s ease-in-out infinite; z-index:2;
@@ -363,18 +363,6 @@ body.dark .md-code{background:rgba(255,255,255,.08)}
 .work-status.tool::before{background:var(--amber)}
 .work-status.life::before{background:var(--green)}
 
-/* waiting 进度条：「条走完我就去做自己的事」 */
-.engage-bar{
-  max-width:640px; margin:0 auto 6px; height:2px; border-radius:99px;
-  background:color-mix(in srgb, var(--chara-accent) 14%, transparent); overflow:hidden;
-}
-.engage-bar[hidden]{display:none}
-.engage-bar i{
-  display:block; height:100%; width:100%; border-radius:99px;
-  background:color-mix(in srgb, var(--chara-accent) 70%, transparent);
-  transition:width 1s linear;
-}
-
 .composer{
   max-width:640px; margin:0 auto; display:flex; align-items:flex-end; gap:8px;
   background:var(--panel); border-radius:13px; padding:6px 8px 6px 14px;
@@ -393,41 +381,24 @@ body.dark .md-code{background:rgba(255,255,255,.08)}
 .composer .stop{background:rgba(20,40,60,.25)}
 .composer .stop:hover{background:var(--red)}
 
-/* ---------- mood layer：界面有情绪，极温和 ----------
-   第 1 层：--chara-accent 来自卡片 theme_color；
-   第 2 层：data-life 只做基色变换（color-mix / 透明度 / box-shadow）。 */
+/* ---------- mood layer v2：安静的在场 ----------
+   状态语义由 header 状态词的「事实文字」承载（等你回复 · ~N 分钟后回去做
+   自己的事 / 休息到 HH:MM）；视觉只做静态基色变化，不做动画。
+   仅存的动效 = 状态点呼吸与工具 spinner（它们陈述的是正在发生的活动）。
+   --chara-accent 来自卡片 theme_color，只作静态身份色。 */
 .chat-root[data-life="waiting"] .composer{
-  animation:lm-invite 4s ease-in-out infinite;
+  box-shadow:0 0 0 1px color-mix(in srgb, var(--chara-accent) 26%, var(--hairline)),0 2px 8px rgba(10,30,50,.06);
 }
-@keyframes lm-invite{
-  0%,100%{box-shadow:0 0 0 1px color-mix(in srgb, var(--chara-accent) 35%, var(--hairline)),0 2px 8px rgba(10,30,50,.06)}
-  50%{box-shadow:0 0 0 1px color-mix(in srgb, var(--chara-accent) 60%, transparent),0 2px 18px color-mix(in srgb, var(--chara-accent) 22%, transparent)}
-}
-/* working / idle_countdown 合并为同一 register：在做自己的事（流光，无倒计时） */
-.chat-root[data-life="working"] .composer::before{
-  content:""; position:absolute; inset:0 auto auto 0; height:2px; width:100%;
-  background:linear-gradient(90deg, transparent 12%,
-    color-mix(in srgb, var(--chara-accent) 55%, transparent) 50%, transparent 88%);
-  background-size:220% 100%;
-  animation:lm-flow 8s linear infinite;
-}
-@keyframes lm-flow{from{background-position:200% 0}to{background-position:-120% 0}}
-/* resting：灯暗了。输入永远不做 disabled 视觉 */
+/* working / idle_countdown 合并为同一 register：在做自己的事（状态词陈述，无特效） */
+/* resting：灯暗了——整体降饱和、不动。输入永远不做 disabled 视觉 */
 .chat-root[data-life="resting"] .chat-pages,
-.chat-root[data-life="resting"] .panel{filter:saturate(.82) brightness(.965)}
-.chat-root[data-life="resting"] .composer{
-  animation:lm-rest 7.5s ease-in-out infinite;
-}
-@keyframes lm-rest{
-  0%,100%{box-shadow:0 0 0 1px var(--hairline-2),0 2px 8px rgba(10,30,50,.04); opacity:.86}
-  50%{box-shadow:0 0 0 1px var(--hairline),0 2px 8px rgba(10,30,50,.06); opacity:1}
-}
+.chat-root[data-life="resting"] .panel{filter:saturate(.84) brightness(.97)}
+.chat-root[data-life="resting"] .composer{opacity:.93}
 .chat-root[data-life="backoff"] .composer{filter:saturate(.5)}
 .chat-root[data-life="backoff"] .work-status{color:var(--red)}
 .chat-root[data-life="backoff"] .work-status::before{background:var(--red); animation:none}
 @media (prefers-reduced-motion: reduce){
   .dot.live,.mini-dot,.spin,.think-head.streaming::before,.work-status::before,
-  .chat-root[data-life] .composer,.chat-root[data-life="working"] .composer::before,
   .transcribing i{animation:none !important}
 }
 
