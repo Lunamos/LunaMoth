@@ -319,6 +319,11 @@ class LLMClient:
         "break the work into several smaller tool calls (e.g. write the file in pieces).]"
     )
     INTERRUPT_MARK = "\n[cut off mid-reply by the operator's next message]"
+    # Empty-completion policy (audit #4, hermes conversation_loop ≤3 retries):
+    # a stream that ends with no text and no tool calls is an invisible
+    # non-answer; silently recording assistant {content: None} violates the
+    # "visible errors, no fabricated output" principle by the back door.
+    _EMPTY_RETRY_LIMIT = 3
 
     def stream_agent(
         self, user_text, context, stable, volatile, tools, execute,
@@ -350,8 +355,10 @@ class LLMClient:
         volatile_messages = self._system_messages(volatile)
         acc: list[str] = []  # text of the in-flight turn, readable by `finally`
         finished = False
+        empty_retries = 0
         try:
-            for step in range(max_steps):
+            step = 0
+            while step < max_steps:
                 acc.clear()
                 t0 = time.monotonic()
                 tool_calls, thinking_text, finish = yield from self._stream_turn(
@@ -367,6 +374,27 @@ class LLMClient:
                 )
                 if truncated:
                     _log.warning("response truncated by output limit (finish=length, tools=%d)", len(tool_calls))
+
+                if not text and not tool_calls and not truncated:
+                    # An empty completion: nothing said, nothing called. Retry
+                    # within a small budget (doesn't consume tool-loop steps);
+                    # then surface a VISIBLE error — never a silent empty turn.
+                    reasoning_only = bool(thinking_text)
+                    what = (
+                        "reasoning-only completion (thinking exhausted before a visible reply)"
+                        if reasoning_only else
+                        f"empty stream (no content, no tool calls, finish={finish or 'missing'})"
+                    )
+                    empty_retries += 1
+                    if empty_retries <= self._EMPTY_RETRY_LIMIT:
+                        _log.warning("%s — retry %d/%d (model=%s)", what, empty_retries, self._EMPTY_RETRY_LIMIT, self.cfg.model)
+                        yield Notice("retry", f"⚠ {what} — retry {empty_retries}/{self._EMPTY_RETRY_LIMIT}")
+                        continue
+                    finished = True  # there is no partial to commit; the error IS the outcome
+                    _log.error("%s after %d retries (model=%s)", what, self._EMPTY_RETRY_LIMIT, self.cfg.model)
+                    raise RuntimeError(f"model returned a {what} after {self._EMPTY_RETRY_LIMIT} retries")
+                empty_retries = 0
+                step += 1
 
                 # DeepSeek thinking mode requires reasoning_content echoed on
                 # replayed assistant tool-call messages; everyone else gets it
