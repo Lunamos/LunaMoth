@@ -14,6 +14,7 @@ the hub reports comes from the documented stable interfaces: session dirs,
 """
 from __future__ import annotations
 
+import base64
 import dataclasses
 import json
 import logging
@@ -549,6 +550,72 @@ def draft_card_from_inspiration(defaults: dict[str, str], inspiration: str, mode
 
 # ---- cards ---------------------------------------------------------------------
 
+_AVATAR_DRAFT_SYSTEM = """You design small decorative SVG avatars for a character card.
+Reply with STRICT JSON ONLY: one object, no markdown, no comments, no trailing prose:
+{"candidates": [{"avatar_svg": string, "theme_color": string}, ...]}
+
+Requirements:
+- exactly 3 candidates, each a clearly DIFFERENT visual idea for the same character.
+- theme_color: a hex color like "#5B9FD4"; honor a color the user asks for, otherwise vary it per candidate.
+- avatar_svg: a SMALL decorative SVG, viewBox "0 0 64 64", <=1500 chars, flat geometric shapes, no text elements,
+  no scripts, no event attributes, no external references, and using that candidate's theme color."""
+
+
+def _persona_summary_for_avatar(card_path: str) -> str:
+    try:
+        card = CharacterCard.load(Path(card_path))
+    except Exception as exc:  # noqa: BLE001
+        raise RpcError(-32035, f"unreadable card: {exc}") from exc
+    bits = [f"Name: {card.name}"]
+    if card.tags:
+        bits.append("Tags: " + ", ".join(str(t) for t in card.tags[:6]))
+    if card.description:
+        bits.append(card.description[:600])
+    return "\n".join(bits)
+
+
+def avatar_draft(defaults: dict[str, str], description: str = "", card_path: str = "",
+                 model: str = "") -> dict[str, Any]:
+    """Regenerate avatar candidates for an existing card (the deck's avatar editor).
+
+    Unsafe SVG candidates are dropped, never repaired; zero usable candidates
+    is a visible error, not a fallback image.
+    """
+    description = (description or "").strip()
+    if not description and not card_path:
+        raise RpcError(-32602, "card.avatar_draft needs a description or card_path")
+    parts: list[str] = []
+    if card_path:
+        parts.append("Character:\n" + _persona_summary_for_avatar(card_path))
+    if description:
+        parts.append("Requested direction:\n" + description)
+    raw = _complete(defaults, _AVATAR_DRAFT_SYSTEM, "\n\n".join(parts), model=model,
+                    max_tokens=4096, temperature=0.9, response_format={"type": "json_object"})
+    try:
+        obj = json.loads(raw.strip())
+    except json.JSONDecodeError as exc:
+        raise HubRpcError(-32050, f"the model did not return strict JSON ({exc.msg})",
+                          {"kind": "draft_json", "detail": str(exc)}) from exc
+    candidates = obj.get("candidates") if isinstance(obj, dict) else None
+    if not isinstance(candidates, list) or not candidates:
+        raise _invalid_draft("candidates must be a non-empty array")
+    kept: list[dict[str, str]] = []
+    notes: list[str] = []
+    for cand in candidates[:3]:
+        if not isinstance(cand, dict):
+            notes.append("candidate dropped: not an object")
+            continue
+        svg, note = _sanitize_avatar_svg(cand.get("avatar_svg"))
+        if not svg:
+            notes.append(note)
+            continue
+        kept.append({"avatar_svg": svg, "theme_color": _clean_theme_color(cand.get("theme_color"))})
+    if not kept:
+        raise HubRpcError(-32050, "the model returned no usable avatar candidates",
+                          {"kind": "draft_schema", "detail": "; ".join(notes) or "all candidates dropped"})
+    return {"candidates": kept, "notes": notes}
+
+
 def _card_sources() -> dict[str, list[str]]:
     """original card path -> session names that froze a copy of it."""
     refs: dict[str, list[str]] = {}
@@ -929,6 +996,129 @@ def superchat_unread(meta: S.SessionMeta) -> int:
     return sum(1 for sp in _transcript_speaks(meta, limit=1000) if float(sp.get("ts") or 0.0) > read_ts)
 
 
+# ---- messaging gateway config (masked secrets) -----------------------------------
+
+_SECRET_KEY_RE = re.compile(r"token|secret|key|password|aes", re.IGNORECASE)
+_SECRET_MASK = "••••••••"
+
+
+def _messaging_path(meta: S.SessionMeta) -> Path:
+    return meta.root / "messaging.json"
+
+
+def _read_messaging(meta: S.SessionMeta) -> dict[str, Any]:
+    try:
+        data = json.loads(_messaging_path(meta).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _mask_secrets(node: Any) -> Any:
+    if isinstance(node, dict):
+        return {
+            k: (_SECRET_MASK if _SECRET_KEY_RE.search(str(k)) and isinstance(v, str) and v
+                else _mask_secrets(v))
+            for k, v in node.items()
+        }
+    if isinstance(node, list):
+        return [_mask_secrets(v) for v in node]
+    return node
+
+
+def _unmask_secrets(node: Any, old: Any) -> Any:
+    """Replace mask placeholders with the previously saved secrets.
+
+    A mask with no stored original is a visible error — we never persist the
+    placeholder itself as a credential."""
+    if isinstance(node, dict):
+        out: dict[str, Any] = {}
+        for k, v in node.items():
+            old_v = old.get(k) if isinstance(old, dict) else None
+            if v == _SECRET_MASK:
+                if not isinstance(old_v, str) or not old_v:
+                    raise RpcError(-32602, f"masked value for '{k}' has no stored original")
+                out[k] = old_v
+            else:
+                out[k] = _unmask_secrets(v, old_v)
+        return out
+    if isinstance(node, list):
+        if _SECRET_MASK in node:
+            raise RpcError(-32602, "masked values inside arrays cannot be matched to stored originals")
+        return [_unmask_secrets(v, None) for v in node]
+    return node
+
+
+def messaging_get(meta: S.SessionMeta) -> dict[str, Any]:
+    return {"config": _mask_secrets(_read_messaging(meta)), "path": str(_messaging_path(meta))}
+
+
+def messaging_save(meta: S.SessionMeta, config: Any) -> dict[str, Any]:
+    if not isinstance(config, dict):
+        raise RpcError(-32602, "messaging.save expects config: {...}")
+    old = _read_messaging(meta)
+    merged = _unmask_secrets(config, old)
+    if "enabled" not in merged and "enabled" in old:
+        merged["enabled"] = old["enabled"]  # enabled is the gateway switch, not the form's to drop
+    path = _messaging_path(meta)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return {"config": _mask_secrets(merged), "path": str(path)}
+
+
+# ---- personal WeChat (iLink) QR login for the web gateway page --------------------
+
+def _weixin_config(meta: S.SessionMeta) -> dict[str, Any]:
+    adapters = _read_messaging(meta).get("adapters")
+    cfg = adapters.get("weixin") if isinstance(adapters, dict) else None
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def weixin_qr(meta: S.SessionMeta) -> dict[str, Any]:
+    from ..messaging.weixin import DEFAULT_BOT_TYPE, WeixinAPI, qr_fallback_url
+
+    cfg = _weixin_config(meta)
+    api = WeixinAPI(base_url=str(cfg.get("base_url") or ""))
+    bot_type = str(cfg.get("bot_type") or DEFAULT_BOT_TYPE)
+    try:
+        data = api.get_bot_qrcode(bot_type)
+    except Exception as exc:  # noqa: BLE001 - surface, never fabricate
+        raise RpcError(-32062, f"weixin qr fetch failed: {exc}") from exc
+    qrcode_value = str(data.get("qrcode") or "")
+    if not qrcode_value:
+        raise RpcError(-32062, f"weixin returned no qrcode: {data}")
+    return {"qrcode": qrcode_value,
+            "img": str(data.get("qrcode_img_content") or ""),
+            "fallback_url": qr_fallback_url(qrcode_value)}
+
+
+def weixin_qr_status(meta: S.SessionMeta, qrcode_value: str) -> dict[str, Any]:
+    """One poll of the QR login state; a confirmed login is persisted into the
+    session's weixin_state.json so the gateway starts already logged in."""
+    if not qrcode_value:
+        raise RpcError(-32602, "weixin.qr_status needs qrcode")
+    from ..messaging.weixin import WeixinAPI, save_login_state
+
+    cfg = _weixin_config(meta)
+    api = WeixinAPI(base_url=str(cfg.get("base_url") or ""))
+    try:
+        status = api.get_qrcode_status(qrcode_value, timeout_ms=5_000)
+    except Exception as exc:  # noqa: BLE001 - surface, never fabricate
+        raise RpcError(-32062, f"weixin qr status failed: {exc}") from exc
+    raw_status = str(status.get("status") or "wait")
+    out: dict[str, Any] = {"status": raw_status}
+    if raw_status == "confirmed":
+        try:
+            out["account_id"] = save_login_state(meta.root / "weixin_state.json", status, cfg)
+        except RuntimeError as exc:
+            raise RpcError(-32062, str(exc)) from exc
+    return out
+
+
 def _gateway_status_from_disk(meta: S.SessionMeta) -> dict[str, Any]:
     path = meta.root / "messaging.json"
     platform = ""
@@ -1138,6 +1328,48 @@ def list_works(meta: S.SessionMeta, limit: int = 200) -> list[dict[str, Any]]:
             })
     out.sort(key=lambda w: w["mtime"], reverse=True)
     return out[:limit]
+
+
+_WORK_READ_CAP = 512 * 1024
+_IMAGE_MIME = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+}
+_TEXT_READ_EXTS = {
+    ".md", ".txt", ".py", ".js", ".ts", ".sh", ".json", ".css", ".html", ".htm",
+    ".csv", ".yml", ".yaml", ".toml", ".log",
+}
+
+
+def read_work(meta: S.SessionMeta, rel: str) -> dict[str, Any]:
+    """In-app preview of one sandbox work (the deck's works page).
+
+    `rel` comes from works.list and must stay inside the sandbox's workspace/
+    or files/ trees — anything else is refused (no traversal). Over-cap files
+    return truncated so the UI can offer works.open instead.
+    """
+    if not rel:
+        raise RpcError(-32602, "works.read needs rel")
+    sandbox = meta.sandbox_dir.resolve()
+    target = (sandbox / rel).resolve()
+    allowed = (sandbox / "workspace", sandbox / "files")
+    if not any(base == target or base in target.parents for base in allowed):
+        raise RpcError(-32031, "works.read only serves files under workspace/ or files/")
+    if not target.is_file():
+        raise RpcError(-32035, f"no such work: {rel}")
+    size = target.stat().st_size
+    suffix = target.suffix.lower()
+    if suffix in _IMAGE_MIME:
+        if size > _WORK_READ_CAP:
+            return {"kind": "image", "size": size, "truncated": True}
+        data = base64.b64encode(target.read_bytes()).decode("ascii")
+        return {"kind": "image", "size": size, "truncated": False,
+                "data_uri": f"data:{_IMAGE_MIME[suffix]};base64,{data}"}
+    if suffix in _TEXT_READ_EXTS:
+        raw = target.read_bytes()
+        return {"kind": "text", "size": size, "truncated": len(raw) > _WORK_READ_CAP,
+                "content": raw[:_WORK_READ_CAP].decode("utf-8", errors="replace")}
+    return {"kind": "binary", "size": size, "truncated": size > _WORK_READ_CAP}
 
 
 def _book_to_dict(book: Any) -> dict[str, Any] | None:
@@ -1421,8 +1653,22 @@ class HubDispatcher:
             return chara_extras(self._meta(p))
         if method == "works.list":
             return list_works(self._meta(p))
+        if method == "works.read":
+            return read_work(self._meta(p), str(p.get("rel") or ""))
         if method == "works.open":
             return open_path(str(p.get("path") or ""), reveal=bool(p.get("reveal")))
+        if method == "messaging.get":
+            return messaging_get(self._meta(p))
+        if method == "messaging.save":
+            return messaging_save(self._meta(p), p.get("config"))
+        if method == "weixin.qr":
+            return weixin_qr(self._meta(p))
+        if method == "weixin.qr_status":
+            return weixin_qr_status(self._meta(p), str(p.get("qrcode") or ""))
+        if method == "card.avatar_draft":
+            return avatar_draft(load_defaults(), description=str(p.get("description") or ""),
+                                card_path=str(p.get("card_path") or p.get("path") or ""),
+                                model=str(p.get("model") or ""))
         if method == "cards.list":
             return list_cards()
         if method == "card.read":

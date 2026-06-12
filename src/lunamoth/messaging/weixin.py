@@ -81,6 +81,30 @@ def default_state_path() -> Path:
     return Path("weixin_state.json").resolve()
 
 
+def save_login_state(
+    state_path: "str | Path",
+    status: dict[str, Any],
+    config: dict[str, Any] | None = None,
+) -> str:
+    """Persist a confirmed QR login (e.g. driven from the desktop hub) so the
+    gateway starts already logged in. Mirrors the confirmed branch of
+    WeixinAdapter._login; returns the account id."""
+    token = _str_field(status, "bot_token")
+    if not token:
+        raise RuntimeError("WeChat iLink login confirmed but returned no bot_token")
+    adapter = WeixinAdapter(dict(config or {}), state_path=state_path)
+    adapter.token = token
+    adapter.ilink_bot_id = _str_field(status, "ilink_bot_id")
+    adapter.ilink_user_id = _str_field(status, "ilink_user_id")
+    adapter.account_id = adapter.ilink_bot_id or adapter.ilink_user_id
+    base = _str_field(status, "baseurl")
+    if base:
+        adapter.base_url = _normalize_base_url(base)
+    adapter.needs_relogin = False
+    adapter._save_state()
+    return adapter.account_id
+
+
 def qr_fallback_url(qrcode_value: str) -> str:
     qs = urllib.parse.urlencode({"size": "320x320", "data": qrcode_value})
     return f"https://api.qrserver.com/v1/create-qr-code/?{qs}"
