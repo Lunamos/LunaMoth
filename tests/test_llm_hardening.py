@@ -127,6 +127,96 @@ def _patch_stream(monkeypatch, chunks):
     monkeypatch.setattr(LLMClient, "_connect_with_retry", fake_connect)
 
 
+# ---- audit #7: lone-surrogate sanitization ----------------------------------------------
+
+
+def test_scrub_surrogates():
+    from lunamoth.core.llm import _scrub_surrogates
+
+    assert _scrub_surrogates("a\ud800b\udfffc") == "a�b�c"
+    clean = "嗨 😀 plain"
+    assert _scrub_surrogates(clean) is clean  # fast no-op path
+
+
+def test_joiner_preserves_split_astral_pairs():
+    from lunamoth.core.llm import _SurrogateJoiner
+
+    j = _SurrogateJoiner()
+    assert j.feed("ok\ud83d") == "ok"          # high surrogate held back
+    assert j.feed("\ude00!") == "😀!"          # rejoined into the real emoji
+    assert j.flush() == ""
+
+
+def test_joiner_scrubs_true_lone_surrogates():
+    from lunamoth.core.llm import _SurrogateJoiner
+
+    j = _SurrogateJoiner()
+    assert j.feed("bad\ud800") == "bad"
+    assert j.feed("x") == "�x"            # high not followed by a low → scrubbed
+    assert j.feed("\ude00y") == "�y"      # naked low surrogate → scrubbed
+    assert j.feed("end\udbff") == "end"
+    assert j.flush() == "�"               # stream ended on a held char
+
+
+def test_stream_text_and_reasoning_are_surrogate_free(monkeypatch):
+    from lunamoth.protocol import TextDelta, ThinkDelta
+
+    _patch_stream(monkeypatch, [
+        {"choices": [{"delta": {"reasoning_content": "hm\ud800"}}]},
+        {"choices": [{"delta": {"reasoning_content": "m"}}]},
+        {"choices": [{"delta": {"content": "ok\ud83d"}}]},   # emoji split across deltas
+        {"choices": [{"delta": {"content": "\ude00!"}}]},
+        {"choices": [{"finish_reason": "stop", "delta": {}}]},
+    ])
+    out: list = []
+    events, (_tools, think, _finish) = _drive(_client()._stream_turn([], None, out))
+    text = "".join(out)
+    assert text == "ok😀!"                      # split pair came out whole
+    assert think == "hm�m"                 # lone surrogate scrubbed from reasoning
+    for e in events:
+        if isinstance(e, (TextDelta, ThinkDelta)):
+            # The exact crash the audit names: ensure_ascii=False json.dumps
+            # on the live event path must never see a lone surrogate.
+            json.dumps(e.text, ensure_ascii=False).encode("utf-8")
+
+
+def test_stream_ending_on_held_surrogate_flushes_scrubbed(monkeypatch):
+    _patch_stream(monkeypatch, [
+        {"choices": [{"delta": {"content": "end\ud83d"}}]},
+        {"choices": [{"finish_reason": "stop", "delta": {}}]},
+    ])
+    out: list = []
+    _drive(_client()._stream_turn([], None, out))
+    assert "".join(out) == "end�"
+
+
+def test_tool_args_surrogates_scrubbed(monkeypatch):
+    _patch_stream(monkeypatch, [
+        {"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "id": "c1", "function": {"name": "speak", "arguments": '{"text": "hi\ud800"}'}},
+        ]}}]},
+        {"choices": [{"finish_reason": "tool_calls", "delta": {}}]},
+    ])
+    _events, (tool_calls, _think, _finish) = _drive(_client()._stream_turn([], None, []))
+    args = tool_calls[0]["function"]["arguments"]
+    json.dumps(args, ensure_ascii=False).encode("utf-8")  # must not raise
+    assert json.loads(args) == {"text": "hi�"}
+
+
+def test_plain_stream_path_is_surrogate_free(monkeypatch):
+    from lunamoth.protocol import TextDelta
+
+    _patch_stream(monkeypatch, [
+        {"choices": [{"delta": {"content": "a\ud800"}}]},
+        {"choices": [{"delta": {"content": "b"}}]},
+    ])
+    events = list(_client()._openai_compatible_stream("hi", [], ["sys"], []))
+    text = "".join(e.text for e in events if isinstance(e, TextDelta))
+    assert text == "a�b"
+    for e in events:
+        json.dumps(e.text, ensure_ascii=False).encode("utf-8")
+
+
 def test_stream_end_args_repair(monkeypatch):
     _patch_stream(monkeypatch, [
         {"choices": [{"delta": {"tool_calls": [

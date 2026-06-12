@@ -34,6 +34,62 @@ _REASONING_PREFIXES = (
 )
 
 
+# ---- lone-surrogate sanitization (audit #7, hermes message_sanitization) ---------------
+# Lone surrogate code points (U+D800–DFFF) are invalid outside UTF-16 pairs.
+# Byte-level models (Ollama Kimi/GLM/Qwen — the hermes scar) emit them as
+# unpaired \udXXX JSON escapes; json.loads happily materializes them, and any
+# later ensure_ascii=False json.dumps (the protocol codec, messaging adapters)
+# raises UnicodeEncodeError at .encode("utf-8"). Scrub to U+FFFD before model
+# text/reasoning/args enter the context or the live event stream.
+_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
+_SURROGATE_PAIR_RE = re.compile(r"[\ud800-\udbff][\udc00-\udfff]")
+
+
+def _combine_pair(m: "re.Match[str]") -> str:
+    s = m.group(0)
+    return chr(0x10000 + ((ord(s[0]) - 0xD800) << 10) + (ord(s[1]) - 0xDC00))
+
+
+def _scrub_surrogates(text: str) -> str:
+    """Replace lone surrogates with U+FFFD; fast no-op when there are none.
+
+    Adjacent high+low surrogates are first recombined into the real astral
+    char: json.loads combines a \\uD83D\\uDE00 escape pair inside ONE delta,
+    but halves rejoined across delta boundaries (_SurrogateJoiner) arrive as
+    two raw code points that Python never auto-combines."""
+    if not _SURROGATE_RE.search(text):
+        return text
+    text = _SURROGATE_PAIR_RE.sub(_combine_pair, text)
+    return _SURROGATE_RE.sub("�", text)
+
+
+class _SurrogateJoiner:
+    """Per-delta surrogate scrubbing that does NOT destroy real astral chars.
+
+    Providers can split one emoji's \\ud83d\\ude00 escape pair across two SSE
+    deltas; scrubbing each delta alone would turn that legal pair into two
+    U+FFFD. So a trailing HIGH surrogate is held back and rejoined with the
+    next chunk — everything emitted is surrogate-free (safe for the
+    ensure_ascii=False codec on the live event path) while split pairs come
+    out whole. flush() releases a dangling held char at stream end.
+    """
+
+    def __init__(self) -> None:
+        self._held = ""
+
+    def feed(self, text: str) -> str:
+        text = self._held + text
+        self._held = ""
+        if text and "\ud800" <= text[-1] <= "\udbff":
+            self._held = text[-1]
+            text = text[:-1]
+        return _scrub_surrogates(text)
+
+    def flush(self) -> str:
+        held, self._held = self._held, ""
+        return _scrub_surrogates(held)
+
+
 # ---- tool-call argument repair (audit #2, hermes message_sanitization) -----------------
 # Local/aggregated models (GLM via Ollama, hermes #12068) emit truncated JSON,
 # trailing commas, Python None, literal control chars. Before this, a parse
@@ -593,6 +649,8 @@ class LLMClient:
         }, override=reasoning)
         data = json.dumps(body).encode("utf-8")
         flow = ""  # "" | "think" | "speech" — for newline transitions around thinking
+        # Lone-surrogate scrub (audit #7); joiners keep split astral pairs whole.
+        speech_join, think_join = _SurrogateJoiner(), _SurrogateJoiner()
         resp = yield from self._connect_with_retry(url, data, timeout=90)
         guard = _StallGuard(resp, stall_timeout=_stall_timeout_for(len(data)))
         try:
@@ -609,10 +667,13 @@ class LLMClient:
                         payload = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    delta = payload.get("choices", [{}])[0].get("delta", {})
+                    choices = payload.get("choices") or [{}]
+                    delta = choices[0].get("delta", {})
                     thinking = delta.get("reasoning_content") or delta.get("reasoning")
                     if thinking:
                         guard.mark_payload()
+                        thinking = think_join.feed(thinking)
+                    if thinking:
                         # Reasoning travels as ThinkDelta; the flow-transition
                         # newlines ride in the same event type so a frontend
                         # that hides thinking leaks nothing.
@@ -624,6 +685,8 @@ class LLMClient:
                     chunk = delta.get("content")
                     if chunk:
                         guard.mark_payload()
+                        chunk = speech_join.feed(chunk)
+                    if chunk:
                         if flow == "think":
                             yield ThinkDelta("\n")
                         flow = "speech"
@@ -632,6 +695,12 @@ class LLMClient:
             _log.error("%s (model=%s)", e, self.cfg.model)
             yield Notice("stall", f"⚠ {e}")
             raise RuntimeError(str(e)) from None
+        leftover = think_join.flush()
+        if leftover:
+            yield ThinkDelta(leftover)
+        leftover = speech_join.flush()
+        if leftover:
+            yield TextDelta(leftover, channel)
 
     # ---- native function-calling agent loop ---------------------------------------
 
@@ -817,6 +886,9 @@ class LLMClient:
         reasoning_parts: list[str] = []
         finish_reason = ""
         flow = ""  # "" | "think" | "speech" — for newline transitions around thinking
+        # Lone-surrogate scrub (audit #7) on everything emitted/accumulated;
+        # joiners keep astral pairs split across deltas whole.
+        speech_join, think_join = _SurrogateJoiner(), _SurrogateJoiner()
         resp = yield from self._connect_with_retry(f"{self.cfg.base_url}/chat/completions", data, timeout=120)
         guard = _StallGuard(resp, stall_timeout=_stall_timeout_for(len(data)))
         try:
@@ -844,6 +916,8 @@ class LLMClient:
                     thinking = delta.get("reasoning_content") or delta.get("reasoning")
                     if thinking:
                         guard.mark_payload()
+                        thinking = think_join.feed(thinking)
+                    if thinking:
                         reasoning_parts.append(thinking)
                         # ThinkDelta: hidden by default behind the "✶ thinking…"
                         # indicator; /thinking on reveals it dimmed. The flow
@@ -857,6 +931,8 @@ class LLMClient:
                     chunk = delta.get("content")
                     if chunk:
                         guard.mark_payload()
+                        chunk = speech_join.feed(chunk)
+                    if chunk:
                         if flow == "think":
                             yield ThinkDelta("\n")
                         flow = "speech"
@@ -877,6 +953,16 @@ class LLMClient:
             _log.error("%s (model=%s)", e, self.cfg.model)
             yield Notice("stall", f"⚠ {e}")
             raise RuntimeError(str(e)) from None
+        # A stream ending on a held-back high surrogate: release it scrubbed so
+        # nothing un-sanitized is lost from the accumulated turn.
+        leftover = think_join.flush()
+        if leftover:
+            reasoning_parts.append(leftover)
+            yield ThinkDelta(leftover)
+        leftover = speech_join.flush()
+        if leftover:
+            text_out.append(leftover)
+            yield TextDelta(leftover, channel)
         tool_calls: list[dict[str, Any]] = []
         for idx in sorted(acc):
             s = acc[idx]
@@ -884,10 +970,13 @@ class LLMClient:
                 tool_calls.append({
                     "id": s["id"] or f"call_{idx}",
                     "type": "function",
-                    # Repair at stream end (audit #2): trailing commas, unclosed
-                    # braces, raw control chars — fixable args must not become a
-                    # missing-args error, and only repaired args enter history.
-                    "function": {"name": s["name"], "arguments": _repair_tool_args(s["args"], s["name"])},
+                    # Scrub surrogates (audit #7 — args are replayed into later
+                    # requests and json.dumps'd by adapters), then repair at
+                    # stream end (audit #2): trailing commas, unclosed braces,
+                    # raw control chars — fixable args must not become a
+                    # missing-args error, and only clean args enter history.
+                    "function": {"name": s["name"],
+                                 "arguments": _repair_tool_args(_scrub_surrogates(s["args"]), s["name"])},
                 })
         return tool_calls, "".join(reasoning_parts), finish_reason
 
