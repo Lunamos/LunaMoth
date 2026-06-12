@@ -131,7 +131,8 @@ const GW_PLATFORMS = {
   },
 };
 
-async function openGatewayModal(name) {
+async function openGatewayModal(name, displayName) {
+  const shown = displayName || ((state.chat && state.chat.name === name) ? state.chat.charName : name);
   let cfg = null;          // messaging.get result (null = backend RPC missing)
   let backendMissing = false;
   try {
@@ -189,7 +190,7 @@ async function openGatewayModal(name) {
     root.innerHTML = "";
     for (const k of Object.keys(inputs)) delete inputs[k];
     const spec = GW_PLATFORMS[plat];
-    root.appendChild(el("h2", null, t("gw-title", { name })));
+    root.appendChild(el("h2", null, t("gw-title", { name: shown })));
     root.appendChild(el("div", { class: "sub" }, t("gw-sub")));
     root.appendChild(el("div", { class: "gw-plats" },
       ...platKeys.map((k) => el("button", { class: k === plat ? "on" : "", onclick: () => { plat = k; render(); } },

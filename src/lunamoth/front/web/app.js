@@ -39,7 +39,7 @@ function timeAgo(ts) {
 }
 
 function fmtClock(epoch) {
-  return new Date(epoch * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(epoch * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 function fmtSize(bytes) {
