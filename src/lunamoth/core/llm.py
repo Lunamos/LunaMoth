@@ -748,6 +748,16 @@ class LLMClient:
         "break the work into several smaller tool calls (e.g. write the file in pieces).]"
     )
     INTERRUPT_MARK = "\n[cut off mid-reply by the operator's next message]"
+    # Step-budget exhaustion (audit #9, hermes turn_finalizer._handle_max_iterations):
+    # a turn the loop limit cuts mid-work must say so — to the UI AND in
+    # context — or the next turn treats the stop as completion ("started
+    # working, then mysteriously gave up", the same bug family as silent
+    # truncation).
+    _MAX_STEPS_NOTE = (
+        "[System: this turn's tool-step budget ({steps} steps) ran out before the work was "
+        "finished. Nothing failed — the loop was stopped. Pick the unfinished work back up "
+        "next turn instead of restarting it.]"
+    )
     # Empty-completion policy (audit #4, hermes conversation_loop ≤3 retries):
     # a stream that ends with no text and no tool calls is an invisible
     # non-answer; silently recording assistant {content: None} violates the
@@ -885,7 +895,16 @@ class LLMClient:
 
                 finished = True
                 return
-            finished = True  # step budget exhausted; everything so far is recorded
+            # Step budget exhausted mid-work (audit #9): NEVER a silent stop.
+            # The UI gets a Notice; the durable context gets an explicit marker
+            # so the next turn knows the loop was cut, not completed. Everything
+            # up to here is already recorded.
+            _log.warning("step budget exhausted (%d steps, model=%s) — turn stopped mid-work",
+                         max_steps, self.cfg.model)
+            note = {"role": "system", "content": self._MAX_STEPS_NOTE.format(steps=max_steps)}
+            record(note)
+            yield Notice("budget", f"⚠ step budget exhausted ({max_steps} tool steps) — stopping here; the work is unfinished")
+            finished = True
         finally:
             if not finished:
                 partial = "".join(acc).strip()

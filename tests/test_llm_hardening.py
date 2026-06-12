@@ -267,3 +267,54 @@ def test_mark_usage_stale():
     c.mark_usage_stale()
     assert not c.usage_fresh
     assert c.last_prompt_tokens == 50  # numbers stay readable for diagnostics
+
+
+# ---- audit #9: step-budget exhaustion is announced ---------------------------------------
+
+
+def _endless_tool_turns(monkeypatch):
+    """Every fake turn calls a tool — the loop can only stop on max_steps."""
+    def fake_stream_turn(self, messages, tools, text_out, reasoning=None, channel="say"):
+        return ([{"id": "c", "type": "function",
+                  "function": {"name": "terminal", "arguments": "{}"}}], "", "tool_calls")
+        yield  # pragma: no cover — generator for `yield from`
+
+    monkeypatch.setattr(LLMClient, "_stream_turn", fake_stream_turn)
+
+
+def test_step_budget_exhaustion_yields_notice_and_context_marker(monkeypatch):
+    from lunamoth.protocol import Notice
+
+    _endless_tool_turns(monkeypatch)
+    recorded: list = []
+    events = list(_client().stream_agent(
+        "go", [], ["sys"], [], tools=[{"type": "function"}],
+        execute=lambda tc: {"display": "", "content": "ok", "ok": True},
+        record=recorded.append, max_steps=2,
+    ))
+    budget = [e for e in events if isinstance(e, Notice) and e.kind == "budget"]
+    assert len(budget) == 1 and "2 tool steps" in budget[0].text
+    # The durable context carries an explicit marker as the last message, so
+    # the next turn knows the loop was cut, not completed.
+    assert recorded[-1]["role"] == "system"
+    assert "tool-step budget (2 steps)" in recorded[-1]["content"]
+    # Exactly max_steps tool rounds ran before the stop.
+    assert sum(1 for m in recorded if m.get("tool_calls")) == 2
+
+
+def test_completed_turn_emits_no_budget_notice(monkeypatch):
+    from lunamoth.protocol import Notice
+
+    def one_turn(self, messages, tools, text_out, reasoning=None, channel="say"):
+        text_out.append("done.")
+        return ([], "", "stop")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(LLMClient, "_stream_turn", one_turn)
+    recorded: list = []
+    events = list(_client().stream_agent(
+        "go", [], ["sys"], [], tools=None, execute=lambda tc: {},
+        record=recorded.append, max_steps=2,
+    ))
+    assert not any(isinstance(e, Notice) and e.kind == "budget" for e in events)
+    assert all("tool-step budget" not in str(m.get("content")) for m in recorded)
