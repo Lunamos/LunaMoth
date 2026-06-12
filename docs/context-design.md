@@ -1,6 +1,6 @@
 # Context design — three-zone prompt, card-first world info, compaction finish
 
-This task implements the prompt/context requirements tracked in `docs/tasks/T1-context-design.md`.
+The prompt/context requirements and their implementation status (all shipped).
 
 ## 1. Three-zone API shape
 

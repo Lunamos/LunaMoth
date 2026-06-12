@@ -1,4 +1,4 @@
-"""Dependency direction is enforced, not aspirational (docs/refactor-plan.md §3.2).
+"""Dependency direction is enforced, not aspirational (CLAUDE.md module map).
 
 Violations here mean a layer boundary broke:
   - nothing outside front/ may import front/ or any UI library (textual/rich)
