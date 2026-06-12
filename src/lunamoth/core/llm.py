@@ -208,6 +208,52 @@ def _preflight_history_tool_calls(msg: dict) -> dict:
     return {**msg, "tool_calls": fixed}
 
 
+# ---- jittered retry backoff (audit #5, hermes retry_utils) ------------------------------
+# A flat 5s×5 burned the whole retry budget inside a single 60s provider rate
+# window. Exponential + jitter spreads the five attempts over ~2.5 minutes and
+# decorrelates concurrent charas retrying against the same provider. The retry
+# COUNT and the no-fallback policy are untouched: after the budget, the error
+# is VISIBLE — never papered over.
+_RETRY_BASE_DELAY = 5.0
+_RETRY_MAX_DELAY = 120.0
+_RETRY_JITTER_RATIO = 0.5
+
+
+def _retry_delay(attempt: int, retry_after: "float | None" = None) -> float:
+    """min(base·2^(n−1), 120) + U(0, 0.5·delay), hermes jittered_backoff.
+
+    A provider-sent Retry-After wins outright — it is the provider's own
+    schedule, no jitter needed — but is capped at the same 120s so a hostile
+    header can't wedge an unattended cycle."""
+    if retry_after is not None and retry_after > 0:
+        return min(retry_after, _RETRY_MAX_DELAY)
+    delay = min(_RETRY_BASE_DELAY * (2 ** max(0, attempt - 1)), _RETRY_MAX_DELAY)
+    return delay + random.uniform(0.0, _RETRY_JITTER_RATIO * delay)
+
+
+def _parse_retry_after(headers) -> "float | None":
+    """Retry-After from a 429: delta-seconds or an HTTP-date. None when absent
+    or unparseable — the jittered backoff is then the schedule."""
+    if headers is None:
+        return None
+    try:
+        value = headers.get("Retry-After")
+    except Exception:
+        return None
+    if not value:
+        return None
+    s = str(value).strip()
+    try:
+        return max(0.0, float(s))
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+        return max(0.0, parsedate_to_datetime(s).timestamp() - time.time())
+    except Exception:
+        return None
+
+
 # ---- stream stall watchdog (audit #1, hermes chat_completion_helpers) ------------------
 # SSE keep-alives defeat socket read timeouts: the socket sees traffic while no
 # real chunk arrives. So the watchdog is a PAYLOAD-level wall clock — only
@@ -368,12 +414,13 @@ class LLMClient:
     # failed request; there is NO fabricated fallback output anywhere.
     _RETRYABLE_HTTP = {408, 429, 500, 502, 503, 504, 520, 522, 524}
     _RETRY_LIMIT = 5
-    _RETRY_DELAY = 5.0
 
     def _connect_with_retry(self, url: str, data: bytes, timeout: float):
-        """Open the streaming request, Claude-Code style on failure: a flat 5s
-        pause, up to 5 retries, then stop and surface the error. Yields dim
-        retry notices to the UI; returns the open response. Only the connection
+        """Open the streaming request. On transient failure: jittered
+        exponential backoff (audit #5) — min(5·2^(n−1), 120)s + U(0, 0.5·delay)
+        — up to 5 retries, then stop and surface the error; a 429's Retry-After
+        header, when present, replaces the computed delay. Yields dim retry
+        notices to the UI; returns the open response. Only the connection
         phase retries — a stream that dies mid-flight surfaces immediately (the
         interrupt-commit machinery already preserves partials)."""
         import urllib.error
@@ -381,6 +428,7 @@ class LLMClient:
 
         attempt = 0
         while True:
+            retry_after = None
             req = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
             try:
                 return urllib.request.urlopen(req, timeout=timeout)
@@ -389,6 +437,8 @@ class LLMClient:
                 if e.code not in self._RETRYABLE_HTTP:
                     _log.info("permanent HTTP error from %s: %s %s", url, e.code, detail[:200])
                     raise RuntimeError(f"HTTP {e.code}: {detail}") from e
+                if e.code == 429:
+                    retry_after = _parse_retry_after(getattr(e, "headers", None))
                 err = f"HTTP {e.code}: {detail[:120]}"
             except urllib.error.URLError as e:
                 err = f"connection failed: {e.reason}"
@@ -398,9 +448,10 @@ class LLMClient:
             if attempt > self._RETRY_LIMIT:
                 _log.error("gave up after %d retries: %s", self._RETRY_LIMIT, err)
                 raise RuntimeError(f"{err} — gave up after {self._RETRY_LIMIT} retries")
-            _log.warning("connect retry %d/%d: %s", attempt, self._RETRY_LIMIT, err)
-            yield Notice("retry", f"⚠ {err} — retry {attempt}/{self._RETRY_LIMIT} in {int(self._RETRY_DELAY)}s")
-            time.sleep(self._RETRY_DELAY)
+            delay = _retry_delay(attempt, retry_after)
+            _log.warning("connect retry %d/%d in %.1fs: %s", attempt, self._RETRY_LIMIT, delay, err)
+            yield Notice("retry", f"⚠ {err} — retry {attempt}/{self._RETRY_LIMIT} in {delay:.0f}s")
+            time.sleep(delay)
 
     def raw_complete(self, messages: list[dict[str, Any]], max_tokens: int = 1024, timeout: float = 60.0) -> str:
         """One-off NON-streaming completion for engine-internal use (context
