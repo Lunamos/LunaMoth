@@ -450,14 +450,28 @@ class CharaChild:
         return {}
 
     async def forward_client_frame(self, raw: str) -> None:
-        await self.ensure_started()
-        proc = self.proc
-        if proc is None or proc.stdin is None:
-            raise RuntimeError("chara child is not running")
         try:
             req = json.loads(raw)
         except json.JSONDecodeError:
             req = None
+        if isinstance(req, dict) and req.get("method") == "detach":
+            # A client leaving the room must not kill the resident. On the
+            # child's stdio transport `detach` means "transport over, exit"
+            # (the direct `serve --stdio` contract) — under the supervisor the
+            # child's lifecycle is OURS, so translate the leave into a
+            # presence fact and answer the client ourselves.
+            with contextlib.suppress(Exception):
+                if self._attached:
+                    await self.private_call("presence.set", {"present": False}, timeout=10.0)
+            rid = req.get("id")
+            driver = self.driver_slot.current
+            if rid is not None and driver is not None:
+                await driver.send({"jsonrpc": "2.0", "id": rid, "result": {"ok": True, "resident": True}})
+            return
+        await self.ensure_started()
+        proc = self.proc
+        if proc is None or proc.stdin is None:
+            raise RuntimeError("chara child is not running")
         if isinstance(req, dict):
             method = req.get("method")
             rid = req.get("id")
