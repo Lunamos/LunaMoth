@@ -125,6 +125,23 @@ shadow（用户卡覆盖同名内置卡）作为特性但在 entry 上标注 `sh
 #6、#8 仍未落地，owner 已直接催。契约维持 #6/#8 原文；`/model` 落地后
 右侧面板模型弹层即点亮（前端已留好接缝）。
 
+## 13. gateway.status 增加 state 枚举（学 Hermes 的三 chip tone）
+
+现状 `gateway.status {name}` 只有 running/stopped。Hermes 的连接器页用
+`state: connected|connecting|fatal|startup_failed|pending_restart` 派生
+chip 颜色与"指名修法"的错误文案。建议：supervisor 的 gateway 监督已知
+重试/崩溃状态，把它透出为 `state` + `error_message`；前端 chip 即可从
+"运行中/已停止"升级为可诊断的三色。
+
+## 14. auxiliary models（per-task 辅助模型，Hermes model-settings 同款）
+
+LunaMoth 已有三个天然辅助任务：compaction 摘要、cards.draft 卡片转写、
+card.avatar_draft 头像生成（后两者 RPC 已接受 model 参数！）。缺一个
+持久化的 per-task 默认（desktop.json `aux_models: {transcribe?, avatar?,
+compact?}`）+ defaults RPC 透出，设置·模型 即可渲染 Hermes 式
+"auto · use main model + Change" 行。compaction 的模型选择需要 core 侧
+接线，优先级最低。
+
 ## v2 / 暂不做（登记免得丢）
 
 - **卡片自定义状态词**：`extensions.lunamoth` 允许卡片覆盖 life.state 的
