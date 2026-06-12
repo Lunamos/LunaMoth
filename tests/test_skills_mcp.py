@@ -221,3 +221,22 @@ def test_unconfigured_mcp_tool_is_denied(agent):
     a = agent()
     out = a.tools.call("mcp__ghost__anything", text="x")
     assert not out["ok"] and "denied" in out["error"]
+
+
+def test_mcp_server_stderr_lands_in_the_shared_log(tmp_path, monkeypatch):
+    """A crashing server must leave diagnostics (audit #20): stderr goes to
+    sandbox/logs/mcp-stderr.log with a per-spawn header, never DEVNULL."""
+    import lunamoth.tools.mcp as M
+
+    monkeypatch.setattr(M, "SANDBOX_ROOT", tmp_path)
+    client = M._Client("whiny", {
+        "command": "/bin/sh",
+        "args": ["-c", "echo BOOM-DIAGNOSTIC >&2; exit 3"],
+    })
+    try:
+        client.list_tools()
+    except M.McpError:
+        pass  # the crash itself is expected — we're after the diagnostics
+    log = (tmp_path / "logs" / "mcp-stderr.log").read_text(encoding="utf-8")
+    assert "--- whiny (/bin/sh)" in log
+    assert "BOOM-DIAGNOSTIC" in log

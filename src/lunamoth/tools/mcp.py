@@ -32,7 +32,7 @@ import time
 from pathlib import Path
 from typing import Any, NoReturn
 
-from ..config import ROOT
+from ..config import ROOT, SANDBOX_ROOT
 from ..obs import get_logger
 
 _log = get_logger("mcp")
@@ -104,15 +104,32 @@ class _Client:
             raise McpError(f"mcp server {self.name!r}: no command configured")
         argv = [str(command)] + [str(a) for a in self.config.get("args", [])]
         restarted = self.proc is not None
+        # Server stderr goes to a shared log, not DEVNULL: a crashing server
+        # must leave diagnostics (hermes scar — the SDK default leaked stderr
+        # into the live TUI; a file with per-spawn headers is the right slice).
+        stderr_target = subprocess.DEVNULL
+        log_handle = None
+        try:
+            log_path = SANDBOX_ROOT / "logs" / "mcp-stderr.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_handle = log_path.open("ab")
+            log_handle.write(f"\n--- {self.name} ({argv[0]}) {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n".encode())
+            log_handle.flush()
+            stderr_target = log_handle
+        except OSError:
+            _log.debug("mcp stderr log unavailable; using DEVNULL", exc_info=True)
         try:
             self.proc = subprocess.Popen(
                 argv,
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr_target,
                 env=_safe_env(self.config.get("env")), text=True, bufsize=1,
             )
         except OSError as e:
             _log.error("server %r failed to start (%s): %s", self.name, argv[0], e)
             raise McpError(f"mcp server {self.name!r} failed to start: {e}") from e
+        finally:
+            if log_handle is not None:
+                log_handle.close()  # the child holds its own duplicate
         _log.info("server %r %s (pid %d)", self.name, "restarted" if restarted else "started", self.proc.pid)
         self._tools = None
         # Dedicated reader thread per spawn: stdout lines flow into a queue so
