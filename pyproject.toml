@@ -21,6 +21,7 @@ server = ["websockets>=12"]
 messaging = [
     "cryptography>=42",
     "qrcode>=8",
+    "websockets>=12",
 ]
 
 [tool.setuptools.packages.find]

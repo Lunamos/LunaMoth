@@ -181,6 +181,7 @@ dev = [
 messaging = [
     { name = "cryptography" },
     { name = "qrcode" },
+    { name = "websockets" },
 ]
 server = [
     { name = "websockets" },
@@ -192,6 +193,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "qrcode", marker = "extra == 'messaging'", specifier = ">=8" },
     { name = "textual", specifier = ">=6.0,<7" },
+    { name = "websockets", marker = "extra == 'messaging'", specifier = ">=12" },
     { name = "websockets", marker = "extra == 'server'", specifier = ">=12" },
 ]
 provides-extras = ["dev", "server", "messaging"]

@@ -410,3 +410,149 @@ def test_weixin_session_timeout_marks_relogin_and_surfaces(tmp_path):
 
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert state["needs_relogin"] is True
+
+
+def test_qq_parse_private_text_segments():
+    from lunamoth.messaging.qq import parse_onebot_event
+
+    raw = json.dumps(
+        {
+            "post_type": "message",
+            "message_type": "private",
+            "user_id": 123456,
+            "sender": {"nickname": "Alice"},
+            "message": [
+                {"type": "text", "data": {"text": "hello"}},
+                {"type": "image", "data": {"file": "ignored.jpg"}},
+                {"type": "text", "data": {"text": " world"}},
+            ],
+        }
+    )
+
+    msg = parse_onebot_event(raw)
+
+    assert msg is not None
+    assert msg.sender_id == "123456"
+    assert msg.sender_name == "Alice"
+    assert msg.text == "hello world"
+
+
+def test_qq_ignores_group_messages_for_v1():
+    from lunamoth.messaging.qq import parse_onebot_event
+
+    raw = json.dumps(
+        {
+            "post_type": "message",
+            "message_type": "group",
+            "group_id": 42,
+            "user_id": 123456,
+            "message": [{"type": "text", "data": {"text": "hello"}}],
+        }
+    )
+
+    assert parse_onebot_event(raw) is None
+
+
+class FakeQQSocket:
+    def __init__(self, frames=None, *, error=None, on_error=None):
+        self.frames = list(frames or [])
+        self.error = error
+        self.on_error = on_error
+        self.sent = []
+        self.closed = False
+        self.entered = False
+        self.exited = False
+
+    def __enter__(self):
+        self.entered = True
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.exited = True
+        return False
+
+    def recv(self, timeout=None):
+        if self.frames:
+            return self.frames.pop(0)
+        if self.on_error:
+            self.on_error()
+        raise self.error or TimeoutError()
+
+    def send(self, payload):
+        self.sent.append(payload)
+
+    def close(self):
+        self.closed = True
+
+
+def test_qq_send_frame_shape_and_reply_target():
+    from lunamoth.messaging.qq import QQAdapter
+
+    sock = FakeQQSocket()
+    adapter = QQAdapter({"url": "ws://127.0.0.1:3001", "peer_id": "999"}, uuid_factory=lambda: "echo-1")
+    adapter._socket = sock
+
+    adapter.send("idle hi")
+    adapter.set_reply_target(InboundMessage("123", "Alice", "hi"))
+    adapter.send("reply hi")
+
+    idle_frame = json.loads(sock.sent[0])
+    reply_frame = json.loads(sock.sent[1])
+    assert idle_frame == {
+        "action": "send_private_msg",
+        "params": {"user_id": 999, "message": "idle hi"},
+        "echo": "echo-1",
+    }
+    assert reply_frame == {
+        "action": "send_private_msg",
+        "params": {"user_id": 123, "message": "reply hi"},
+        "echo": "echo-1",
+    }
+
+
+def test_qq_reconnect_backoff_resets_after_success():
+    from lunamoth.messaging.qq import QQAdapter
+
+    frames = [
+        json.dumps(
+            {
+                "post_type": "message",
+                "message_type": "private",
+                "user_id": 123,
+                "message": [{"type": "text", "data": {"text": "ping"}}],
+            }
+        )
+    ]
+    attempts = []
+    sleeps = []
+    sockets = []
+    adapter = QQAdapter(
+        {"url": "ws://127.0.0.1:3001", "access_token": "secret"},
+        sleep=lambda seconds: sleeps.append(seconds),
+        recv_timeout=0,
+    )
+
+    def connect(url, **kwargs):
+        attempts.append((url, kwargs))
+        if len(attempts) == 1:
+            raise OSError("first drop")
+        if len(attempts) == 2:
+            sock = FakeQQSocket(error=ConnectionError("second drop"))
+            sockets.append(sock)
+            return sock
+        sock = FakeQQSocket(frames=frames, error=ConnectionError("done"), on_error=adapter.close)
+        sockets.append(sock)
+        return sock
+
+    adapter._connect_func = connect
+    inbox = queue.Queue()
+
+    adapter.run(inbox)
+
+    assert [url for url, _kwargs in attempts] == ["ws://127.0.0.1:3001"] * 3
+    assert attempts[1][1]["additional_headers"] == {"Authorization": "Bearer secret"}
+    assert sleeps == [1.0, 1.0]
+    msg = inbox.get_nowait()
+    assert msg.sender_id == "123"
+    assert msg.text == "ping"
+    assert all(sock.entered and sock.exited for sock in sockets)

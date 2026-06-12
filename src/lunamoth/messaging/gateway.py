@@ -14,6 +14,7 @@ from typing import Any
 from ..protocol import SAY, TextDelta
 from ..protocol.api import CharaHandle
 from .base import Adapter, DeliveryDeferred, InboundMessage
+from .qq import QQAdapter
 from .text import split_text
 from .wecom import WeComAdapter
 from .weixin import WeixinAdapter
@@ -56,6 +57,8 @@ def make_adapters(config: dict[str, Any]) -> list[Adapter]:
             out.append(WeComAdapter(adapter_config))
         elif name == "weixin":
             out.append(WeixinAdapter(adapter_config))
+        elif name == "qq":
+            out.append(QQAdapter(adapter_config))
         else:
             raise ValueError(f"unknown messaging adapter {name!r}")
     if not out:
