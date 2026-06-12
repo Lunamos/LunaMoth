@@ -132,6 +132,39 @@ def test_terminal_output_reaches_model_ansi_free(tmp_path):
     assert "\x1b" not in out and "title" not in out
 
 
+def test_grep_no_match_exit1_is_annotated(tmp_path):
+    # Audit #18: a bare exit=1 from grep invites pointless retries.
+    ws = tmp_path / "workspace"
+    ws.mkdir(parents=True, exist_ok=True)
+    (ws / "hay.txt").write_text("haystack\n")
+    out = run_terminal("grep needle hay.txt", ws, isolation="dir", timeout=10)
+    assert "exit=1" in out
+    assert "no match found — not a failure" in out
+
+
+def test_diff_differs_exit1_is_annotated(tmp_path):
+    ws = tmp_path / "workspace"
+    ws.mkdir(parents=True, exist_ok=True)
+    (ws / "a.txt").write_text("a\n")
+    (ws / "b.txt").write_text("b\n")
+    out = run_terminal("diff a.txt b.txt", ws, isolation="dir", timeout=10)
+    assert "exit=1" in out
+    assert "the inputs differ — not a failure" in out
+
+
+def test_grep_real_error_is_not_annotated(tmp_path):
+    # exit 2 + stderr (missing file) is a REAL failure: no soothing note.
+    ws = tmp_path / "workspace"
+    out = run_terminal("grep needle /nonexistent-file-xyz", ws, isolation="dir", timeout=10)
+    assert "not a failure" not in out
+
+
+def test_other_commands_exit1_is_not_annotated(tmp_path):
+    ws = tmp_path / "workspace"
+    out = run_terminal("false", ws, isolation="dir", timeout=10)
+    assert "exit=1" in out and "not a failure" not in out
+
+
 def test_credentials_are_stripped(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret")
     ws = tmp_path / "workspace"

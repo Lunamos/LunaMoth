@@ -91,6 +91,36 @@ def strip_ansi(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text)
 
 
+# Audit #18 (hermes terminal_tool.py:1609-1670): these commands use exit 1 as
+# information ("no match" / "inputs differ"), not failure. A bare exit=1
+# invites the model to waste turns investigating a non-error.
+_EXIT1_IS_INFO = {
+    "grep": "no match found",
+    "egrep": "no match found",
+    "fgrep": "no match found",
+    "rg": "no match found",
+    "diff": "the inputs differ",
+    "cmp": "the inputs differ",
+}
+
+
+def _exit_code_note(command: str, returncode: int, stderr: str) -> str:
+    """A one-line note when exit 1 from a search/compare command is informational.
+
+    Only when the command's FIRST word is one of the known commands, exit is
+    exactly 1 and stderr is empty — exit 2+, or exit 1 with stderr (e.g. a
+    missing file), still reads as a real failure.
+    """
+    if returncode != 1 or stderr.strip():
+        return ""
+    words = command.strip().split()
+    first = words[0].split("/")[-1] if words else ""
+    meaning = _EXIT1_IS_INFO.get(first)
+    if not meaning:
+        return ""
+    return f"\n[note: exit 1 from {first} means {meaning} — not a failure]"
+
+
 def truncate_middle(text: str, cap: int) -> str:
     """Explicit head+tail truncation (audit #15; hermes terminal_tool.py:2406).
 
@@ -269,7 +299,7 @@ def run_terminal(
 
     out = truncate_middle(strip_ansi((out_b or b"").decode("utf-8", errors="replace")), _OUTPUT_CAP)
     err = truncate_middle(strip_ansi((err_b or b"").decode("utf-8", errors="replace")), _STDERR_CAP)
-    parts = [f"exit={proc.returncode}"]
+    parts = [f"exit={proc.returncode}" + _exit_code_note(command, proc.returncode, err)]
     if out:
         parts.append(f"STDOUT:\n{out}")
     if err:
