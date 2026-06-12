@@ -78,6 +78,86 @@ def test_bad_target_and_missing_args(tmp_path):
         m.remove("memory", "nonexistent")  # no match
 
 
+# ---- durability + external-edit drift (audit #25; hermes memory_tool.py:522-606) ----
+
+
+def test_write_fsyncs_before_atomic_replace(tmp_path, monkeypatch):
+    import os as os_mod
+
+    import lunamoth.tools.memory as mem_mod
+
+    synced = []
+    real_fsync = os_mod.fsync
+    monkeypatch.setattr(mem_mod.os, "fsync", lambda fd: (synced.append(fd), real_fsync(fd)))
+    m = MemoryStore(tmp_path / "mem")
+    m.add("memory", "durable note")
+    assert synced  # the bytes were forced to disk before the rename made them visible
+    assert m.entries("memory") == ["durable note"]
+
+
+def test_failed_write_raises_instead_of_lying(tmp_path, monkeypatch):
+    # The old `except OSError: pass` meant the chara was told "saved" when
+    # nothing landed. A failed write must be a visible error.
+    import lunamoth.tools.memory as mem_mod
+
+    m = MemoryStore(tmp_path / "mem")
+
+    def broken_replace(src, dst):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(mem_mod.os, "replace", broken_replace)
+    with pytest.raises(RuntimeError, match="memory write failed — nothing was saved"):
+        m.add("memory", "this must not be silently dropped")
+    monkeypatch.undo()
+    assert m.entries("memory") == []  # and indeed nothing landed
+
+
+def test_external_oversized_append_is_backed_up_and_refused(tmp_path):
+    # Scar #26045: an external writer appended free-form content; flushing
+    # would truncate it. Back it up to .bak.<ts> and refuse the clobber.
+    m = MemoryStore(tmp_path / "mem", MemoryLimits(memory_chars=200, user_chars=200))
+    m.add("memory", "tool-written entry")
+    path = tmp_path / "mem" / "memory.md"
+    external = "\n" + "external essay " * 40  # one >200-char blob, appended outside the tool
+    with path.open("a", encoding="utf-8") as f:
+        f.write(external)
+    drifted = path.read_text(encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match=r"edited outside the memory tool.*\.bak\.\d+"):
+        m.add("memory", "new note")
+
+    assert path.read_text(encoding="utf-8") == drifted  # original untouched
+    baks = list((tmp_path / "mem").glob("memory.md.bak.*"))
+    assert len(baks) == 1 and baks[0].read_text(encoding="utf-8") == drifted
+
+
+def test_roundtrip_mismatch_is_drift_too(tmp_path):
+    m = MemoryStore(tmp_path / "mem")
+    path = tmp_path / "mem" / "memory.md"
+    path.write_text("x\n§\n\n§\ny", encoding="utf-8")  # empty entry: never tool-written
+    with pytest.raises(RuntimeError, match="edited outside the memory tool"):
+        m.add("memory", "note")
+
+
+def test_tool_written_files_never_read_as_drift(tmp_path):
+    m = MemoryStore(tmp_path / "mem", MemoryLimits(memory_chars=64, user_chars=64))
+    m.add("memory", "first entry here")
+    m.add("memory", "second entry that pushes over the cap and forces a recut")
+    m.add("memory", "third")  # writes over a previously cap-cut file: no false drift
+    assert "third" in m.entries("memory")
+    assert not list((tmp_path / "mem").glob("*.bak.*"))
+
+
+def test_operator_shrink_recap_is_not_drift(tmp_path):
+    # set_limits is an explicit operator action: entries over the NEW cap are
+    # the re-cap's input, not an external edit.
+    m = MemoryStore(tmp_path / "mem", MemoryLimits(memory_chars=4000, user_chars=2000))
+    m.add("memory", "a" * 300)
+    warnings = m.set_limits(MemoryLimits(memory_chars=100, user_chars=100))
+    assert warnings and "discarded" in warnings[0]
+    assert m.chars("memory") <= 100
+
+
 def test_frozen_snapshot_decouples_prompt_from_writes(tmp_path):
     # The system-prompt memory block is FROZEN at session start: a mid-session
     # write changes disk + the tool response, but NOT the injected block — until

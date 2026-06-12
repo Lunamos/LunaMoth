@@ -21,12 +21,17 @@ class InboundMessage:
     `sender_id` is the stable platform/user id used for allowlisting.  `reply`
     lets callback-style transports remember a per-message destination; direct
     adapters may ignore it and send to their current configured recipient.
+    `message_id` is the platform's message id when one exists (WeCom MsgId,
+    OneBot message_id): the gateway dedups redeliveries on it, so a retried
+    callback or a post-reconnect redelivery never runs a second LLM turn.
+    Empty = no platform id = never deduplicated.
     """
 
     sender_id: str
     sender_name: str
     text: str
     reply: object | None = None
+    message_id: str = ""
 
 
 class Adapter(abc.ABC):

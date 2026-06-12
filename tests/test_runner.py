@@ -1,7 +1,7 @@
 
 import pytest
 
-from lunamoth.tools.runner import os_sandbox_available, run_terminal
+from lunamoth.tools.runner import os_sandbox_available, run_terminal, strip_ansi, truncate_middle
 
 
 def test_dir_runs_any_command(tmp_path):
@@ -47,12 +47,122 @@ def test_timeout_with_pipe_holding_grandchild_returns_and_kills_group(tmp_path):
     assert not alive
 
 
+def test_huge_timeout_is_clamped_with_a_note(tmp_path):
+    # Audit #17: timeout=999999 must not be able to wedge an unattended cycle.
+    ws = tmp_path / "workspace"
+    out = run_terminal("echo ok", ws, isolation="dir", timeout=999999)
+    assert "ok" in out and "exit=0" in out
+    assert "timeout clamped to 600s (requested 999999s" in out
+
+
+def test_tiny_timeout_is_clamped_up_with_a_note(tmp_path):
+    ws = tmp_path / "workspace"
+    out = run_terminal("sleep 30", ws, isolation="dir", timeout=-5)
+    assert "timed out after 1s" in out                    # clamped to the 1 s floor
+    assert "timeout clamped to 1s (requested -5s" in out  # and the model is told
+
+
+def test_in_range_timeout_gets_no_note(tmp_path):
+    ws = tmp_path / "workspace"
+    out = run_terminal("echo ok", ws, isolation="dir", timeout=30)
+    assert "clamped" not in out
+
+
 def test_timeout_keeps_partial_output(tmp_path):
     ws = tmp_path / "workspace"
     out = run_terminal("echo 早期输出; echo oops >&2; sleep 60", ws, isolation="dir", timeout=1)
     assert "timed out after 1s" in out
     assert "早期输出" in out  # what the command printed before the cut survives
     assert "oops" in out
+
+
+def test_truncate_middle_keeps_head_and_tail_with_marker():
+    # Audit #15: 40% head / 60% tail around an explicit marker, never a
+    # silent last-N-chars cut.
+    text = "H" * 5000 + "M" * 5000 + "T" * 5000
+    out = truncate_middle(text, 1000)
+    assert out.startswith("H" * 400)          # 40% head survives
+    assert out.endswith("T" * 600)            # 60% tail survives
+    assert "M" not in out                     # the middle is what was cut
+    assert "14000 chars omitted out of 15000 total" in out
+    # Total stays ~cap (cap + the marker line).
+    assert len(out) < 1000 + 200
+
+
+def test_truncate_middle_short_output_untouched():
+    assert truncate_middle("short", 1000) == "short"
+
+
+def test_long_output_truncated_head_and_tail(tmp_path):
+    ws = tmp_path / "workspace"
+    out = run_terminal(
+        "python3 -c \"print('HEADMARK' + 'x'*30000 + 'TAILMARK')\"",
+        ws, isolation="dir", timeout=15,
+    )
+    assert "HEADMARK" in out                  # the head is no longer thrown away
+    assert "TAILMARK" in out
+    assert "chars omitted out of" in out      # explicit marker, no silent cut
+
+
+@pytest.mark.parametrize("dirty,clean", [
+    ("\x1b[31mred\x1b[0m text", "red text"),                       # CSI colors
+    ("\x1b[?25l\x1b[2Khidden cursor", "hidden cursor"),            # CSI private mode
+    ("\x1b]0;window title\x07body", "body"),                       # OSC, BEL terminator
+    ("\x1b]8;;http://x\x1b\\link\x1b]8;;\x1b\\", "link"),          # OSC, ST terminator
+    ("\x1bPq#0;2;0;0;0\x1b\\sixel gone", "sixel gone"),            # DCS string
+    ("\x1b(Bcharset", "charset"),                                  # nF escape
+    ("\x9b31mbright\x9b0m", "bright"),                             # 8-bit CSI
+    ("\x9d0;title\x9cafter", "after"),                             # 8-bit OSC
+    ("a\x85b\x90c", "abc"),                                        # bare 8-bit C1
+])
+def test_strip_ansi_full_ecma48(dirty, clean):
+    assert strip_ansi(dirty) == clean
+
+
+def test_strip_ansi_fast_path_returns_same_object():
+    s = "plain text, no escapes — 中文 too"
+    assert strip_ansi(s) is s   # fast path: untouched, not even copied
+    assert strip_ansi("") == ""
+
+
+def test_terminal_output_reaches_model_ansi_free(tmp_path):
+    ws = tmp_path / "workspace"
+    out = run_terminal("printf '\\033[1;32mGREEN\\033[0m\\n\\033]0;title\\007BODY\\n'", ws, isolation="dir", timeout=10)
+    assert "GREEN" in out and "BODY" in out
+    assert "\x1b" not in out and "title" not in out
+
+
+def test_grep_no_match_exit1_is_annotated(tmp_path):
+    # Audit #18: a bare exit=1 from grep invites pointless retries.
+    ws = tmp_path / "workspace"
+    ws.mkdir(parents=True, exist_ok=True)
+    (ws / "hay.txt").write_text("haystack\n")
+    out = run_terminal("grep needle hay.txt", ws, isolation="dir", timeout=10)
+    assert "exit=1" in out
+    assert "no match found — not a failure" in out
+
+
+def test_diff_differs_exit1_is_annotated(tmp_path):
+    ws = tmp_path / "workspace"
+    ws.mkdir(parents=True, exist_ok=True)
+    (ws / "a.txt").write_text("a\n")
+    (ws / "b.txt").write_text("b\n")
+    out = run_terminal("diff a.txt b.txt", ws, isolation="dir", timeout=10)
+    assert "exit=1" in out
+    assert "the inputs differ — not a failure" in out
+
+
+def test_grep_real_error_is_not_annotated(tmp_path):
+    # exit 2 + stderr (missing file) is a REAL failure: no soothing note.
+    ws = tmp_path / "workspace"
+    out = run_terminal("grep needle /nonexistent-file-xyz", ws, isolation="dir", timeout=10)
+    assert "not a failure" not in out
+
+
+def test_other_commands_exit1_is_not_annotated(tmp_path):
+    ws = tmp_path / "workspace"
+    out = run_terminal("false", ws, isolation="dir", timeout=10)
+    assert "exit=1" in out and "not a failure" not in out
 
 
 def test_credentials_are_stripped(tmp_path, monkeypatch):

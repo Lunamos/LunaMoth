@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -44,9 +45,100 @@ from ..session.isolation import (  # noqa: F401 — backend/os_sandbox_available
 _log = get_logger("runner")
 
 DEFAULT_TIMEOUT = 30
+MIN_TIMEOUT = 1      # audit #17: the model-supplied timeout is clamped to
+MAX_TIMEOUT = 600    # [1, 600] s so `timeout=999999` can't wedge an unattended cycle
 _OUTPUT_CAP = 12000
+_STDERR_CAP = 2000
 _KILL_GRACE = 1.0    # seconds between SIGTERM and SIGKILL on timeout
 _DRAIN_DEADLINE = 1.0  # bounded non-blocking pipe drain after the group is killed
+
+
+# ---- ANSI/control stripping (audit #16; ported from hermes tools/ansi_strip.py) ----
+# Command output is cleaned before it reaches the model: escape codes waste
+# tokens, can derail weaker models, and — the hermes root cause — get copied
+# verbatim into file writes. Covers the full ECMA-48 spec: CSI (including
+# private-mode `?` prefix, colon-separated params, intermediate bytes), OSC
+# (BEL and ST terminators), DCS/SOS/PM/APC string sequences, nF multi-byte
+# escapes, Fp/Fe/Fs single-byte escapes, and 8-bit C1 control characters.
+_ANSI_ESCAPE_RE = re.compile(
+    r"\x1b"
+    r"(?:"
+        r"\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]"       # CSI sequence
+        r"|\][\s\S]*?(?:\x07|\x1b\\)"                  # OSC (BEL or ST terminator)
+        r"|[PX^_][\s\S]*?(?:\x1b\\)"                   # DCS/SOS/PM/APC strings
+        r"|[\x20-\x2f]+[\x30-\x7e]"                    # nF escape sequences
+        r"|[\x30-\x7e]"                                # Fp/Fe/Fs single-byte
+    r")"
+    r"|\x9b[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]"        # 8-bit CSI
+    r"|\x9d[\s\S]*?(?:\x07|\x9c)"                      # 8-bit OSC
+    r"|[\x80-\x9f]",                                   # Other 8-bit C1 controls
+    re.DOTALL,
+)
+
+# Fast-path check — skip the full regex when no escape-like bytes are present.
+_HAS_ESCAPE = re.compile(r"[\x1b\x80-\x9f]")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text.
+
+    Returns the input unchanged (fast path) when no ESC or C1 bytes are
+    present. Safe to call on any string — clean text passes through with
+    negligible overhead.
+    """
+    if not text or not _HAS_ESCAPE.search(text):
+        return text
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+
+# Audit #18 (hermes terminal_tool.py:1609-1670): these commands use exit 1 as
+# information ("no match" / "inputs differ"), not failure. A bare exit=1
+# invites the model to waste turns investigating a non-error.
+_EXIT1_IS_INFO = {
+    "grep": "no match found",
+    "egrep": "no match found",
+    "fgrep": "no match found",
+    "rg": "no match found",
+    "diff": "the inputs differ",
+    "cmp": "the inputs differ",
+}
+
+
+def _exit_code_note(command: str, returncode: int, stderr: str) -> str:
+    """A one-line note when exit 1 from a search/compare command is informational.
+
+    Only when the command's FIRST word is one of the known commands, exit is
+    exactly 1 and stderr is empty — exit 2+, or exit 1 with stderr (e.g. a
+    missing file), still reads as a real failure.
+    """
+    if returncode != 1 or stderr.strip():
+        return ""
+    words = command.strip().split()
+    first = words[0].split("/")[-1] if words else ""
+    meaning = _EXIT1_IS_INFO.get(first)
+    if not meaning:
+        return ""
+    return f"\n[note: exit 1 from {first} means {meaning} — not a failure]"
+
+
+def truncate_middle(text: str, cap: int) -> str:
+    """Explicit head+tail truncation (audit #15; hermes terminal_tool.py:2406).
+
+    Keeps 40% head (error messages often appear early) and 60% tail (the most
+    recent output) around a marker stating how much was cut. A silent
+    last-N-chars cut hides the head — exactly where compile/launch errors live —
+    and reads as complete output, sending the model down wrong paths.
+    """
+    if len(text) <= cap:
+        return text
+    head = int(cap * 0.4)
+    tail = cap - head
+    omitted = len(text) - head - tail
+    marker = (
+        f"\n\n... [output truncated — {omitted} chars omitted out of {len(text)} total; "
+        f"kept the first {head} and last {tail} chars] ...\n\n"
+    )
+    return text[:head] + marker + text[-tail:]
 
 
 def _kill_group(proc: subprocess.Popen) -> None:
@@ -137,6 +229,14 @@ def run_terminal(
     workspace = workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=True)
     isolation = (isolation or backend()).lower()
+    # Clamp the (model-supplied) timeout, with a note when clamped — the model
+    # must learn the real bound instead of silently getting a different wait.
+    requested = int(timeout)
+    timeout = max(MIN_TIMEOUT, min(MAX_TIMEOUT, requested))
+    clamp_note = (
+        f"\n[lunamoth: timeout clamped to {timeout}s (requested {requested}s; allowed {MIN_TIMEOUT}-{MAX_TIMEOUT}s)]"
+        if timeout != requested else ""
+    )
     writable = [Path(p).resolve() for p in writable_paths]
     cwd = workspace
     if workdir:
@@ -144,7 +244,7 @@ def run_terminal(
         if isolation == "dir" or cand == workspace or workspace in cand.parents or cand in writable:
             cwd = cand
 
-    note = ""
+    note = clamp_note
     if isolation == "docker" and shutil.which("docker"):
         cmd: list[str] = _docker(command, workspace, allow_network, image, memory_mb, cpus)
         run_cwd = None
@@ -153,7 +253,7 @@ def run_terminal(
         run_cwd = str(cwd) if sys.platform == "darwin" else None  # bwrap sets its own chdir
     else:
         if isolation != "dir":
-            note = f"\n[lunamoth: '{isolation}' jail unavailable, ran with directory trust]"
+            note += f"\n[lunamoth: '{isolation}' jail unavailable, ran with directory trust]"
         cmd = ["/bin/bash", "-c", command]
         run_cwd = str(cwd)
 
@@ -185,8 +285,10 @@ def run_terminal(
             out_b = _drain_nonblocking(proc.stdout, _DRAIN_DEADLINE)
             err_b = _drain_nonblocking(proc.stderr, _DRAIN_DEADLINE)
         parts = [f"[timed out after {timeout}s]"]
-        out = out_b.decode("utf-8", errors="replace")[-_OUTPUT_CAP:].strip()
-        err = err_b.decode("utf-8", errors="replace")[-2000:].strip()
+        # Strip BEFORE truncating so the cap budgets clean text and the cut
+        # can't land mid-escape-sequence and leave fragments behind.
+        out = truncate_middle(strip_ansi(out_b.decode("utf-8", errors="replace")), _OUTPUT_CAP).strip()
+        err = truncate_middle(strip_ansi(err_b.decode("utf-8", errors="replace")), _STDERR_CAP).strip()
         if out:
             parts.append(f"partial STDOUT:\n{out}")
         if err:
@@ -195,9 +297,9 @@ def run_terminal(
     _log.info("terminal (%s, net=%s) exit=%d in %.1fs: %.120s",
               isolation, "on" if allow_network else "off", proc.returncode, time.monotonic() - t0, command)
 
-    out = (out_b or b"").decode("utf-8", errors="replace")[-_OUTPUT_CAP:]
-    err = (err_b or b"").decode("utf-8", errors="replace")[-2000:]
-    parts = [f"exit={proc.returncode}"]
+    out = truncate_middle(strip_ansi((out_b or b"").decode("utf-8", errors="replace")), _OUTPUT_CAP)
+    err = truncate_middle(strip_ansi((err_b or b"").decode("utf-8", errors="replace")), _STDERR_CAP)
+    parts = [f"exit={proc.returncode}" + _exit_code_note(command, proc.returncode, err)]
     if out:
         parts.append(f"STDOUT:\n{out}")
     if err:
