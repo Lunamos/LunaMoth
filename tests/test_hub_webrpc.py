@@ -125,6 +125,35 @@ def test_messaging_save_preserves_enabled_when_omitted():
     assert on_disk["enabled"] is True
 
 
+def test_messaging_save_merges_per_the_web_form_contract():
+    """The deck form sends only the platform on screen and omits unchanged
+    secrets — the backend must merge, never replace (webui-needs #7)."""
+    meta = wake_session()
+    result("messaging.save", {"name": meta.name, "config": {
+        "enabled": True,
+        "adapters": {"weixin": {"base_url": "https://ilink.example/v1", "bot_token": "tok-123"}}}})
+    # Saving the wecom tab must not drop the weixin adapter.
+    result("messaging.save", {"name": meta.name, "config": {
+        "enabled": True, "allowed_senders": ["alice"],
+        "adapters": {"wecom": {"corp_id": "c1", "corp_secret": "s1"}}}})
+    on_disk = json.loads((meta.root / "messaging.json").read_text(encoding="utf-8"))
+    assert on_disk["adapters"]["weixin"]["bot_token"] == "tok-123"
+    assert on_disk["adapters"]["wecom"]["corp_id"] == "c1"
+    assert on_disk["allowed_senders"] == ["alice"]
+    # Editing one weixin field with the secret omitted keeps the secret.
+    result("messaging.save", {"name": meta.name, "config": {
+        "adapters": {"weixin": {"base_url": "https://ilink.example/v2"}}}})
+    on_disk = json.loads((meta.root / "messaging.json").read_text(encoding="utf-8"))
+    assert on_disk["adapters"]["weixin"]["bot_token"] == "tok-123"
+    assert on_disk["adapters"]["weixin"]["base_url"] == "https://ilink.example/v2"
+    # Explicit null deletes a field / a platform.
+    result("messaging.save", {"name": meta.name, "config": {
+        "adapters": {"weixin": {"bot_token": None}, "wecom": None}}})
+    on_disk = json.loads((meta.root / "messaging.json").read_text(encoding="utf-8"))
+    assert "bot_token" not in on_disk["adapters"]["weixin"]
+    assert "wecom" not in on_disk["adapters"]
+
+
 # ---- card.avatar_draft -------------------------------------------------------------
 
 GOOD_SVG = '<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="20" fill="#7C5CFF"/></svg>'

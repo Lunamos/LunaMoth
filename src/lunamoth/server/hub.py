@@ -1053,13 +1053,43 @@ def messaging_get(meta: S.SessionMeta) -> dict[str, Any]:
     return {"config": _mask_secrets(_read_messaging(meta)), "path": str(_messaging_path(meta))}
 
 
+def _merge_messaging(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    """Field-level merge per the web deck's form contract (webui-needs #7):
+    the form sends only the platform on screen and omits unchanged secrets,
+    so omitted keys KEEP their stored value, adapters merge per platform,
+    and an explicit null deletes a key."""
+    out = dict(old)
+    for k, v in new.items():
+        if v is None:
+            out.pop(k, None)
+        elif k == "adapters" and isinstance(v, dict):
+            adapters = dict(old.get("adapters")) if isinstance(old.get("adapters"), dict) else {}
+            for plat, fields in v.items():
+                if fields is None:
+                    adapters.pop(plat, None)
+                    continue
+                if not isinstance(fields, dict):
+                    adapters[plat] = fields
+                    continue
+                cur = adapters.get(plat)
+                base = dict(cur) if isinstance(cur, dict) else {}
+                for f, fv in fields.items():
+                    if fv is None:
+                        base.pop(f, None)
+                    else:
+                        base[f] = fv
+                adapters[plat] = base
+            out["adapters"] = adapters
+        else:
+            out[k] = v
+    return out
+
+
 def messaging_save(meta: S.SessionMeta, config: Any) -> dict[str, Any]:
     if not isinstance(config, dict):
         raise RpcError(-32602, "messaging.save expects config: {...}")
     old = _read_messaging(meta)
-    merged = _unmask_secrets(config, old)
-    if "enabled" not in merged and "enabled" in old:
-        merged["enabled"] = old["enabled"]  # enabled is the gateway switch, not the form's to drop
+    merged = _merge_messaging(old, _unmask_secrets(config, old))
     path = _messaging_path(meta)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
