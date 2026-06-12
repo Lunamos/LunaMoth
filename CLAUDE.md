@@ -35,7 +35,7 @@ It is the synthesis of three projects — clone them under `reference/`
   counterpart first and port its solution shape AND its edge cases —
   hermes's scars are the maturity we lack. Architecture stays ours; never
   inherit its fallback-model logic. Parity checklist:
-  `.codex-fleet/hermes-parity-audit.md`.
+  `docs/archive/hermes-parity-audit.md`.
 - **SillyTavern/SillyTavern** — character cards / world books / prompt layering
   (we stay card- and world-book-compatible; ST content is the import format).
 - **farion1231/cc-switch** — session/roster ergonomics, remote access.
