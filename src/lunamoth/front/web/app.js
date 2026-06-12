@@ -29,6 +29,23 @@ function toast(msg, isErr) {
   setTimeout(() => node.remove(), isErr ? 5200 : 3200);
 }
 
+/* ---------- global error backstop（Hermes error-boundary 的 vanilla 版） ----------
+   只上浮，不处理：完整细节进 console.error，toast 限流一条/3s（错误风暴不刷屏，
+   也不会因 toast 自身出错而循环）。绝不吞错。 */
+let lastErrToastAt = 0;
+function surfaceUncaught(msg, detail) {
+  console.error("[lunamoth] uncaught:", detail !== undefined && detail !== null ? detail : msg);
+  const now = Date.now();
+  if (now - lastErrToastAt < 3000) return;
+  lastErrToastAt = now;
+  toast(String(msg || t("err-unexpected")), true);
+}
+window.addEventListener("error", (ev) => surfaceUncaught(ev.message, ev.error));
+window.addEventListener("unhandledrejection", (ev) => {
+  const r = ev.reason;
+  surfaceUncaught(r && r.message ? r.message : String(r), r);
+});
+
 function timeAgo(ts) {
   if (!ts) return "";
   const s = Math.max(0, Date.now() / 1000 - ts);
@@ -814,11 +831,12 @@ function setupPane(opts) {
     provRows.push({ key, node });
     return node;
   }
+  // 每行一句认证机制说明（Hermes providers-settings 的风格），灰字走现有 .pdesc。
   root.appendChild(provRow("OpenRouter", "OpenRouter", t("or-desc"), true));
-  root.appendChild(provRow("OpenAI", "OpenAI", "", false));
+  root.appendChild(provRow("OpenAI", "OpenAI", t("prov-openai-desc"), false));
   const moreWrap = el("div", { style: "display:none" },
-    provRow("Ollama (local)", "Ollama", "local", false),
-    provRow("_custom", "OpenAI-compatible", "", false));
+    provRow("Ollama (local)", "Ollama", t("prov-ollama-desc"), false),
+    provRow("_custom", "OpenAI-compatible", t("prov-compat-desc"), false));
   const moreBtn = el("button", { class: "provider more", onclick: () => {
     moreWrap.style.display = moreWrap.style.display === "none" ? "block" : "none";
   } }, t("more-providers"));
