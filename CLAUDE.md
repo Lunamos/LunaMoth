@@ -29,6 +29,13 @@ It is the synthesis of three projects — clone them under `reference/`
 
 - **NousResearch/hermes-agent** — the most important. Agent runtime, context
   management, prompt-cache discipline, skills, plugin/registry patterns.
+  RULE (owner, 2026-06-13): before building or fixing any COMMODITY
+  subsystem (streaming, tool loop, PTY, dashboards, session hygiene —
+  anything that isn't the chara-life innovation core), read the hermes
+  counterpart first and port its solution shape AND its edge cases —
+  hermes's scars are the maturity we lack. Architecture stays ours; never
+  inherit its fallback-model logic. Parity checklist:
+  `.codex-fleet/hermes-parity-audit.md`.
 - **SillyTavern/SillyTavern** — character cards / world books / prompt layering
   (we stay card- and world-book-compatible; ST content is the import format).
 - **farion1231/cc-switch** — session/roster ergonomics, remote access.
