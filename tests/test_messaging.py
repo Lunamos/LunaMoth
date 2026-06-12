@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+import json
+import queue
 import time
 from xml.etree import ElementTree as ET
 
@@ -255,3 +257,156 @@ def test_chunking_long_outbound_text():
     assert len(chunks) == 3
     assert all(0 < len(chunk) <= 2048 for chunk in chunks)
     assert "".join(chunks) == text
+
+class FakeHTTPResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self):
+        import json
+        return json.dumps(self.payload, ensure_ascii=False).encode("utf-8")
+
+
+class FakeWeixinTransport:
+    def __init__(self, payloads):
+        self.payloads = list(payloads)
+        self.requests = []
+
+    def __call__(self, req, timeout=0):
+        self.requests.append((req, timeout))
+        if not self.payloads:
+            raise AssertionError("unexpected HTTP request")
+        return FakeHTTPResponse(self.payloads.pop(0))
+
+
+def test_weixin_login_poll_persists_cursor_and_context_token(tmp_path):
+    from lunamoth.messaging.weixin import WeixinAdapter
+
+    transport = FakeWeixinTransport([
+        {"qrcode": "qr-token", "qrcode_img_content": "img"},
+        {
+            "status": "confirmed",
+            "bot_token": "tok",
+            "ilink_bot_id": "bot-1",
+            "ilink_user_id": "owner-1",
+            "baseurl": "https://ilink.example",
+        },
+        {
+            "ret": 0,
+            "errcode": 0,
+            "get_updates_buf": "cursor-2",
+            "msgs": [
+                {
+                    "from_user_id": "user-1",
+                    "context_token": "ctx-1",
+                    "item_list": [
+                        {"type": 1, "text_item": {"text": "hello"}},
+                        {"type": 3, "voice_item": {"text": "voice words"}},
+                    ],
+                }
+            ],
+        },
+    ])
+    out = []
+    adapter = WeixinAdapter(
+        {},
+        opener=transport,
+        state_path=tmp_path / "weixin_state.json",
+        output=type("Out", (), {"write": lambda self, s: out.append(s), "flush": lambda self: None})(),
+        sleep=lambda _seconds: None,
+    )
+    inbox = queue.Queue()
+
+    assert adapter.poll_once(inbox) == 1
+    msg = inbox.get_nowait()
+    assert msg.sender_id == "user-1"
+    assert msg.text == "hello\nvoice words"
+
+    state = json.loads((tmp_path / "weixin_state.json").read_text(encoding="utf-8"))
+    assert state["token"] == "tok"
+    assert state["account_id"] == "bot-1"
+    assert state["base_url"] == "https://ilink.example"
+    assert state["sync_buf"] == "cursor-2"
+    assert state["context_tokens"] == {"user-1": "ctx-1"}
+    assert oct((tmp_path / "weixin_state.json").stat().st_mode & 0o777) == "0o600"
+    assert "api.qrserver.com" in "".join(out)
+
+    urls = [req.full_url for req, _timeout in transport.requests]
+    assert "get_bot_qrcode" in urls[0]
+    assert "get_qrcode_status" in urls[1]
+    assert "getupdates" in urls[2]
+    assert transport.requests[2][0].headers["Authorization"] == "Bearer tok"
+    assert transport.requests[2][0].headers["Authorizationtype"] == "ilink_bot_token"
+    assert transport.requests[2][0].headers["X-wechat-uin"]
+
+
+def test_weixin_reuses_saved_token_and_send_requires_context_token(tmp_path):
+    from lunamoth.messaging.base import DeliveryDeferred, InboundMessage
+    from lunamoth.messaging.weixin import WeixinAdapter
+
+    state_path = tmp_path / "weixin_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "token": "tok",
+                "account_id": "bot-1",
+                "base_url": "https://ilink.example",
+                "sync_buf": "cursor",
+                "context_tokens": {"user-1": "ctx-1"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    transport = FakeWeixinTransport([
+        {"ret": 0, "errcode": 0},
+    ])
+    adapter = WeixinAdapter({}, opener=transport, state_path=state_path)
+
+    adapter.set_reply_target(InboundMessage("user-1", "user-1", "hi"))
+    adapter.send("reply text")
+    body = json.loads(transport.requests[-1][0].data.decode("utf-8"))
+    assert body["msg"]["to_user_id"] == "user-1"
+    assert body["msg"]["context_token"] == "ctx-1"
+    assert body["msg"]["item_list"] == [{"type": 1, "text_item": {"text": "reply text"}}]
+
+    adapter.set_reply_target(InboundMessage("user-2", "user-2", "hi"))
+    with pytest.raises(DeliveryDeferred, match="waiting for the human to say hi first"):
+        adapter.send("cannot yet")
+
+    urls = [req.full_url for req, _timeout in transport.requests]
+    assert not any("get_bot_qrcode" in url for url in urls)
+
+
+def test_weixin_session_timeout_marks_relogin_and_surfaces(tmp_path):
+    from lunamoth.messaging.base import InboundMessage
+    from lunamoth.messaging.weixin import WeixinAdapter
+
+    state_path = tmp_path / "weixin_state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "token": "tok",
+                "account_id": "bot-1",
+                "base_url": "https://ilink.example",
+                "context_tokens": {"user-1": "ctx-1"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    transport = FakeWeixinTransport([
+        {"ret": 0, "errcode": -14, "errmsg": "session timeout"},
+    ])
+    adapter = WeixinAdapter({}, opener=transport, state_path=state_path)
+    adapter.set_reply_target(InboundMessage("user-1", "user-1", "hi"))
+
+    with pytest.raises(RuntimeError, match="QR re-login is required"):
+        adapter.send("hello")
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["needs_relogin"] is True
