@@ -7,8 +7,12 @@
 // — and loads that URL into a BrowserWindow. Backend missing, dying, or not
 // printing the line is a visible error dialog and exit, never a silent
 // fallback (project rule).
+//
+// Lifecycle: closing the window backgrounds the app to a menu-bar tray icon
+// (backend keeps running); only Quit (tray menu / Cmd-Q) stops the backend.
+// Chara daemons always live in their own sessions and outlive both.
 
-const { app, BrowserWindow, Notification, dialog, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage, shell } = require('electron')
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -21,6 +25,7 @@ const SIGTERM_GRACE_MS = 8_000
 
 let win = null
 let backend = null // { proc, url, origin, log: [] }
+let tray = null
 let quitting = false
 
 // ---- backend discovery -------------------------------------------------------------
@@ -48,7 +53,9 @@ function backendCommand() {
   if (repo) {
     return {
       cmd: 'uv',
-      args: ['run', '--extra', 'server', 'lunamoth', 'desktop', '--no-open'],
+      // Both extras: a bare `--extra server` sync would strip the dev tools
+      // (pytest) out of the repo venv every time the app launches.
+      args: ['run', '--extra', 'dev', '--extra', 'server', 'lunamoth', 'desktop', '--no-open'],
       cwd: repo,
     }
   }
@@ -192,6 +199,16 @@ function createWindow(url, origin) {
   win.once('ready-to-show', () => win.show())
   win.on('closed', () => { win = null })
 
+  // Closing the window is leaving the room, not ending the visit: the app
+  // retires to the menu-bar moth and the backend (with its charas' gateway)
+  // keeps living. Quit lives in the tray menu / Cmd-Q.
+  win.on('close', (event) => {
+    if (quitting) return
+    event.preventDefault()
+    win.hide()
+    if (app.dock) app.dock.hide() // pure menu-bar presence while backgrounded
+  })
+
   // Only the local backend may be displayed; everything else is the system's.
   win.webContents.on('will-navigate', (event, target) => {
     if (new URL(target).origin === origin) return
@@ -214,6 +231,34 @@ async function boot() {
   } catch (err) {
     fatal('LunaMoth could not start.', err.message)
   }
+}
+
+// ---- tray --------------------------------------------------------------------------
+
+function showWindow() {
+  if (app.dock) app.dock.show()
+  if (win) {
+    win.show()
+    win.focus()
+  } else if (backend && backend.url) {
+    createWindow(backend.url, backend.origin)
+  } else if (!quitting) {
+    boot()
+  }
+}
+
+function createTray() {
+  const icon = nativeImage
+    .createFromPath(path.join(__dirname, '..', 'assets', 'icon.png'))
+    .resize({ width: 18, height: 18 })
+  tray = new Tray(icon)
+  tray.setToolTip('LunaMoth')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '打开 LunaMoth / Open', click: showWindow },
+    { type: 'separator' },
+    { label: '退出 / Quit', click: () => app.quit() },
+  ]))
+  tray.on('click', showWindow)
 }
 
 // ---- app lifecycle -----------------------------------------------------------------
@@ -247,19 +292,19 @@ if (!app.requestSingleInstanceLock()) {
     return true
   })
 
-  app.whenReady().then(boot)
-
-  // Closing the window ends the visit: the backend (and its per-chara serve
-  // children) goes down; chara daemons live in their own sessions and stay.
-  app.on('window-all-closed', () => {
-    stopBackend().then(() => {
-      if (process.platform !== 'darwin' && !quitting) app.quit()
-    })
+  app.whenReady().then(() => {
+    createTray()
+    boot()
   })
 
-  // macOS dock click with no window: a fresh visit, fresh backend.
+  // The window hides on close (see createWindow), so this only fires when a
+  // window is destroyed outright (e.g. renderer crash). The app lives on in
+  // the tray either way; Quit is the only thing that stops the backend.
+  app.on('window-all-closed', () => { /* tray keeps the app alive */ })
+
+  // macOS dock click with no window: bring the visit back.
   app.on('activate', () => {
-    if (win === null && backend === null && !quitting) boot()
+    if (!quitting) showWindow()
   })
 
   app.on('before-quit', (event) => {
