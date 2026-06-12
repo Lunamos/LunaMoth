@@ -175,9 +175,9 @@ Every API request is assembled as **three zones**:
 
 1. **Stable prefix** — computed once per session and reused byte-identically until
    `make_session` / reconfigure / `/reset`: card identity (`render_system`,
-   PHI-free), optional neutral Rules layer when tools are enabled, the static
-   tool-use nudge, toolpack note, frozen memory snapshot, frozen SKILLS index,
-   constant world-info entries.
+   PHI-free), optional actor embodiment bridge + neutral Rules layer when tools
+   are enabled, the static tool-use nudge, toolpack note, frozen memory snapshot,
+   frozen SKILLS index, constant world-info entries.
 2. **History** — the append-only `ContextBuffer` view. Compaction is the one
    sanctioned rewrite: old head → one persisted summary + recent tail.
 3. **Volatile tail** — recomputed per turn, never persisted: live env facts
@@ -187,8 +187,9 @@ Every API request is assembled as **three zones**:
    card `post_history_instructions` > card `extensions.lunamoth.rules_closer`
    > bundled rules closer (the latter two only when tools are enabled).
 
-Card override hooks: `extensions.lunamoth.{rules,rules_closer,goals,world,
-toolpack,memory_chars,on_attach,on_detach}`; global `~/.lunamoth/rules.md`.
+Card override hooks: `extensions.lunamoth.{rules,rules_closer,embodiment,
+embodiment_bridge,tempo,goals,world,toolpack,memory_chars,on_attach,on_detach}`;
+global `~/.lunamoth/rules.md`.
 
 ## Chara life (what already exists — build on it, don't reinvent)
 
@@ -202,6 +203,14 @@ toolpack,memory_chars,on_attach,on_detach}`; global `~/.lunamoth/rules.md`.
   wall-clock timestamp (ephemeral, in_context=False — the rules layer
   documents the convention); long silences get one gap note; day-level date
   rides the env facts.
+- **Tempo**: a chara's time-flow rate is card-declarable
+  (`extensions.lunamoth.tempo`) and operator-overridable (`/tempo`,
+  `Settings.tempo`; precedence operator > card > 1.0). It scales ONLY the pause
+  between spontaneous cycles (`patience ÷ tempo`), never `/quiet` or `rest`.
+- **Embodiment stance**: `literal` (default) means today's digital-being model;
+  `actor` injects a neutral bridge before Rules so tools remain real backstage
+  while the fiction stays whole. Precedence is operator override
+  (`Settings.embodiment_override`, `/embodiment`) > card declaration > literal.
 - **Two output registers**: muse (its own life; panoramic frontends only) vs
   say (delivered everywhere — the `speak` tool is how it decides to reach you).
 - **Isolation** per chara: `dir` / `sandbox` (default; sandbox-exec/bwrap) /
@@ -224,13 +233,11 @@ toolpack,memory_chars,on_attach,on_detach}`; global `~/.lunamoth/rules.md`.
 1. **The neutral prompt curriculum** — iterate rules.py + tool descriptions so
    any worldview and any character can live well: how to use tools, how to
    treat goals, how to spend unattended time — neutral suggestions, never
-   orders. OPEN DESIGN QUESTION (owner leaning yes): adopt the tavern's
-   framing — the model *plays* the character while the workspace stays real —
-   so non-tech-worldview characters can coherently use tools; possibly as a
-   card-declared stance (literal being vs actor) with neutral bridging text.
-2. **Tempo** — unify pacing into something card-expressible and easily
-   controlled (patience/quiet/rest today; think "time flow rate" of the
-   chara's world).
+   orders. PARTIAL: embodiment shipped as `literal|actor` with a neutral bridge
+   for actor stance; the rest of the curriculum remains open.
+2. **Tempo** — SHIPPED as card hook `extensions.lunamoth.tempo`, Settings
+   override + `/tempo`, and frontend scheduling (`patience ÷ tempo`) without
+   changing quiet/rest.
 3. **A browse path for curiosity** — charas reading what interests them
    (today: terminal+`/net on` or an MCP fetch server; consider a bundled
    suggestion or note in the curriculum).
