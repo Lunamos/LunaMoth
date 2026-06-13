@@ -689,6 +689,11 @@ class CharaChild:
                     snap = await self.snapshot(silent=True)
                     self.idle.mark_idle_complete(snap or {})
                 except Exception as exc:  # noqa: BLE001
+                    # The chara being stopped/paused mid-cycle is an intended
+                    # shutdown, not a crash: the child exits and this idle call
+                    # fails. Don't report it as a backoff error.
+                    if self._stopping or Supervisor.is_paused(self.meta):
+                        return
                     msg = str(exc)
                     self.idle.mark_idle_error(msg)
                     if not permanent_model_error(msg):
