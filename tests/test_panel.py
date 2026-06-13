@@ -80,3 +80,54 @@ def test_panel_routing(tui_env):
             assert app._think_tokens > 0
 
     asyncio.run(scenario())
+
+
+def test_conversation_and_mode_smoke(tui_env):
+    """End-to-end: a real turn streams a reply, the shared /mode switch flips
+    autonomy (the ONE switch — no separate pause), and Ctrl+C detaches cleanly.
+
+    This guards against backend churn breaking the live path (CharaHandle's
+    stream_user/attach/snapshot, the shared command registry) — the import-only
+    checks miss a signature/field drift that only bites a running session."""
+    from lunamoth.front.tui import LunaMothTUI
+
+    async def scenario():
+        app = LunaMothTUI(patience=999, mode_override="chat")
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert app._session_started
+            assert app.char_name
+
+            # A real message: queued (never dropped), then streamed by the mock
+            # provider into the top pane, with the operator's line echoed above it.
+            app.input.value = "hello there"
+            await pilot.press("enter")
+            for _ in range(60):
+                await pilot.pause(0.05)
+                if not app._is_streaming() and app.pending_input is None:
+                    break
+            shown = "".join(t for _, t in app.display_segments)
+            assert "hello there" in shown          # operator echo in the transcript
+            assert len(shown) > len("hello there")  # plus the streamed reply
+
+            # /mode is the single autonomy control, served by the SHARED registry
+            # (core/commands.py) — flipping it must update the frontend's view.
+            app.input.value = "/mode live"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.mode == "live"
+            app.input.value = "/mode chat"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.mode == "chat"
+
+            # Status line renders against a live snapshot without raising.
+            app._update_status()
+
+            # Ctrl+C: clean shutdown + presence detach (the handoff bookkeeping).
+            await pilot.press("ctrl+c")
+            await pilot.pause()
+            assert app.shutdown_requested
+            assert app._detached
+
+    asyncio.run(scenario())
