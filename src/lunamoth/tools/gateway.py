@@ -566,5 +566,15 @@ class ToolGateway:
             out.extend(self.mcp.schemas(self.mcp_allowed))
         return out
 
+    def schemas_names(self) -> list[str]:
+        """Just the names of the active tool schemas — for the request log."""
+        out: list[str] = []
+        for spec in self.schemas():
+            fn = spec.get("function") if isinstance(spec, dict) else None
+            name = fn.get("name") if isinstance(fn, dict) else None
+            if name:
+                out.append(str(name))
+        return out
+
     def as_json(self, value: Any) -> str:
         return json.dumps(value, ensure_ascii=False, indent=2)

@@ -223,6 +223,64 @@ def test_export_zips_the_whole_session(tmp_path, monkeypatch):
     assert any(n.endswith("card.json") for n in names)
 
 
+def _seed_transcript(meta):
+    """Write a tiny transcript.db (chat + a struct tool call) without importing core/."""
+    db = meta.sandbox_dir / "transcript.db"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, epoch INTEGER NOT NULL DEFAULT 0,"
+        " role TEXT NOT NULL, content TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'chat', ts REAL NOT NULL);"
+        "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);"
+    )
+    conn.execute("INSERT INTO messages(epoch,role,content,kind,ts) VALUES(0,'user','run it','chat',1.0)")
+    call = json.dumps({"role": "assistant", "content": "", "reasoning_content": "thinking",
+                       "tool_calls": [{"id": "c1", "type": "function",
+                                       "function": {"name": "terminal", "arguments": "{}"}}]})
+    conn.execute("INSERT INTO messages(epoch,role,content,kind,ts) VALUES(0,'assistant',?,'struct',2.0)", (call,))
+    conn.commit()
+    conn.close()
+
+
+def test_export_includes_conversation_and_requests_jsonl(tmp_path, monkeypatch):
+    set_defaults()
+    monkeypatch.setattr(H.Path, "home", classmethod(lambda cls: tmp_path))
+    entry = result("session.wake", {"card": luna_card_path()})
+    meta = S.load_session(entry["name"])
+    _seed_transcript(meta)
+    (meta.sandbox_dir / "logs").mkdir(parents=True, exist_ok=True)
+    (meta.sandbox_dir / "logs" / "requests.jsonl").write_text(
+        json.dumps({"kind": "send", "model": "m", "system": ["sys"], "messages": [], "tools": []}) + "\n",
+        encoding="utf-8")
+    r = result("session.export", {"name": entry["name"]})
+
+    # Standalone files next to the zip.
+    assert r["conversation"].endswith("-conversation.jsonl")
+    assert r["requests"].endswith("-requests.jsonl")
+    conv_lines = [json.loads(ln) for ln in Path(r["conversation"]).read_text(encoding="utf-8").splitlines()]
+    assert conv_lines[0]["content"] == "run it"
+    assert conv_lines[1]["tool_calls"][0]["function"]["name"] == "terminal"
+    assert conv_lines[1]["reasoning_content"] == "thinking"
+
+    # And inside the zip too.
+    import zipfile
+
+    names = zipfile.ZipFile(r["path"]).namelist()
+    assert any(n.endswith("-conversation.jsonl") for n in names)
+    assert any(n.endswith("-requests.jsonl") for n in names)
+
+
+def test_export_without_requests_log_omits_requests_key(tmp_path, monkeypatch):
+    set_defaults()
+    monkeypatch.setattr(H.Path, "home", classmethod(lambda cls: tmp_path))
+    entry = result("session.wake", {"card": luna_card_path()})
+    meta = S.load_session(entry["name"])
+    _seed_transcript(meta)  # no requests.jsonl written
+    r = result("session.export", {"name": entry["name"]})
+    assert "requests" not in r
+    assert "conversation" in r
+
+
 # ---- cards: drafts, save, delete ------------------------------------------------
 
 def test_card_from_draft_roundtrip():

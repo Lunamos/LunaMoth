@@ -127,7 +127,10 @@ zero internal deps; `obs/` imports only `config`.
   - `context.py` — `ContextBuffer` (full message dicts; THINK_WINDOW pruning).
   - `compaction.py` — Hermes-style summary compaction; summaries persist as
     transcript `kind="summary"` rows; restore = latest summary + tail (no re-LLM).
-  - `transcript.py` — per-chara SQLite log (WAL+fallback, epochs for /reset).
+  - `transcript.py` — per-chara SQLite log (WAL+fallback, epochs for /reset);
+    `export_jsonl` writes the full epoch (prompts/tool calls/results/reasoning)
+    hermes-style. `agent.py` also writes `sandbox/logs/requests.jsonl` — the
+    faithful request log (last 200 turns: exact system+messages+tools sent).
   - `providers.py` — model's REAL context window. `state.py` — `EnvState`
     (env_status.json: isolation/network/writable/tools/rest_until).
 - `protocol/` — **the contract layer**; frontends import this and nothing deeper:

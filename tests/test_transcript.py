@@ -65,6 +65,70 @@ def test_unwritable_path_degrades_gracefully(tmp_path):
     assert t2.load() == []
 
 
+def test_export_jsonl_complete_roundtrip(tmp_path):
+    import json
+
+    t = TranscriptStore(tmp_path / "t.db")
+    t.append_message({"role": "user", "content": "run it"})
+    call = {"role": "assistant", "content": "", "tool_calls": [
+        {"id": "c1", "type": "function", "function": {"name": "terminal", "arguments": "{\"command\": \"ls\"}"}}
+    ], "reasoning_content": "let me look around"}
+    t.append_message(call)
+    t.append_message({"role": "tool", "tool_call_id": "c1", "content": "exit=0\nfile.txt"})
+    t.append_message({"role": "assistant", "content": "done", "kind": "think"})
+
+    out = tmp_path / "conv.jsonl"
+    n = t.export_jsonl(out)
+    lines = [json.loads(ln) for ln in out.read_text(encoding="utf-8").splitlines()]
+    assert n == 4 and len(lines) == 4
+    # Oldest first, every kind present.
+    assert lines[0]["role"] == "user" and lines[0]["content"] == "run it"
+    # The struct row expands back to its FULL message dict.
+    assert lines[1]["kind"] == "struct"
+    assert lines[1]["tool_calls"][0]["function"]["name"] == "terminal"
+    assert lines[1]["reasoning_content"] == "let me look around"
+    # The tool result line.
+    assert lines[2]["role"] == "tool" and lines[2]["tool_call_id"] == "c1"
+    assert "exit=0" in lines[2]["content"]
+    # Every line carries id + ts.
+    assert all("id" in o and "ts" in o for o in lines)
+
+
+def test_export_jsonl_only_current_epoch(tmp_path):
+    import json
+
+    t = TranscriptStore(tmp_path / "t.db")
+    t.append("user", "old")
+    t.reset()
+    t.append("user", "new")
+    out = tmp_path / "conv.jsonl"
+    t.export_jsonl(out)
+    lines = [json.loads(ln) for ln in out.read_text(encoding="utf-8").splitlines()]
+    assert [o["content"] for o in lines] == ["new"]
+
+
+def test_export_jsonl_missing_db_is_empty_not_fabricated(tmp_path):
+    # Force the read-only export path to face a DB that was never written.
+    fresh = TranscriptStore.__new__(TranscriptStore)
+    fresh.path = tmp_path / "absent.db"
+    fresh.available = True
+    out = tmp_path / "empty.jsonl"
+    assert fresh.export_jsonl(out) == 0
+    assert out.read_text(encoding="utf-8") == ""
+
+
+def test_load_display_includes_legacy_tool_rows(tmp_path):
+    t = TranscriptStore(tmp_path / "t.db")
+    t.append("user", "hi")
+    # A legacy forensic tool row (older builds wrote kind='tool').
+    import json as _json
+    t.append("tool", _json.dumps({"role": "tool", "tool_call_id": "x", "content": "42"}), kind="tool")
+    model_view = t.load()       # what the model replays — excludes 'tool'
+    display_view = t.load_display()  # what the frontend shows — includes 'tool'
+    assert all(m.get("role") != "tool" for m in model_view)
+    assert any(m.get("role") == "tool" and m.get("content") == "42" for m in display_view)
+
+
 @pytest.fixture
 def agent(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "mock")
