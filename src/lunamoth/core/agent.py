@@ -52,6 +52,44 @@ def _abbrev(text: str, limit: int) -> str:
     return one_line if len(one_line) <= limit else one_line[: limit - 1] + "…"
 
 
+# The faithful per-turn request log keeps only the most recent N requests.
+_REQUEST_LOG_MAX_LINES = 200
+
+
+def _append_request_log(kind: str, system: list[str], messages: list[dict],
+                        tools: list[str], model: str) -> None:
+    """Append one faithful request record to SANDBOX_ROOT/logs/requests.jsonl.
+
+    This is debug instrumentation — ALWAYS on but capped at the last
+    _REQUEST_LOG_MAX_LINES lines. Best-effort, exactly like the audit log:
+    a logging failure must NEVER raise into the turn (no-fallback applies to
+    the model output, not to this side channel)."""
+    try:
+        path = SANDBOX_ROOT / "logs" / "requests.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = _json.dumps(
+            {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "kind": kind,
+                "system": list(system),
+                "messages": messages,
+                "tools": list(tools),
+                "model": model,
+            },
+            ensure_ascii=False,
+        )
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+        # Cheap rotation: only re-read+trim when we are over the cap.
+        with path.open("r", encoding="utf-8") as fh:
+            lines = fh.readlines()
+        if len(lines) > _REQUEST_LOG_MAX_LINES:
+            with path.open("w", encoding="utf-8") as fh:
+                fh.writelines(lines[-_REQUEST_LOG_MAX_LINES:])
+    except Exception:  # noqa: BLE001 - logging must never break a turn
+        pass
+
+
 @dataclass
 class Session:
     context: ContextBuffer = field(default_factory=lambda: ContextBuffer(
@@ -645,8 +683,11 @@ class LunaMothAgent:
         speech: list[str] = []
         committed = False
         try:
+            view = self._context_view(session)
+            _append_request_log("send", stable + volatile, view,
+                                 self.tools.schemas_names(), self.settings.model)
             stream = self._reply_stream(
-                text, self._context_view(session), stable, volatile,
+                text, view, stable, volatile,
                 in_context=True, record=session.context.add_message,
             )
             for ev in stream:
@@ -747,8 +788,11 @@ class LunaMothAgent:
                 scan_text = self._scan_text(session, tick_text)
                 stable = self._stable_prefix()
                 volatile = self._volatile_tail(scan_text, session)
+                view = self._context_view(session)
+                _append_request_log("idle", stable + volatile, view,
+                                    self.tools.schemas_names(), self.settings.model)
                 stream = self._reply_stream(
-                    tick_text, self._context_view(session), stable, volatile,
+                    tick_text, view, stable, volatile,
                     in_context=False, record=self._record_think(session), channel=MUSE,
                 )
                 try:
