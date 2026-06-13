@@ -21,7 +21,14 @@ from ..config import SANDBOX_ROOT
 from .broker import broker
 
 _FORMAT = "%(asctime)s %(levelname)-7s [%(session)s] %(name)s: %(message)s"
-_REDACT = re.compile(r"(sk-[A-Za-z0-9_\-]{8,}|Bearer\s+\S+|api[_-]?key[\"':=\s]+\S+)", re.I)
+_REDACT = re.compile(
+    r"(sk-[A-Za-z0-9_\-]{8,}"
+    r"|Bearer\s+\S+"
+    r"|api[_-]?key[\"':=\s]+\S+"
+    # query-param credential forms (e.g. WeChatPadPro's ?key=<authKey>, ?token=…)
+    r"|[?&](?:access[_-]?token|auth[_-]?key|authkey|token|secret|password|key)=[^&\s)\"']+)",
+    re.I,
+)
 
 _configured = False
 

@@ -762,7 +762,8 @@ def test_wecom_callback_carries_msgid_for_dedup(monkeypatch):
             "<MsgType><![CDATA[text]]></MsgType><Content><![CDATA[hello]]></Content>"
             "<MsgId>1456453720</MsgId><AgentID>1000002</AgentID></xml>"
         )
-        url = f"http://127.0.0.1:{port}/callback/command?msg_signature=x&timestamp=1&nonce=2"
+        # a fresh timestamp: the callback handler rejects stale ones (±5 min replay guard)
+        url = f"http://127.0.0.1:{port}/callback/command?msg_signature=x&timestamp={int(time.time())}&nonce=2"
         req = urllib.request.Request(url, data=plain.encode("utf-8"), method="POST")
         with urllib.request.urlopen(req, timeout=5) as resp:
             assert resp.status == 200

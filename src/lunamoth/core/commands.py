@@ -60,7 +60,9 @@ def _files(agent, session, arg: str) -> Reply:
 
 
 def _workspace(agent, session, arg: str) -> Reply:
-    return _tool_json(agent, "list_workspace")
+    # workspace/ IS the one sandbox dir, so this is list_files (the dedicated
+    # list_workspace tool was retired; routing here keeps the alias working).
+    return _tool_json(agent, "list_files")
 
 
 def _read(agent, session, arg: str) -> Reply:
@@ -72,7 +74,7 @@ def _read(agent, session, arg: str) -> Reply:
 def _wread(agent, session, arg: str) -> Reply:
     if not arg:
         return Reply(False, "usage: /wread <filename>")
-    return _tool_json(agent, "read_workspace_file", filename=arg.split()[0])
+    return _tool_json(agent, "read_file", filename=arg.split()[0])
 
 
 def _write(agent, session, arg: str) -> Reply:

@@ -201,7 +201,8 @@ class CharaClient {
   }
 
   send(text) { return this._stream("send", { text }); }
-  idle() { return this._stream("idle", {}); }
+  // No idle() here by design: idle driving is SERVER-SIDE only (supervisor.py).
+  // The web renderer renders life.state and must never drive an idle turn.
   interrupt() { return this.sock.call("interrupt", {}, 10000); }
   command(line) { return this.sock.call("command", { line }, 60000); }
   snapshot() { return this.sock.call("snapshot", {}, 20000); }

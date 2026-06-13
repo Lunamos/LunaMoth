@@ -73,21 +73,20 @@ def _hint(interactive: bool) -> Text:
 
 
 def _splash(console: Console, animate: bool) -> None:
-    # The compact block wordmark is the preferred LunaMoth look — always use it
-    # (the wide serif one is not used; keep it this way unless asked otherwise).
-    compact = True
+    # The compact block wordmark is the one LunaMoth look (the wide serif art was
+    # retired). art.* no longer takes a `compact` flag.
     if animate and console.is_terminal:
         try:
             from rich.live import Live  # inline (screen=False) → stays in scrollback
 
             with Live(console=console, refresh_per_second=24, transient=False) as live:
-                for frame in art.sweep_frames(compact):
+                for frame in art.sweep_frames():
                     live.update(frame)
                     time.sleep(0.04)
         except Exception:
-            console.print(art.wordmark(compact))
+            console.print(art.wordmark())
     else:
-        console.print(art.wordmark(compact))
+        console.print(art.wordmark())
     console.print(art.tagline())
     console.print()
 

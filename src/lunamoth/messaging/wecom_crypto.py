@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import os
 import struct
 from xml.etree import ElementTree as ET
@@ -29,9 +30,9 @@ def _aes_key(encoding_aes_key: str) -> bytes:
 
 
 def _pad(data: bytes) -> bytes:
+    # PKCS#7-style over a 32-byte block: a full final block always gets a whole
+    # block of padding (amount is in 1..32, never 0), so the unpad is unambiguous.
     amount = 32 - (len(data) % 32)
-    if amount == 0:
-        amount = 32
     return data + bytes([amount]) * amount
 
 
@@ -121,7 +122,7 @@ def decrypt_message(
 ) -> str:
     encrypted = extract_encrypt(encrypted_xml)
     expected = sha1_signature(token, timestamp, nonce, encrypted)
-    if expected != msg_signature:
+    if not hmac.compare_digest(expected, msg_signature):
         raise WeComCryptoError("invalid message signature")
     return aes_decrypt(encrypted, receive_id, encoding_aes_key)
 
@@ -137,7 +138,7 @@ def verify_url(
     receive_id: str,
 ) -> str:
     expected = sha1_signature(token, timestamp, nonce, echostr)
-    if expected != msg_signature:
+    if not hmac.compare_digest(expected, msg_signature):
         raise WeComCryptoError("invalid url signature")
     return aes_decrypt(echostr, receive_id, encoding_aes_key)
 

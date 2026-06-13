@@ -25,7 +25,8 @@ Cross-process handoff: when a TUI detaches, the detach event is queued in a
 small state file inside the session sandbox; the background daemon consumes it
 on startup so the chara's loop continues *knowing* the operator left. The same
 file remembers whether the chara has ever met the operator (first boot shows
-the card's first_mes; later attaches get a live arrival turn instead).
+the card's first_mes once; later attaches open silently — the chara registers
+the operator only when they speak).
 
 Presence also gates the `request_permission` tool: while the operator is
 attached the character may ask for network / writable paths / more resources

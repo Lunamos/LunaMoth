@@ -94,14 +94,10 @@ cards/*
 !cards/Quinn.zh.json
 !cards/Quinn.en.json
 
-# LunaMoth runtime artifacts
+# LunaMoth runtime artifacts (sandbox/logs/ is fully ignored below; created at runtime)
 sandbox/logs/*.jsonl
 sandbox/workspace/*
-!sandbox/logs/.gitkeep
 !sandbox/workspace/.gitkeep
-
-# LunaMoth local config (may contain API keys)
-.lunamoth/
 
 # pre-rename config dir (still readable as fallback)
 .lunamoss/

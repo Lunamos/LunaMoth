@@ -213,6 +213,18 @@ class WeComAdapter(Adapter):
                     self._write(404, "not found")
                     return
                 query = urllib.parse.parse_qs(parsed.query)
+                # Freshness guard: the signed timestamp must be recent. Dedup alone
+                # is in-memory (lost on restart / after TTL), so a captured callback
+                # could be replayed verbatim with a still-valid signature; reject
+                # anything outside a ±5 min window before running a turn.
+                try:
+                    skew = abs(time.time() - int(self._param(query, "timestamp")))
+                except (TypeError, ValueError):
+                    skew = float("inf")
+                if skew > 300:
+                    _log.warning("WeCom callback rejected: timestamp skew %.0fs", skew)
+                    self._write(403, "stale timestamp")
+                    return
                 length = int(self.headers.get("Content-Length", "0") or "0")
                 body = self.rfile.read(length)
                 try:

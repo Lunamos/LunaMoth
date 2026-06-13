@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import dataclasses
 import functools
+import hmac
 import http.server
 import json
 import logging
@@ -901,7 +902,7 @@ class WebHandler(http.server.SimpleHTTPRequestHandler):
         url = urlsplit(self.path)
         qs = parse_qs(url.query)
         token = (qs.get("token") or [""])[0]
-        if not self.token or token != self.token:
+        if not self.token or not hmac.compare_digest(token, self.token):
             self.send_error(403)
             return
         if url.path == "/rpc":

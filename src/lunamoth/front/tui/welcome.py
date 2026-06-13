@@ -145,7 +145,7 @@ class WelcomeScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with VerticalScroll(id="welcome"):
-            yield Static(art.wordmark(compact=True), id="banner")
+            yield Static(art.wordmark(), id="banner")
             yield Static(self.skin.subtitle, id="title")
             yield Static(
                 "Pick a model and a character, then enter. Choosing a character fills in its "
@@ -200,7 +200,7 @@ class WelcomeScreen(Screen):
             themes = _discover("themes", (".json",))
             yield Label("TUI theme (cosmetic skin)", classes="field-label")
             yield Select(
-                _picker_options(themes, self.draft.tui_theme_path, "(default · LunaMoth 月蛾)"),
+                _picker_options(themes, self.draft.tui_theme_path, "(default theme)"),
                 value=self.draft.tui_theme_path or "",
                 allow_blank=False,
                 id="theme",

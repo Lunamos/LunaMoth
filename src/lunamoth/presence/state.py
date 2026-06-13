@@ -11,7 +11,9 @@ class PresenceState:
     """Tiny state file inside the session sandbox.
 
     `met` — whether the chara has ever seen the operator (first boot shows the
-    card's first_mes; later attaches get a live arrival turn instead).
+    card's first_mes once; later attaches open silently — the chara registers
+    the operator only when they speak, via the "[operator entered]" marker on
+    that first message).
     `pending` — a context line queued by the process that detached, consumed by
     the next process that adopts the chara (e.g. the background daemon).
     """

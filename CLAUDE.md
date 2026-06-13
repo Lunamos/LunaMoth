@@ -145,7 +145,7 @@ zero internal deps; `obs/` imports only `config`.
   - `codec.py` — JSON wire format (stream-json, the server, the web renderer).
   - `api.py` — `CharaHandle` (attach/streams/command/snapshot/permission hook)
     + Reply/AttachInfo/StateSnapshot. The ONLY backend surface frontends see.
-- `messaging/` — external chat gateways: WeCom, personal WeChat (iLink/ClawBot, and also via WeChatPadPro — user-run docker, iPad protocol, any account), QQ OneBot, and Telegram adapters behind the sync `Adapter` seam. A gateway is NOT a separate agent: the adapters run INSIDE the chara's `serve --stdio` child via `server/messaging_host.py` (`MessagingHost` + `dispatch.run_stream_sync`), sharing its ONE handle — a WeChat turn streams into the desktop window live AND replies to WeChat. The host has no idle loop (the supervisor owns self-work). `MessagingGateway` (own handle + idle) remains the standalone `lunamoth gateway NAME` path for headless use/tests. Per-chara toggle = `messaging.start/stop` RPC to the child (`GatewayChild` is now a thin controller, not a process).
+- `messaging/` — external chat gateways: WeCom, personal WeChat (iLink/ClawBot, and also via WeChatPadPro — user-run docker, iPad protocol, any account), QQ OneBot, and Telegram adapters behind the sync `Adapter` seam. A gateway is NOT a separate agent: the adapters run INSIDE the chara's `serve --stdio` child via `server/messaging_host.py` (`MessagingHost` + `dispatch.run_stream_sync`), sharing its ONE handle — a WeChat turn streams into the desktop window live AND replies to WeChat. The host has no idle loop (the supervisor owns self-work). `MessagingGateway` (own handle + idle) remains the standalone `lunamoth gateway NAME` path for headless use/tests. Per-chara toggle = `messaging.start/stop` RPC to the child (`GatewayChild` is now a thin controller, not a process). Shared seams: `access.py` (the allow-list + refusal throttle — ONE copy gating BOTH the standalone gateway and the in-child host, so "empty allow-list = open" can't drift between them) and `text.py` (`split_text`, sentence-aware splitting for platform length caps).
 - `content/` — SillyTavern compat, pure data: `cards.py` (V2/V3 PNG/JSON; PHI
   exposed for the post-history slot, never folded into the persona;
   `merge_world_into_card` = the world-book IMPORT path), `worldinfo.py`
@@ -153,7 +153,8 @@ zero internal deps; `obs/` imports only `config`.
   card's embedded `character_book` is the ONE world source), `persona.py`
   (default card = the localized card carrying the `"default"` tag),
   `rules.py` (the neutral Rules layer), `themes.py` (built-in TUI theme;
-  theme files are user-supplied — no bundled themes dir).
+  theme files are user-supplied — no bundled themes dir),
+  `knobs.py` (chara-knob defaults + the UI copy describing each embodiment stance).
 - `tools/` — the tool domain: `gateway.py` (`ToolGateway`, allowlisted dispatch,
   `call(name, /)` positional-only), `runner.py` (terminal under dir/sandbox/docker),
   `sandbox.py` (ONE working dir — `workspace/`; write_file/read_file/list_files
@@ -171,7 +172,9 @@ zero internal deps; `obs/` imports only `config`.
   `SessionMeta.env()` is the activation interface), `settings.py`, `cleanup.py`,
   `isolation.py` (stdlib-only OS jail builders — shared by tools/runner and the
   supervisor's PTY shell; `interactive_shell_argv` never degrades to dir trust).
-- `presence/` — attach/detach awareness + `/mode live|chat`.
+- `presence/` — attach/detach awareness + `/mode live|chat`: `state.py`
+  (`PresenceState` — the first-meeting flag + cross-process detach handoff file),
+  `prompts.py` (the live|chat mode semantics + card-driven enter/leave prompts).
 - `server/` — the remote/desktop gateway (imports protocol+session+content, never
   core/tools directly): `dispatch.py` (per-session JSON-RPC over CharaHandle),
   `stdio.py`/`ws.py` (transports for `lunamoth serve <name>`), `hub.py`
@@ -195,13 +198,18 @@ zero internal deps; `obs/` imports only `config`.
     operator console / spotlight panel. Steady caret. Renders protocol events in
     `_handle_event`; spontaneous cycles gated by quiet window + rest_until.
   - `terminal.py` — plain-terminal loop; also what the background daemon runs.
-  - `roster.py` — the launcher. Compact block wordmark (do NOT switch to the wide
-    serif one). Raw-mode **`os.read(fd)`** key reads, NOT `sys.stdin.read` (that
-    breaks ESC sequences — every arrow read as bare Esc and quit the launcher).
+  - `roster.py` — the launcher. Compact block wordmark (the wide serif one was
+    retired — `art.*` no longer takes a `compact` flag). Raw-mode **`os.read(fd)`**
+    key reads, NOT `sys.stdin.read` (that breaks ESC sequences — every arrow read
+    as bare Esc and quit the launcher).
   - `wizard.py` — plain-terminal first-run setup. `art.py` — the blue wordmark.
   - `web/` — the desktop renderer (no build step: index.html/style.css/i18n.js/
-    rpc.js/app.js), a pure protocol client served by `lunamoth desktop`.
-    UI chrome bilingual zh/en + light/dark; a chara's
+    rpc.js + `app.js` = board/deck/settings/workshop half and `chat.js` = chat
+    page + tabbed right panel + works/terminal pages + gateway pane), a pure
+    protocol client served by `lunamoth desktop`. NOTE: the gateway deck UI
+    currently exposes only the WeChat (weixin) platform; the WeCom/QQ/Telegram
+    adapters exist in `messaging/` but aren't surfaced in the deck yet (≈50
+    platform i18n keys sit unused). UI chrome bilingual zh/en + light/dark; a chara's
     words stay in the card's language. Idle driving is SERVER-SIDE only
     (supervisor.py) — web clients render life.state and must never drive idle.
 

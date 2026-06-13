@@ -218,14 +218,6 @@ class ToolGateway:
     def tool_read_file(self, filename: str) -> str:
         return self.sandbox.read_file(filename)
 
-    # Kept for the /workspace and /wread operator commands (the LLM no longer
-    # sees these as separate tools — list_files/read_file ARE the workspace).
-    def tool_list_workspace(self) -> list[str]:
-        return self.sandbox.list_files()
-
-    def tool_read_workspace_file(self, filename: str) -> str:
-        return self.sandbox.read_file(filename)
-
     def tool_write_file(self, filename: str, text: str) -> str:
         self.sandbox.write_file(filename, text)
         # Report the byte count, not the content — the result must never echo
@@ -342,6 +334,16 @@ class ToolGateway:
             if not p:
                 return "granted in principle, but no path was given — request again with the path in `detail`."
             self.state.add_writable_path(p)
+            # docker isolation runs `_docker()` which does NOT bind-mount the
+            # writable list (only the dir/sandbox jails honor it), so be honest:
+            # the grant is recorded but cannot take effect until the container is
+            # rebuilt with that mount. Anything else fabricates a success.
+            if (self.state.load().get("isolation") or "").lower() == "docker":
+                return (
+                    f"recorded: {p} is on your writable list, but docker isolation does not "
+                    "bind-mount it — the terminal cannot write there until the container is "
+                    "restarted with that mount. Writes inside your workspace work as usual."
+                )
             return f"granted: {p} is now writable."
         if kind == "memory":
             if self.memory is None:

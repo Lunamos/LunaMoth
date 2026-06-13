@@ -25,6 +25,7 @@ const I18N = {
   "empty-board": ["还没有角色。", "No characters yet."],
   "meet-luna": ["遇见你的角色", "Meet your character"],
   "create-chara": ["创建角色", "Create a character"],
+  "via-tag": ["来自", "via"],
   // board card
   "st-idle-live": ["在过自己的日子", "Living its own day"],
   "st-offline": ["离线", "Offline"],

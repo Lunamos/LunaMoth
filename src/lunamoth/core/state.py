@@ -14,7 +14,7 @@ DEFAULT_STATUS = {
     "rest_until": 0.0,               # epoch until which the chara chose to rest (rest tool)
     "tool_access": [
         "inspect_env", "memory", "list_files", "read_file",
-        "list_workspace", "read_workspace_file", "write_file", "write_log", "terminal",
+        "write_file", "write_log", "terminal",
         "request_permission", "add_goal", "set_goal_status", "read_skill", "create_skill",
         "speak", "rest",
     ],

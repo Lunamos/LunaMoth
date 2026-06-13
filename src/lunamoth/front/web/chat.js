@@ -910,7 +910,7 @@ class ChatController {
     const src = (p && p.source) || "";
     if (src) {
       const label = (typeof gwPlatLabel === "function") ? gwPlatLabel(src) : src;
-      row.appendChild(el("div", { class: "via-tag" }, "via " + label));
+      row.appendChild(el("div", { class: "via-tag" }, t("via-tag") + " " + label));
     }
     $("stream-inner").appendChild(row);
     this.scrollDown(true);

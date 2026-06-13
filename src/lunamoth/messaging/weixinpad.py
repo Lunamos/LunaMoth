@@ -564,6 +564,12 @@ class WeixinPadAdapter(Adapter):
         msg = ws_message_to_inbound(data)
         if msg is None:
             return False
+        # GetSyncMsg also syncs back messages THIS account sent (the bot's own
+        # replies, FromUserName == our wxid). Without this guard, with an open
+        # (empty) allow-list the bot would ingest and answer itself in a loop.
+        if self.wxid and msg.sender_id == self.wxid:
+            _log.debug("ignored WeChatPadPro echo of our own outbound message")
+            return False
         self._last_sender = msg.sender_id
         inbox.put(msg)
         return True

@@ -1,8 +1,9 @@
-"""LunaMoth brand art: the serif wordmark, a pale-blue→white gradient, and a
-small "moonlight" sweep animation. Shown on every launch (the roster/splash).
+"""LunaMoth brand art: the compact block wordmark, a pale-blue→white gradient,
+and a small "moonlight" sweep animation. Shown on every launch (roster/splash).
 
-Cosmetic only. Kept restrained — this is a general runtime — but with a serif
-wordmark + a moth tagline so it reads as a roleplay tavern, not a dev tool.
+Cosmetic only. Kept restrained — this is a general runtime — but with a wordmark
++ a moth tagline so it reads as a roleplay tavern, not a dev tool. (The wide
+serif wordmark was retired; the compact block art is the one true look.)
 
 We render with rich `Text` (per-row styles) rather than markup strings, so the
 ASCII art's stray brackets/backslashes can never be mis-parsed as markup tags.
@@ -43,15 +44,11 @@ def _row_color(i: int, n: int) -> str:
     return _blend(i / max(1, n - 1))
 
 
-def _file(compact: bool) -> str:
-    return "wordmark_compact.txt" if compact else "wordmark.txt"
-
-
-def wordmark(compact: bool = False, sweep_x: int | None = None, sweep_w: int = 6) -> Text:
+def wordmark(sweep_x: int | None = None, sweep_w: int = 6) -> Text:
     """The wordmark as a rich Text, vertical blue→white gradient.
 
     sweep_x: center column of a brighter "moonlight" bar (None = static)."""
-    rows = _load(_file(compact))
+    rows = _load("wordmark_compact.txt")
     n = len(rows)
     t = Text(no_wrap=True)
     for i, row in enumerate(rows):
@@ -72,17 +69,17 @@ def wordmark(compact: bool = False, sweep_x: int | None = None, sweep_w: int = 6
     return t
 
 
-def wordmark_width(compact: bool = False) -> int:
-    return max((len(r) for r in _load(_file(compact))), default=0)
+def wordmark_width() -> int:
+    return max((len(r) for r in _load("wordmark_compact.txt")), default=0)
 
 
-def sweep_frames(compact: bool = False, step: int = 4, sweep_w: int = 6) -> list[Text]:
+def sweep_frames(step: int = 4, sweep_w: int = 6) -> list[Text]:
     """Frames for a one-shot moonlight sweep across the wordmark, then settle."""
-    width = wordmark_width(compact)
-    frames = [wordmark(compact, sweep_x=x, sweep_w=sweep_w) for x in range(-sweep_w, width + sweep_w, step)]
-    frames.append(wordmark(compact, sweep_x=None))  # settle to static gradient
+    width = wordmark_width()
+    frames = [wordmark(sweep_x=x, sweep_w=sweep_w) for x in range(-sweep_w, width + sweep_w, step)]
+    frames.append(wordmark(sweep_x=None))  # settle to static gradient
     return frames
 
 
-def tagline(text: str = "an agentic character tavern · 月蛾") -> Text:
+def tagline(text: str = "an agentic character tavern") -> Text:
     return Text(text, style=f"italic {_DIM}")
