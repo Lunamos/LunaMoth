@@ -191,6 +191,19 @@ const GW_PLATFORMS = {
       { key: "api_timeout_ms", label: "api_timeout_ms", secret: false, help: "gw-h-wx-api-timeout", ph: "15000" },
     ],
   },
+  weixinpad: {
+    label: "微信 · WeChatPadPro",
+    blurb: "gw-wxpad-blurb",
+    note: "gw-wxpad-risk",   // ban-risk warning (unofficial iPad protocol)
+    required: [
+      { key: "host", label: "host", secret: false, help: "gw-h-wxpad-host", ph: "127.0.0.1" },
+      { key: "admin_key", label: "admin_key", secret: true, help: "gw-h-wxpad-admin" },
+    ],
+    recommended: [
+      { key: "port", label: "port", secret: false, help: "gw-h-wxpad-port", ph: "38849" },
+    ],
+    advanced: [],
+  },
   qq: {
     label: "QQ · OneBot",
     blurb: "gw-qq-blurb",
