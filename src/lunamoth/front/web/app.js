@@ -771,6 +771,24 @@ function pendingSpine(pd) {
   return spine;
 }
 
+/* Regenerate a draft card from its stored origin inspiration. The origin is
+   persisted by the draft pipeline (card.from_draft -> ext.lunamoth.origin), so
+   regenerate re-runs cards.draft with it. If a card has no stored origin
+   (e.g. an old draft or an imported one), we fall back to its description as
+   the inspiration — the simplest honest behavior. Backgrounds like a fresh
+   generation: a new placeholder, the old draft card stays until it lands. */
+async function regenerateDraftCard(c) {
+  let full;
+  try {
+    full = await hub.call("card.read", { path: c.path }, 20000);
+  } catch (e) { toast(rpcErrText(e), true); return; }
+  const ext = full.extensions && full.extensions.lunamoth ? full.extensions.lunamoth : {};
+  const origin = String(ext.origin || "").trim() || String(full.description || "").trim();
+  if (!origin) { toast(t("regen-no-origin"), true); return; }
+  startDraftGeneration(origin, {});
+  toast(t("regen-started"));
+}
+
 function renderDeck() {
   if (!state.hub) return;
   const q = ($("deck-search").value || "").toLowerCase();
@@ -787,6 +805,7 @@ function renderDeck() {
     const acts = el("div", { class: "spine-acts" },
       el("button", { class: "wake", onclick: (ev) => { ev.stopPropagation(); ensureModel(() => openWakeSheet(c)); } }, t("deck-wake")),
       el("button", { onclick: (ev) => { ev.stopPropagation(); viewCard(c); } }, t("deck-view")),
+      c.draft ? el("button", { onclick: (ev) => { ev.stopPropagation(); ensureModel(() => regenerateDraftCard(c)); } }, t("deck-regen")) : null,
       el("button", { onclick: async (ev) => {
         ev.stopPropagation();
         try {
