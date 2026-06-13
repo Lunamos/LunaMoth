@@ -41,6 +41,10 @@ from ..content.knobs import normalize_embodiment, parse_patience
 
 _log = get_logger("agent")
 
+# The Settings.user_name default — card-declared user_name applies only when the
+# operator hasn't overridden it (precedence: operator > card > default).
+_DEFAULT_USER_NAME = "操作者"
+
 
 def _abbrev(text: str, limit: int) -> str:
     """Collapse a tool result to a single short line for compact display."""
@@ -162,6 +166,14 @@ class LunaMothAgent:
         # Language follows the card — it is not a setting. Used only to pick
         # the fallback persona when no card loads at all.
         self.lang = self.character.language if self.character else system_language()
+
+        # The card may name the operator (extensions.lunamoth.user_name). Apply
+        # it only when the operator hasn't set their own — precedence stays
+        # operator override > card > default, like every other knob.
+        if self.character is not None:
+            declared_user = self.character.user_name_override()
+            if declared_user and self.settings.user_name in ("", _DEFAULT_USER_NAME):
+                self.settings.user_name = declared_user
 
     def _load_toolpack(self) -> None:
         """Load the tool pack (the 'what it can do' layer) and apply it to the gateway.
@@ -409,6 +421,12 @@ class LunaMothAgent:
         #    autonomy all come from the card; the engine adds no identity of its own.
         if self.character is not None:
             msgs.append(self.character.render_system(self.settings.user_name))
+            # Who the OPERATOR is (extensions.lunamoth.user_persona) — the
+            # SillyTavern persona-description convention. Stable, so it rides
+            # the cached prefix beside the chara's own identity.
+            user_persona = self.character.render_user_persona(self.settings.user_name)
+            if user_persona:
+                msgs.append(user_persona)
         else:
             msgs.append(fallback_persona(self.lang))
 

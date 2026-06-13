@@ -171,6 +171,23 @@ class CharacterCard:
             parts.append(f"Example dialogue:\n{apply_macros(self.mes_example.strip(), char, user)}")
         return "\n\n".join(parts)
 
+    def user_name_override(self) -> str:
+        """The operator's name as the card declares it (extensions.lunamoth.user_name),
+        or '' — the engine applies it only when the operator hasn't set one."""
+        val = self.defaults().get("user_name")
+        return str(val).strip() if isinstance(val, str) else ""
+
+    def render_user_persona(self, user: str = "User") -> str:
+        """A persona block describing the OPERATOR (the SillyTavern persona-
+        description convention), or '' when the card declares none. Lives in
+        extensions.lunamoth.user_persona. Stable across a session, so it rides
+        the cached prefix — who the user is is not a per-turn fact."""
+        val = self.defaults().get("user_persona")
+        text = str(val).strip() if isinstance(val, str) else ""
+        if not text:
+            return ""
+        return f"About {user}:\n{apply_macros(text, self.name, user)}"
+
     def greeting(self, user: str = "User") -> str:
         if not self.first_mes.strip():
             return ""

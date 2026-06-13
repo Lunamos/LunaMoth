@@ -237,3 +237,34 @@ def test_model_command_session_scoped_hot_swap(agent_factory, tmp_path):
     # not persisted: a fresh settings load knows nothing of the swap
     from lunamoth.session.settings import load_settings
     assert load_settings().model != "mock/other"
+
+
+def test_card_user_name_and_persona_reach_the_prompt(agent_factory, tmp_path):
+    """The card may name the operator and describe them (webui-needs #9,
+    ST persona convention): user_name fills {{user}}, user_persona becomes an
+    'About <user>' block in the cached stable prefix."""
+    card = _write_card(tmp_path / "withuser.json", {
+        "toolpack": "sandbox",
+        "user_name": "Mira",
+        "user_persona": "{{user}} is a marine biologist who works odd hours.",
+    })
+    a = agent_factory(card=card)
+    # user_name overrides the default and flows into {{user}} substitution
+    assert a.settings.user_name == "Mira"
+    prefix = "\n\n".join(a._stable_prefix())
+    assert "About Mira:" in prefix
+    assert "marine biologist" in prefix
+    # the chara's own identity still leads; the user block is separate
+    assert prefix.index("KnobCard") < prefix.index("About Mira:")
+
+
+def test_operator_user_name_wins_over_the_card(agent_factory, tmp_path):
+    card = _write_card(tmp_path / "withuser2.json", {"toolpack": "sandbox", "user_name": "Mira"})
+    a = agent_factory(card=card, user_name="Captain")  # operator set it explicitly
+    assert a.settings.user_name == "Captain"
+
+
+def test_no_user_persona_means_no_block(agent_factory, tmp_path):
+    card = _write_card(tmp_path / "nouser.json", {"toolpack": "sandbox"})
+    a = agent_factory(card=card)
+    assert "About " not in "\n\n".join(a._stable_prefix())
