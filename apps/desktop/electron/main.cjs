@@ -248,9 +248,13 @@ function showWindow() {
 }
 
 function createTray() {
-  const icon = nativeImage
-    .createFromPath(path.join(__dirname, '..', 'assets', 'icon.png'))
-    .resize({ width: 18, height: 18 })
+  // A monochrome moth silhouette (the `Template` suffix + setTemplateImage
+  // let macOS auto-invert it: white on a dark menu bar, dark on a light one).
+  // @2x is picked up automatically alongside trayTemplate.png.
+  const icon = nativeImage.createFromPath(
+    path.join(__dirname, '..', 'assets', 'trayTemplate.png'),
+  )
+  icon.setTemplateImage(true)
   tray = new Tray(icon)
   tray.setToolTip('LunaMoth')
   tray.setContextMenu(Menu.buildFromTemplate([
