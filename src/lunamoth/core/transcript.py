@@ -23,6 +23,7 @@ import json
 import sqlite3
 import time
 from pathlib import Path
+from typing import Any
 
 # Markers of WAL-incompatible filesystems (from hermes-agent, MIT).
 _WAL_INCOMPAT_MARKERS = ("locking protocol", "not authorized", "disk i/o error")
@@ -201,6 +202,107 @@ class TranscriptStore:
             else:
                 out.append({"role": str(role), "content": str(content)})
         return out
+
+    def load_display(self, max_messages: int = 0) -> list[dict]:
+        """Like load(), but ALSO carries legacy kind='tool' forensic rows so a
+        frontend can show the full recent history (tool calls + results +
+        reasoning). The MODEL never sees this view — it is display-only, so the
+        model's replayed context (load() → context.render()) is unchanged."""
+        if not self.available:
+            return []
+        try:
+            with self._connect() as conn:
+                epoch = self.epoch()
+                row = conn.execute(
+                    "SELECT MAX(id) FROM messages WHERE epoch=? AND kind='summary'",
+                    (epoch,),
+                ).fetchone()
+                summary_id = int(row[0]) if row and row[0] else None
+                sql = (
+                    "SELECT role, content, kind FROM messages "
+                    "WHERE epoch=? AND kind IN ('chat','think','struct','summary','tool')"
+                )
+                params: tuple[int, ...] | tuple[int, int] = (epoch,)
+                if summary_id is not None:
+                    sql += " AND id>=?"
+                    params = (epoch, summary_id)
+                sql += " ORDER BY id"
+                rows = conn.execute(sql, params).fetchall()
+        except (sqlite3.Error, OSError):
+            return []
+        if max_messages > 0:
+            if rows and rows[0][2] == "summary" and len(rows) > max_messages:
+                rows = [rows[0]] if max_messages <= 1 else [rows[0]] + rows[-(max_messages - 1):]
+            else:
+                rows = rows[-max_messages:]
+        out: list[dict] = []
+        for role, content, kind in rows:
+            if kind in ("struct", "tool"):
+                try:
+                    msg = json.loads(content)
+                    if isinstance(msg, dict) and msg.get("role"):
+                        out.append(msg)
+                        continue
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                out.append({"role": str(role), "content": str(content)})
+            elif kind == "think":
+                out.append({"role": str(role), "content": str(content), "kind": "think"})
+            elif kind == "summary":
+                out.append({"role": str(role), "content": str(content), "kind": "summary"})
+            else:
+                out.append({"role": str(role), "content": str(content)})
+        return out
+
+    def export_jsonl(self, path: Path) -> int:
+        """Hermes-style complete conversation export of the CURRENT epoch.
+
+        EVERY row (chat, think, struct, tool, summary) becomes one JSON object
+        per line, oldest first — struct/tool rows expanded back to their full
+        message dict (tool_calls / tool_call_id / reasoning_content / content).
+        Opens the DB read-only, so it works while the chara is stopped. Returns
+        the number of lines written."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        written = 0
+        try:
+            conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=5.0)
+        except sqlite3.Error:
+            # No DB yet → an empty export, not a fabricated one.
+            path.write_text("", encoding="utf-8")
+            return 0
+        try:
+            try:
+                epoch_row = conn.execute("SELECT value FROM meta WHERE key='epoch'").fetchone()
+                epoch = int(epoch_row[0]) if epoch_row and epoch_row[0] else 0
+            except (sqlite3.Error, ValueError):
+                epoch = 0
+            rows = conn.execute(
+                "SELECT id, ts, role, content, kind FROM messages WHERE epoch=? ORDER BY id",
+                (epoch,),
+            ).fetchall()
+        finally:
+            conn.close()
+        with path.open("w", encoding="utf-8") as fh:
+            for row_id, ts, role, content, kind in rows:
+                obj: dict[str, Any] = {"id": int(row_id), "ts": float(ts or 0.0),
+                                       "role": str(role), "kind": str(kind)}
+                if kind in ("struct", "tool"):
+                    try:
+                        msg = json.loads(content)
+                    except (json.JSONDecodeError, TypeError):
+                        msg = None
+                    if isinstance(msg, dict):
+                        # Expand the full message dict; id/ts/kind from the row win.
+                        for k, v in msg.items():
+                            obj.setdefault(k, v)
+                        obj["role"] = str(msg.get("role") or role)
+                    else:
+                        obj["content"] = str(content)
+                else:
+                    obj["content"] = str(content)
+                fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
+                written += 1
+        return written
 
     def last_timestamp(self) -> float:
         """Wall-clock time of the newest message in the current epoch (0 if none).

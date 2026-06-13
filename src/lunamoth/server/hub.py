@@ -1502,17 +1502,98 @@ def stop_daemon(meta: S.SessionMeta) -> bool:
     return True
 
 
+def _transcript_export_jsonl(meta: S.SessionMeta) -> str:
+    """Hermes-style complete conversation export of the CURRENT epoch, read
+    straight from the session's transcript DB (read-only — works while the
+    chara is stopped). Every row (chat/think/struct/tool/summary) becomes one
+    JSON line, oldest first; struct/tool rows expanded back to their full
+    message dict. The hub reads the DB directly (never imports core/)."""
+    db = meta.sandbox_dir / "transcript.db"
+    if not db.exists():
+        return ""
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+    except sqlite3.Error:
+        return ""
+    try:
+        try:
+            row = conn.execute("SELECT value FROM meta WHERE key='epoch'").fetchone()
+            epoch = int(row[0]) if row and row[0] else 0
+        except (sqlite3.Error, ValueError):
+            epoch = 0
+        try:
+            rows = conn.execute(
+                "SELECT id, ts, role, content, kind FROM messages WHERE epoch=? ORDER BY id",
+                (epoch,),
+            ).fetchall()
+        except sqlite3.Error:
+            return ""
+    finally:
+        conn.close()
+    out_lines: list[str] = []
+    for row_id, ts, role, content, kind in rows:
+        obj: dict[str, Any] = {"id": int(row_id), "ts": float(ts or 0.0),
+                               "role": str(role), "kind": str(kind)}
+        if kind in ("struct", "tool"):
+            try:
+                msg = json.loads(content)
+            except (json.JSONDecodeError, TypeError):
+                msg = None
+            if isinstance(msg, dict):
+                for k, v in msg.items():
+                    obj.setdefault(k, v)
+                obj["role"] = str(msg.get("role") or role)
+            else:
+                obj["content"] = str(content)
+        else:
+            obj["content"] = str(content)
+        out_lines.append(json.dumps(obj, ensure_ascii=False))
+    return "\n".join(out_lines) + ("\n" if out_lines else "")
+
+
 def export_session(meta: S.SessionMeta) -> dict[str, Any]:
-    """Zip the whole session dir (sandbox + transcript + memory + config)."""
+    """Zip the whole session dir, AND emit the complete conversation as JSONL.
+
+    The zip stays the raw forensic bundle (sandbox + transcript + memory +
+    config). Alongside it, for debugging like hermes's export, we write:
+      <name>-conversation.jsonl — every transcript row of the current epoch
+        (prompts/tool calls/results/reasoning), oldest first;
+      <name>-requests.jsonl — a copy of sandbox/logs/requests.jsonl (the
+        faithful per-turn request log) when it exists.
+    Both are placed inside the zip AND as standalone files next to it. The zip
+    path is still the primary return value."""
     downloads = Path.home() / "Downloads"
     target_dir = downloads if downloads.is_dir() else Path.home()
     stamp = time.strftime("%Y%m%d-%H%M%S")
     target = target_dir / f"lunamoth-{meta.name}-{stamp}.zip"
+
+    conversation = _transcript_export_jsonl(meta)
+    conv_path = target_dir / f"lunamoth-{meta.name}-{stamp}-conversation.jsonl"
+    conv_path.write_text(conversation, encoding="utf-8")
+
+    requests_src = meta.sandbox_dir / "logs" / "requests.jsonl"
+    requests_path: Path | None = None
+    requests_text = ""
+    if requests_src.exists():
+        try:
+            requests_text = requests_src.read_text(encoding="utf-8")
+        except OSError:
+            requests_text = ""
+        requests_path = target_dir / f"lunamoth-{meta.name}-{stamp}-requests.jsonl"
+        requests_path.write_text(requests_text, encoding="utf-8")
+
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
         for p in sorted(meta.root.rglob("*")):
             if p.is_file():
                 zf.write(p, p.relative_to(meta.root.parent))
-    return {"path": str(target)}
+        zf.writestr(f"{meta.name}-conversation.jsonl", conversation)
+        if requests_path is not None:
+            zf.writestr(f"{meta.name}-requests.jsonl", requests_text)
+
+    result: dict[str, Any] = {"path": str(target), "conversation": str(conv_path)}
+    if requests_path is not None:
+        result["requests"] = str(requests_path)
+    return result
 
 
 def list_toolpacks() -> list[dict[str, Any]]:
