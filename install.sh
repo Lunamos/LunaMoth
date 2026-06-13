@@ -49,7 +49,11 @@ else
 fi
 
 say "syncing python environment ..."
-(cd "$APP_DIR" && "$UV" sync -q) || fail "uv sync failed"
+# Include the server + messaging extras so `lunamoth desktop` (the web/desktop
+# hub — needs websockets) and `lunamoth gateway` (WeChat/QQ/Telegram — needs
+# cryptography/qrcode/websockets) work out of the box. Plain `uv sync` only
+# installs the base TUI deps and leaves both of those crashing on import.
+(cd "$APP_DIR" && "$UV" sync -q --extra server --extra messaging) || fail "uv sync failed"
 
 # --- shim --------------------------------------------------------------------
 SHIM="$LINK_DIR/lunamoth"
