@@ -32,6 +32,7 @@ from ..messaging.gateway import (
     load_config,
     make_adapters,
 )
+from ..messaging.filters import is_silence_narration
 from ..messaging.text import split_text
 from ..protocol import SAY, TextDelta
 
@@ -211,6 +212,11 @@ class MessagingHost:
     def _send(self, adapter: Adapter, text: str) -> None:
         """Deliver one outbound message; a transient send error never crashes
         the relay (one retry after _SEND_RETRY_DELAY, then drop this message)."""
+        # Anti-loop (audit #33): drop silence-narration tokens before delivery,
+        # same guard the standalone gateway applies at its send chokepoint.
+        if is_silence_narration(text):
+            _log.info("dropped silence-narration token before delivery: %r", text[:40])
+            return
         max_len = int(getattr(adapter, "max_message_length", 0) or 0)
         parts = split_text(text, max_len) if max_len else [text]
         for part in parts:
