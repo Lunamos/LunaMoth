@@ -1023,7 +1023,11 @@ class ChatController {
     else if (opts.val !== undefined) row.appendChild(el("span", { class: "pval" }, opts.val));
     if (opts.tidy) row.appendChild(el("button", { class: "tidy-link", onclick: (ev) => { ev.stopPropagation(); opts.tidy(); } }, t("p-tidy")));
     if (opts.onSwitch) {
-      const sw = el("button", { class: "switch" + (opts.switchOn ? " on" : ""), onclick: (ev) => { ev.stopPropagation(); opts.onSwitch(); } });
+      const sw = el("button", { class: "switch" + (opts.switchOn ? " on" : ""), onclick: (ev) => {
+        ev.stopPropagation();
+        sw.classList.toggle("on");  // optimistic: flip immediately, the re-render reconciles
+        opts.onSwitch();
+      } });
       row.appendChild(sw);
     }
     if (opts.chev) row.appendChild(el("span", { class: "chev" }, "›"));
@@ -1795,8 +1799,10 @@ class ChatController {
 
   /* ---- composer & UI bindings ---- */
   setSending(streaming) {
-    $("send-btn").textContent = streaming ? "■" : "↑";
-    $("send-btn").className = streaming ? "stop" : "send";
+    const btn = $("send-btn");
+    btn.textContent = streaming ? "■" : "↑";
+    btn.className = streaming ? "stop" : "send";  // clears the transient "stopping" state
+    btn.disabled = false;
   }
 
   bindUI() {
@@ -1813,8 +1819,14 @@ class ChatController {
       }
     };
     $("send-btn").onclick = () => {
-      if (this.client.streaming) this.client.interrupt().catch(() => {});
-      else this.submit();
+      if (this.client.streaming) {
+        // Optimistic: show the interrupt landed instantly (button → stopping,
+        // disabled) — runStream's finally restores it when the turn winds down.
+        const btn = $("send-btn");
+        btn.classList.add("stopping");
+        btn.disabled = true;
+        this.client.interrupt().catch(() => {});
+      } else this.submit();
     };
     $("chat-back").onclick = () => navTo("#/");
     $("chat-avatar").onclick = () => {

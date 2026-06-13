@@ -384,6 +384,7 @@ body.dark .md-code{background:rgba(255,255,255,.08)}
 }
 .composer .stop{background:rgba(20,40,60,.25)}
 .composer .stop:hover{background:var(--red)}
+.composer .stop.stopping{opacity:.45; cursor:default}
 
 /* ---------- mood layer v2：安静的在场 ----------
    状态语义由 header 状态词的「事实文字」承载（等你回复 · ~N 分钟后回去做
