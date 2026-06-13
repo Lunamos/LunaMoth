@@ -26,8 +26,8 @@ def sender_allowed(sender_id: str, allowed: set[str]) -> bool:
 class RefusalThrottle:
     """Emit at most one 'unauthorized sender' refusal per sender per day.
 
-    WeCom retries unanswered callbacks and OneBot redelivers after a reconnect,
-    so an unknown sender can hit us repeatedly; we tell them no once a day, then
+    OneBot redelivers after a reconnect (and any callback platform retries an
+    unacked delivery), so an unknown sender can hit us repeatedly; we tell them no once a day, then
     stay silent (audit: never spam, never run a turn for them).
     """
 

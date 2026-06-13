@@ -9,9 +9,8 @@ drops these tokens before they ever reach an adapter.
 
 This lives in ``messaging/`` (not the gateway) so both the standalone
 :class:`~lunamoth.messaging.gateway.MessagingGateway` and the in-child
-``server/messaging_host.MessagingHost`` can share it. (The integrator should
-wire :func:`is_silence_narration` into ``messaging_host.py``'s send path too —
-the host owns ``server/`` and is out of this worktree's scope.)
+``server/messaging_host.MessagingHost`` share it — :func:`is_silence_narration`
+is applied on both send paths.
 
 Only WHOLE-string silence tokens are dropped. Substantive prose that merely
 *mentions* silence ("The deploy ran silently", "Silence is golden — here's the

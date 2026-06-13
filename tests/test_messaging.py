@@ -2,21 +2,12 @@ from dataclasses import dataclass
 import json
 import queue
 import time
-from xml.etree import ElementTree as ET
 
 import pytest
 
 from lunamoth.messaging.base import Adapter, InboundMessage
 from lunamoth.messaging.gateway import MessageDeduplicator, MessagingGateway
 from lunamoth.messaging.text import split_text
-from lunamoth.messaging.wecom import parse_message_xml
-from lunamoth.messaging.wecom_crypto import (
-    aes_decrypt,
-    decrypt_message,
-    encrypt_message,
-    sha1_signature,
-    verify_url,
-)
 from lunamoth.protocol import MUSE, SAY, TextDelta, ThinkDelta, ToolEnd, ToolStart
 from lunamoth.protocol.api import Reply, StateSnapshot
 
@@ -250,82 +241,6 @@ def test_delivery_deferred_is_logged_not_retried(fast_send_retry, caplog):
     assert any("could not deliver" in m for m in caplog.messages)
 
 
-def test_wecom_official_sample_signature_and_url_decrypt():
-    pytest.importorskip("cryptography")
-    # Tencent's WXBizMsgCrypt samples: the POST example documents the first
-    # signature; the URL-verify sample decrypts to the echoed nonce-like string.
-    key = "6qkdMrq68nTKduznJYO1A37W2oEgpkMUvkttRToqhUt"
-    token = "QDG6eK"
-    corp_id = "ww1436e0e65a779aee"
-    echostr = (
-        "fsi1xnbH4yQh0+PJxcOdhhK6TDXkjMyhEPA7xB2TGz6b+g7xyAbEkRxN/"
-        "3cNXW9qdqjnoVzEtpbhnFyq6SVHyA=="
-    )
-
-    assert sha1_signature(token, "1409659589", "263014780", "P9nAzCzyDtyTWESHep1vC5X9xho/qYX3Zpb4yKa9SKld1DsH3Iyt3tP3zNdtp+4RPcs8TgAE7OaBO+FZXvnaqQ==") == "5c45ff5e21c57e6ad56bac8758b79b1d9ac89fd3"
-    assert verify_url(
-        "59dce1a653fc31a6f0472567199561e9336a8d0b",
-        "1476416373",
-        "47744683",
-        echostr,
-        token="xxxxxxx",
-        encoding_aes_key=key,
-        receive_id=corp_id,
-    ) == "1288432023552776189"
-    decrypted_xml = aes_decrypt(
-        "Kl7kjoSf6DMD1zh7rtrHjFaDapSCkaOnwu3bqLc5tAybhhMl9pFeK8NslNPVdMwmBQTNoW4mY7AIjeLvEl3NyeTkAgGzBhzTtRLNshw2AEew+kkYcD+Fq72Kt00fT0WnN87hGrW8SqGc+NcT3mu87Ha3dz1pSDi6GaUA6A0sqfde0VJPQbZ9U+3JWcoD4Z5jaU0y9GSh010wsHF8KZD24YhmZH4ch4Ka7ilEbjbfvhKkNL65HHL0J6EYJIZUC2pFrdkJ7MhmEbU2qARR4iQHE7wy24qy0cRX3Mfp6iELcDNfSsPGjUQVDGxQDCWjayJOpcwocugux082f49HKYg84EpHSGXAyh+/oxwaWbvL6aSDPOYuPDGOCI8jmnKiypE+",
-        corp_id,
-        key,
-    )
-    assert "<Content>你好</Content>" in decrypted_xml
-
-
-def test_wecom_crypto_encrypt_decrypt_round_trip():
-    pytest.importorskip("cryptography")
-    key = "6qkdMrq68nTKduznJYO1A37W2oEgpkMUvkttRToqhUt"
-    token = "QDG6eK"
-    corp_id = "ww1436e0e65a779aee"
-    plain = (
-        "<xml><ToUserName>ww1436e0e65a779aee</ToUserName>"
-        "<FromUserName>ChenJiaShun</FromUserName><MsgType>text</MsgType>"
-        "<Content>你好</Content><AgentID>1000002</AgentID></xml>"
-    )
-    encrypted = encrypt_message(
-        plain,
-        "1597212914",
-        "1476422779",
-        token=token,
-        encoding_aes_key=key,
-        receive_id=corp_id,
-        random16=b"abcdefghijklmnop",
-    )
-    root = ET.fromstring(encrypted)
-    decrypted = decrypt_message(
-        encrypted,
-        root.findtext("MsgSignature") or "",
-        root.findtext("TimeStamp") or "",
-        root.findtext("Nonce") or "",
-        token=token,
-        encoding_aes_key=key,
-        receive_id=corp_id,
-    )
-    assert decrypted == plain
-
-
-def test_wecom_message_xml_parse():
-    msg = parse_message_xml(
-        "<xml><ToUserName><![CDATA[ww1436e0e65a779aee]]></ToUserName>"
-        "<FromUserName><![CDATA[ChenJiaShun]]></FromUserName>"
-        "<CreateTime>1476422779</CreateTime><MsgType><![CDATA[text]]></MsgType>"
-        "<Content><![CDATA[你好]]></Content><MsgId>1456453720</MsgId>"
-        "<AgentID>1000002</AgentID></xml>"
-    )
-    assert msg is not None
-    assert msg.sender_id == "ChenJiaShun"
-    assert msg.agent_id == "1000002"
-    assert msg.text == "你好"
-
-
 def test_chunking_long_outbound_text():
     text = "a" * 2047 + "。" + "b" * 2048 + "c"
     chunks = split_text(text, 2048)
@@ -419,6 +334,49 @@ def test_weixin_login_poll_persists_cursor_and_context_token(tmp_path):
     assert transport.requests[2][0].headers["Authorization"] == "Bearer tok"
     assert transport.requests[2][0].headers["Authorizationtype"] == "ilink_bot_token"
     assert transport.requests[2][0].headers["X-wechat-uin"]
+
+
+def test_weixin_drops_self_echo_from_own_account(tmp_path):
+    """getupdates can surface the bot's OWN sent messages; with an open (empty)
+    allow-list those must be dropped, not answered, or the bot loops on itself."""
+    from lunamoth.messaging.weixin import WeixinAdapter
+
+    transport = FakeWeixinTransport([
+        {"qrcode": "qr-token", "qrcode_img_content": "img"},
+        {
+            "status": "confirmed",
+            "bot_token": "tok",
+            "ilink_bot_id": "bot-1",
+            "ilink_user_id": "owner-1",
+            "baseurl": "https://ilink.example",
+        },
+        {
+            "ret": 0,
+            "errcode": 0,
+            "get_updates_buf": "cursor-2",
+            "msgs": [
+                # the bot's own outbound echoed back — must be ignored
+                {"from_user_id": "bot-1", "context_token": "ctx-x",
+                 "item_list": [{"type": 1, "text_item": {"text": "my own words"}}]},
+                # a real user — must reach the chara
+                {"from_user_id": "user-1", "context_token": "ctx-1",
+                 "item_list": [{"type": 1, "text_item": {"text": "hello"}}]},
+            ],
+        },
+    ])
+    adapter = WeixinAdapter(
+        {},
+        opener=transport,
+        state_path=tmp_path / "weixin_state.json",
+        output=type("Out", (), {"write": lambda self, s: None, "flush": lambda self: None})(),
+        sleep=lambda _seconds: None,
+    )
+    inbox = queue.Queue()
+
+    adapter.poll_once(inbox)
+    msg = inbox.get_nowait()
+    assert msg.sender_id == "user-1" and msg.text == "hello"
+    assert inbox.empty()  # only the real user surfaced; the self-echo was dropped
 
 
 def test_weixin_reuses_saved_token_and_send_requires_context_token(tmp_path):
@@ -639,12 +597,12 @@ def test_qq_reconnect_backoff_resets_after_success():
 def test_dedup_ttl_window_with_fake_clock():
     now = [1000.0]
     d = MessageDeduplicator(ttl_seconds=300, clock=lambda: now[0])
-    assert d.is_duplicate("wecom:m1") is False   # first sight: recorded
-    assert d.is_duplicate("wecom:m1") is True    # redelivery inside the TTL
+    assert d.is_duplicate("qq:m1") is False   # first sight: recorded
+    assert d.is_duplicate("qq:m1") is True    # redelivery inside the TTL
     now[0] += 299
-    assert d.is_duplicate("wecom:m1") is True    # still inside
+    assert d.is_duplicate("qq:m1") is True    # still inside
     now[0] += 2
-    assert d.is_duplicate("wecom:m1") is False   # expired: treated as new
+    assert d.is_duplicate("qq:m1") is False   # expired: treated as new
     assert d.is_duplicate("") is False
     assert d.is_duplicate("") is False           # empty ids are never deduped
 
@@ -690,7 +648,7 @@ def test_gateway_without_message_id_never_dedups():
 
 def test_gateway_dedup_is_keyed_per_platform():
     handle = FakeHandle()
-    a1, a2 = FakeAdapter("qq"), FakeAdapter("wecom")
+    a1, a2 = FakeAdapter("qq"), FakeAdapter("telegram")
     gateway = MessagingGateway(handle=handle, adapters=[a1, a2], allowed_senders=["u1"], patience=999)
 
     gateway.enqueue(a1, InboundMessage("u1", "Alice", "hi", message_id="7"))
@@ -715,64 +673,6 @@ def test_qq_event_carries_message_id_for_dedup():
     )
     msg = parse_onebot_event(raw)
     assert msg is not None and msg.message_id == "778899"
-
-
-def test_wecom_callback_carries_msgid_for_dedup(monkeypatch):
-    # The crypto layer is covered by its own (cryptography-gated) tests; here
-    # the decrypt seam is stubbed so the MsgId -> InboundMessage.message_id
-    # wiring in the callback handler is exercised without the optional extra.
-    import socket
-    import threading
-    import urllib.request
-
-    import lunamoth.messaging.wecom as wecom_mod
-    from lunamoth.messaging.wecom import WeComAdapter
-
-    monkeypatch.setattr(
-        wecom_mod, "decrypt_message",
-        lambda body, sig, ts, nonce, **kw: body.decode("utf-8"),
-    )
-
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-
-    adapter = WeComAdapter(
-        {
-            "corp_id": "corp", "secret": "s", "agent_id": "1000002",
-            "token": "t", "encoding_aes_key": "k",
-            "host": "127.0.0.1", "port": port,
-        }
-    )
-    inbox = queue.Queue()
-    thread = threading.Thread(target=adapter.run, args=(inbox,), daemon=True)
-    thread.start()
-    try:
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:  # wait for the server to bind
-            try:
-                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
-                    break
-            except OSError:
-                time.sleep(0.02)
-
-        plain = (
-            "<xml><ToUserName><![CDATA[corp]]></ToUserName>"
-            "<FromUserName><![CDATA[u1]]></FromUserName>"
-            "<MsgType><![CDATA[text]]></MsgType><Content><![CDATA[hello]]></Content>"
-            "<MsgId>1456453720</MsgId><AgentID>1000002</AgentID></xml>"
-        )
-        # a fresh timestamp: the callback handler rejects stale ones (±5 min replay guard)
-        url = f"http://127.0.0.1:{port}/callback/command?msg_signature=x&timestamp={int(time.time())}&nonce=2"
-        req = urllib.request.Request(url, data=plain.encode("utf-8"), method="POST")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            assert resp.status == 200
-
-        msg = inbox.get(timeout=5)
-        assert msg.text == "hello"
-        assert msg.message_id == "1456453720"  # MsgId wired through for the gateway dedup
-    finally:
-        adapter.close()
 
 
 # ---- QQ send while disconnected (audit #32) ------------------------------------------

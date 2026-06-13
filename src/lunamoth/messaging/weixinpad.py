@@ -585,6 +585,13 @@ class WeixinPadAdapter(Adapter):
     def run(self, inbox: "queue.Queue[InboundMessage]") -> None:
         self._validate()
         self._ensure_login()
+        # A restored session reloads auth_key, but wxid resolution is best-effort
+        # and may have failed/been skipped last run. The inbound self-echo guard
+        # in handle_frame needs wxid — without it an empty (open) allow-list would
+        # let the bot ingest and answer itself in a loop — so resolve it here on
+        # the inbound path before the first frame arrives.
+        if self.auth_key and not self.wxid:
+            self._resolve_wxid()
         backoff = 1.0
         while not self._closed.is_set():
             try:

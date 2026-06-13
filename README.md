@@ -164,12 +164,11 @@ In-session: `/help`, `/goal`, `/skills`, `/mcp`, `/status`, `/memory`, `/files`,
 
 ## Messaging gateways
 
-A chara can also live in your chat apps. In the desktop app open the **Gateways** page (or run `lunamoth gateway NAME` headless) and connect one or more of personal WeChat, WeCom, QQ, or Telegram — configuration lives in `~/.lunamoth/sessions/NAME/messaging.json`. Adapters deliver only `say` / `speak` text and drop muse / thinking / tool chatter. An empty `allowed_senders` is open; add ids to restrict. Login credentials are saved per-platform in the session dir (e.g. `weixin_state.json`), never in `messaging.json`.
+A chara can also live in your chat apps. In the desktop app open the **Gateways** page (or run `lunamoth gateway NAME` headless) and connect one or more of personal WeChat, QQ, or Telegram — configuration lives in `~/.lunamoth/sessions/NAME/messaging.json`. Adapters deliver only `say` / `speak` text and drop muse / thinking / tool chatter. An empty `allowed_senders` is open; add ids to restrict. Login credentials are saved per-platform in the session dir (e.g. `weixin_state.json`), never in `messaging.json`.
 
 | Platform | How |
 | --- | --- |
 | **Personal WeChat** | Official iLink/ClawBot (`weixin`) — scan a QR, lowest ban risk but grayscale-gated. Or a self-run [WeChatPadPro](https://github.com/WeChatPadPro/WeChatPadPro) docker (`weixinpad`) — iPad protocol, works on any account; **ban risk is real, use a spare account**. |
-| **WeCom** | Self-built app callback server (`uv sync --extra messaging` for the callback crypto). |
 | **QQ** | OneBot v11 via NapCat — LunaMoth is the WebSocket client (`url` + your QQ number as `peer_id`), never handles credentials. |
 | **Telegram** | A `@BotFather` bot (`bot_token`), long-polled `getUpdates` — no public URL or webhook. |
 

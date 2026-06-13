@@ -18,7 +18,6 @@ from .filters import is_silence_narration
 from .qq import QQAdapter
 from .telegram import TelegramAdapter
 from .text import split_text
-from .wecom import WeComAdapter
 from .weixin import WeixinAdapter
 from .weixinpad import WeixinPadAdapter
 
@@ -34,8 +33,8 @@ DEFAULT_REFUSAL = (
 _SEND_RETRY_DELAY = 3.0
 
 # Inbound dedup window (audit #30; hermes gateway/platforms/helpers.py
-# MessageDeduplicator): WeCom retries callbacks that aren't answered in time
-# and OneBot/NapCat redelivers after a reconnect — well inside 300 s.
+# MessageDeduplicator): OneBot/NapCat redelivers after a reconnect (and any
+# callback platform retries an unacked delivery) — well inside 300 s.
 _DEDUP_TTL = 300.0
 _DEDUP_MAX = 2000
 
@@ -102,9 +101,7 @@ def make_adapters(config: dict[str, Any]) -> list[Adapter]:
     for name, adapter_config in adapters.items():
         if not isinstance(adapter_config, dict):
             raise ValueError(f"adapter {name!r} config must be an object")
-        if name == "wecom":
-            out.append(WeComAdapter(adapter_config))
-        elif name == "weixin":
+        if name == "weixin":
             out.append(WeixinAdapter(adapter_config))
         elif name == "weixinpad":
             out.append(WeixinPadAdapter(adapter_config))
@@ -260,8 +257,8 @@ class MessagingGateway:
         return sender_allowed(sender_id, self.allowed_senders)
 
     def _process_inbound(self, adapter: Adapter, msg: InboundMessage) -> None:
-        # Audit #30: WeCom retries unanswered callbacks, OneBot redelivers
-        # after reconnect — a redelivered message must not run a second turn.
+        # Audit #30: OneBot redelivers after reconnect (and any callback platform
+        # retries an unacked delivery) — a redelivered message must not run a second turn.
         if msg.message_id and self._dedup.is_duplicate(f"{adapter.name}:{msg.message_id}"):
             _log.info("dropped duplicate inbound %s message %s (platform redelivery)",
                       adapter.name, msg.message_id)

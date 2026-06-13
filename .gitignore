@@ -116,6 +116,4 @@ sandbox/memory/
 # runtime diagnostics (obs/)
 sandbox/logs/
 
-# codex fleet logs
-.codex-fleet/
 hermes ui/

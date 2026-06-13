@@ -165,8 +165,8 @@ class MessagingHost:
                 _log.exception("messaging relay turn failed")
 
     def _process(self, adapter: Adapter, msg: InboundMessage) -> None:
-        # A platform redelivery (WeCom retry, OneBot reconnect) must not run a
-        # second turn on the shared agent.
+        # A platform redelivery (OneBot reconnect, or any callback retry) must
+        # not run a second turn on the shared agent.
         if msg.message_id and self._dedup.is_duplicate(f"{adapter.name}:{msg.message_id}"):
             return
         adapter.set_reply_target(msg)

@@ -499,6 +499,13 @@ class WeixinAdapter(Adapter):
         if not sender_id:
             _log.debug("ignored WeChat iLink message without sender id")
             return False
+        # Self-echo guard: getupdates can surface the bot's OWN sent messages.
+        # Without this, an open (empty) allow-list would let the bot ingest and
+        # answer itself in a loop (sender_allowed treats empty as open). Drop
+        # anything whose sender is this account's own id.
+        if sender_id in {self.account_id, self.ilink_bot_id, self.ilink_user_id} - {""}:
+            _log.debug("ignored WeChat iLink self-echo from %s", sender_id)
+            return False
         context_token = str(msg.get("context_token") or "").strip()
         dirty = False
         if context_token and self.context_tokens.get(sender_id) != context_token:

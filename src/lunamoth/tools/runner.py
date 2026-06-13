@@ -33,7 +33,7 @@ import time
 from pathlib import Path
 
 from ..obs import get_logger
-from ..session.isolation import (  # noqa: F401 — backend/os_sandbox_available are this module's public API
+from ..session.isolation import (
     _base_env,
     _docker,
     _linux_jail,
