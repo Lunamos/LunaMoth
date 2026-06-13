@@ -186,11 +186,15 @@ def _launch_tui(meta: S.SessionMeta, args: argparse.Namespace) -> int:
 
 
 def cmd_default(args: argparse.Namespace) -> int:
-    """Resume-first launcher: show the roster of agents, act on the choice, repeat."""
+    """Resume-first launcher: show the roster of charas, act on the choice, repeat.
+
+    There is NO default session — every session is a chara, deliberately created.
+    `lunamoth` with no args opens the roster (pick or summon a chara)."""
     if not sys.stdin.isatty():
-        # Headless: no roster UI — just open/create the default agent.
-        return _launch_tui(S.ensure_default_session(), args)
-    S.ensure_default_session()  # there is always at least the 'home' agent
+        # Headless with no chara named: nothing to open (no default 'home').
+        print("no chara specified — try `lunamoth ls`, `lunamoth attach NAME`, "
+              "or `lunamoth new NAME`.", file=sys.stderr)
+        return 1
     from .roster import run_launcher
 
     first = True
@@ -516,9 +520,9 @@ def cmd_daemon(args: argparse.Namespace) -> int:
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
-    meta = S.load_session(args.name) or (S.ensure_default_session() if args.name == S.DEFAULT_SESSION else None)
+    meta = S.load_session(args.name)
     if meta is None:
-        print(f"error: no session named {args.name!r}", file=sys.stderr)
+        print(f"error: no chara named {args.name!r} (see `lunamoth ls` or `lunamoth new {args.name}`)", file=sys.stderr)
         return 1
     _activate(meta)
     from .wizard import run_wizard
@@ -698,7 +702,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_rm)
 
     sp = sub.add_parser("run", help="headless one-shot: -p sends a message and prints the reply")
-    sp.add_argument("name", nargs="?", default=S.DEFAULT_SESSION)
+    sp.add_argument("name")
     sp.add_argument("-p", "--prompt", required=True, help="the message to send")
     sp.add_argument("--stream-json", action="store_true", help="one protocol event per line (JSONL wire format)")
     sp.set_defaults(func=cmd_run)
@@ -733,7 +737,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_daemon)
 
     sp = sub.add_parser("setup", help="(re)run the setup wizard")
-    sp.add_argument("name", nargs="?", default=S.DEFAULT_SESSION)
+    sp.add_argument("name")
     sp.set_defaults(func=cmd_setup)
 
     sp = sub.add_parser("update", help="update the installed checkout")

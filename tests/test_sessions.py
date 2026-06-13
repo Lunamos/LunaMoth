@@ -58,12 +58,6 @@ def test_env_points_at_session():
     assert env["LUNAMOTH_SANDBOX"].endswith("sessions/envy/sandbox")
 
 
-def test_default_session_idempotent():
-    a = S.ensure_default_session()
-    b = S.ensure_default_session()
-    assert a.name == b.name == S.DEFAULT_SESSION
-
-
 def test_cli_new_ls_rm(temp_home):
     def run(*argv):
         return subprocess.run(

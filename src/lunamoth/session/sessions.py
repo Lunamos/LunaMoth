@@ -28,7 +28,6 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-DEFAULT_SESSION = "home"
 ISOLATION_LEVELS = ("dir", "sandbox", "docker")  # dir < sandbox (OS-level) < docker
 
 
@@ -204,10 +203,3 @@ def delete_session(name: str) -> None:
     if pid:
         raise RuntimeError(f"session {name!r} is running (pid {pid}); stop it first")
     shutil.rmtree(meta.root)
-
-
-def ensure_default_session() -> SessionMeta:
-    meta = load_session(DEFAULT_SESSION)
-    if meta is None:
-        meta = create_session(DEFAULT_SESSION, isolation="sandbox", note="default home session")
-    return meta
