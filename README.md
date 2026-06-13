@@ -161,65 +161,39 @@ Patience defaults to 600 seconds, can be declared by cards as `extensions.lunamo
 
 In-session: `/help`, `/goal`, `/skills`, `/mcp`, `/status`, `/memory`, `/files`, `/mode live|chat`, `/patience`, `/reasoning`, `/net on|off`, `/allow-dir <path>`, `/panel`, `/theme`, `/settings`, `/clear`, `/exit` — verbose output lights up the right-side **spotlight panel** (telemetry / memory / file tree with click-to-preview / operator terminal / help), so the console stays a clean chat log. `! <cmd>` runs YOUR shell command in the chara's sandbox (same jail, output in the panel); `Esc` brings the panel home to telemetry.
 
+## Messaging gateways
+
+A chara can also live in your chat apps. In the desktop app open the **Gateways** page (or run `lunamoth gateway NAME` headless) and connect one or more of personal WeChat, WeCom, QQ, or Telegram — configuration lives in `~/.lunamoth/sessions/NAME/messaging.json`. Adapters deliver only `say` / `speak` text and drop muse / thinking / tool chatter. An empty `allowed_senders` is open; add ids to restrict. Login credentials are saved per-platform in the session dir (e.g. `weixin_state.json`), never in `messaging.json`.
+
+| Platform | How |
+| --- | --- |
+| **Personal WeChat** | Official iLink/ClawBot (`weixin`) — scan a QR, lowest ban risk but grayscale-gated. Or a self-run [WeChatPadPro](https://github.com/WeChatPadPro/WeChatPadPro) docker (`weixinpad`) — iPad protocol, works on any account; **ban risk is real, use a spare account**. |
+| **WeCom** | Self-built app callback server (`uv sync --extra messaging` for the callback crypto). |
+| **QQ** | OneBot v11 via NapCat — LunaMoth is the WebSocket client (`url` + your QQ number as `peer_id`), never handles credentials. |
+| **Telegram** | A `@BotFather` bot (`bot_token`), long-polled `getUpdates` — no public URL or webhook. |
+
+Example `messaging.json` (personal WeChat over iLink):
+
+```json
+{
+  "allowed_senders": [],
+  "adapters": { "weixin": { "bot_type": "3" } }
+}
+```
+
+Where the platform requires the user to message first (WeChat / QQ / Telegram), an unattended `speak` before first contact is logged as deferred — never faked.
+
+## Desktop app
+
+`apps/desktop/` is a thin Electron window over `lunamoth desktop` (the backend serves `front/web/`; the shell has no renderer of its own) — the primary face of LunaMoth, with system notifications for `speak` while the window is unfocused.
+
+```bash
+cd apps/desktop && npm install && npm run dev
+```
+
 ## License & acknowledgements
 
 - **Runtime** (everything under `src/lunamoth`, scripts, tests, packaging): [Apache License 2.0](LICENSE).
 - **Bundled example content** (the LunaMoth 月蛾 and Quinn 小Q character cards under `cards/`, including their embedded world books): original, owner-authored content, Apache-2.0 like the rest of the project. See [CONTENT_LICENSE.md](CONTENT_LICENSE.md) and [NOTICE.md](NOTICE.md).
 
 This project began as an SCP fan work — an attempt to recreate SCP-079 in the real world — and quickly grew into a general-purpose roleplay agent system. No SCP-derived content ships any longer; the two bundled cards are LunaMoth 月蛾 (the flagship example, a serene self-metamorphosing digital soul) and Quinn 小Q (the default, a digital intern). Both are original, owner-authored, Apache-2.0.
-
-## Roadmap status
-
-- [x] **Remote TUI gateway foundation** — `lunamoth serve NAME --stdio` now exposes the activated session as newline-delimited JSON-RPC, and `lunamoth serve NAME --host 127.0.0.1 --port 8137` exposes the same dispatch over a token-authenticated WebSocket. Install the optional WebSocket dependency with `uv sync --extra server`. The default bind is loopback; binding to a public interface is an operator decision.
-- [x] **Desktop card studio** — the web deck can now draft an editable SillyTavern V3 card from prose inspiration, including embedded world entries, seed goals, an embodiment stance, theme color, and a sanitized SVG avatar; nothing is saved until the creator reviews and saves.
-- [x] **Legible web chat** — the desktop chat now gives thinking, muse/self-talk, system/GM lines, Super Chat speaks, and tool work distinct looks, with an always-visible in-flight work state and a board Super Chat feed.
-- [x] **Messaging gateway (WeCom + personal WeChat + QQ + Telegram)** — `lunamoth gateway NAME` runs one activated chara behind `~/.lunamoth/sessions/NAME/messaging.json`; adapters deliver only `say` text (including idle `speak` output) and drop muse/thinking/tool chatter. WeCom/Enterprise WeChat self-built apps use the stdlib callback server plus callback crypto from `uv sync --extra messaging`. Personal WeChat works two ways: the official iLink/ClawBot path (`weixin`, lowest ban risk but grayscale-gated) or, via a user-run WeChatPadPro docker container (`weixinpad`, iPad protocol, a real device-login QR that works on any account).
-
-  **Personal WeChat / iLink ClawBot setup:** add a `weixin` adapter, then run `lunamoth gateway NAME` and scan the terminal QR with your phone WeChat (requires the ClawBot plugin; iOS ≥ 8.0.70 / Android ≥ 8.0.69). Credentials are saved in `weixin_state.json` in the session directory, not in `messaging.json`; terminal QR ASCII uses the optional `qrcode` package, and the gateway always prints an `api.qrserver.com` fallback URL. Text-only iLink support intentionally does not implement media/CDN crypto. The bot can only message users who have messaged it in the current session because WeChat requires a per-user `context_token`; an unattended `speak` before first contact logs “waiting for the human to say hi first” instead of inventing a fallback.
-
-  ```json
-  {
-    "allowed_senders": ["<your ilink_user_id after first contact>"],
-    "adapters": {
-      "weixin": {
-        "base_url": "https://ilinkai.weixin.qq.com",
-        "bot_type": "3",
-        "long_poll_timeout_ms": 35000,
-        "api_timeout_ms": 15000
-      }
-    }
-  }
-  ```
-
-  **Personal WeChat via WeChatPadPro setup (`weixinpad`):** if your account hasn't received the ClawBot grayscale (the iLink QR "scans to nothing"), run a [WeChatPadPro](https://github.com/WeChatPadPro/WeChatPadPro) docker stack yourself (the container + MySQL + Redis; default API port 38849, pick an `adminKey`) and point this adapter at it. On first run the gateway derives a per-account auth key from your `adminKey`, prints a **real WeChat device-login QR** (scan it once with your phone WeChat → "log in on another device"); it then reads inbound over the `GetSyncMsg` WebSocket and sends via HTTP REST. Credentials are saved in `weixinpad_state.json` in the session directory, not in `messaging.json`. The WebSocket transport needs `websockets` (`uv sync --extra server`). Text-only for v1. Unlike iLink it can usually initiate to any friend, so unattended `speak` works once a destination is known. **Ban risk is real:** WeChatPadPro speaks WeChat's unofficial iPad protocol — NOT sanctioned by Tencent. Upstream warns that new accounts should stabilize ~3 days before high-risk ops, fresh logins can be force-disconnected within 24h, and friend-add / bulk ops trigger 7-to-30-day bans. Use a spare/secondary WeChat, keep your phone logged in in the same region, and keep the message rate low.
-
-  ```json
-  {
-    "allowed_senders": ["<the sender wxid after first contact>"],
-    "adapters": {
-      "weixinpad": {
-        "host": "127.0.0.1",
-        "port": 38849,
-        "admin_key": "<your WeChatPadPro adminKey>"
-      }
-    }
-  }
-  ```
-
-  **QQ / OneBot v11 setup:** run NapCat, log in by QR in its WebUI, enable forward WebSocket, then paste the WebSocket URL and your own QQ number into `messaging.json`. LunaMoth is the WebSocket client; it never runs a listener and never handles QQ credentials. `peer_id` is required for unattended `speak`; replies to inbound private messages target the inbound sender. Text segments are concatenated and non-text OneBot segments are ignored for v1.
-
-  ```json
-  {
-    "allowed_senders": ["<your QQ number>"],
-    "adapters": {
-      "qq": {
-        "url": "ws://127.0.0.1:3001",
-        "access_token": "optional",
-        "peer_id": "<your QQ number>"
-      }
-    }
-  }
-  ```
-
-  **Telegram setup:** create a bot with `@BotFather`, then add `"telegram": {"bot_token": "<token>"}` under `adapters` (optional `api_base` for self-hosted Bot API servers); the gateway long-polls `getUpdates` — no public URL or webhook — persists its offset in `telegram_state.json` in the session directory so restarts never replay old messages, and handles private text chats only for v1; a bot cannot message a user before that user messages it first, so an unattended `speak` before first contact is logged as deferred instead of inventing a fallback.
-- [x] **Desktop shell (Electron, v1)** — `apps/desktop/` wraps `lunamoth desktop` in a thin Electron window (official Hermes Desktop's shape: no renderer of its own, the backend serves `front/web/`); system notifications for `speak` while the window is unfocused. `cd apps/desktop && npm i && npm run dev`.
