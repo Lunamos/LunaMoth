@@ -479,6 +479,41 @@ body.dark .md-code{background:rgba(255,255,255,.08)}
 }
 .prow.danger{color:var(--red); border-bottom:none}
 .prow.danger:hover{background:rgba(229,72,77,.07)}
+
+/* 上下文环（owner 喜欢的圈圈进度条） */
+.ctx-sec{padding:8px 2px 12px}
+.ctx-sec-label{font-size:12px; color:var(--text-2); margin-bottom:9px}
+.ctx-big{display:flex; align-items:center; gap:14px}
+.ctx-big .ctx-ring{
+  width:52px; height:52px; border-radius:50%; flex:none;
+  background:conic-gradient(var(--accent) calc(var(--p,0)*1%), rgba(20,40,60,.08) 0);
+  -webkit-mask:radial-gradient(circle, transparent 17px, #000 17.5px);
+          mask:radial-gradient(circle, transparent 17px, #000 17.5px);
+}
+.ctx-big .ctx-ring.hot{background:conic-gradient(var(--amber) calc(var(--p,0)*1%), rgba(20,40,60,.08) 0)}
+body.dark .ctx-big .ctx-ring{background:conic-gradient(var(--accent) calc(var(--p,0)*1%), rgba(255,255,255,.1) 0)}
+body.dark .ctx-big .ctx-ring.hot{background:conic-gradient(var(--amber) calc(var(--p,0)*1%), rgba(255,255,255,.1) 0)}
+.ctx-nums b{font-size:15px; font-variant-numeric:tabular-nums}
+.ctx-nums div{font-size:11.5px; color:var(--text-3); font-variant-numeric:tabular-nums; margin-top:2px}
+.ctx-tidy{margin-left:auto; font-size:12px}
+.ctx-tidy.loading{color:transparent; position:relative; pointer-events:none}
+.ctx-tidy.loading::after{
+  content:""; position:absolute; inset:0; margin:auto; width:13px; height:13px;
+  border:2px solid var(--accent); border-top-color:transparent; border-radius:50%;
+  animation:spin .7s linear infinite;
+}
+.sys-note.compacting{animation:notepulse 1.3s ease-in-out infinite}
+@keyframes notepulse{0%,100%{opacity:.5}50%{opacity:1}}
+
+/* 二次确认弹窗 */
+.confirm-box{padding:6px 2px}
+.confirm-box h4{margin:0 0 8px; font-size:15px}
+.confirm-box .confirm-body{font-size:13px; color:var(--text-2); line-height:1.65; margin:0 0 16px}
+.confirm-acts{display:flex; justify-content:flex-end; gap:10px}
+
+/* 暂存（排队）的消息气泡 */
+.user-msg.queued{opacity:.62}
+.user-msg.queued .bubble{border:1px dashed rgba(91,159,212,.5); background:rgba(91,159,212,.06)}
 .switch{
   margin-left:auto; width:34px; height:20px; border-radius:99px; background:rgba(20,40,60,.18);
   position:relative; cursor:pointer; transition:background .15s; border:none; flex:none;

@@ -857,6 +857,7 @@ class ChatController {
       }
       this._appTurn = false;
     }
+    this.flushQueue();   // the chara is free now — deliver any staged message
   }
 
   // A turn the app did NOT drive (self-work / WeChat / idle) streamed events
@@ -864,8 +865,31 @@ class ChatController {
   // to call finalize(), it would stick forever (the "still generating after
   // rest" bug). The backend's turn_end signal is that missing completion.
   onTurnEnd() {
-    if (this.disposed || this._appTurn) return;  // app turns finalize via runStream
-    if (this.work && this.work.active) this.finalize();
+    if (this.disposed) return;
+    if (!this._appTurn && this.work && this.work.active) this.finalize();
+    this.flushQueue();   // a self-work/WeChat turn just ended — deliver staged msg
+  }
+
+  // Send-anytime: while the chara is busy, a typed message is STAGED (not sent,
+  // not an interrupt) and shown as a pending bubble; it's delivered as a normal
+  // turn the moment the chara finishes what it's doing.
+  queueMessage(text) {
+    this.clearEmpty();
+    this._queue = this._queue || [];
+    const row = el("div", { class: "user-msg queued" },
+      el("div", { class: "bubble" }, text),
+      el("div", { class: "via-tag" }, t("queued-hint")));
+    $("stream-inner").appendChild(row);
+    this.scrollDown(true);
+    this._queue.push({ text, node: row });
+  }
+
+  flushQueue() {
+    if (this.disposed || !this._queue || !this._queue.length) return;
+    if (this.client.streaming || this._appTurn) return;   // still busy
+    const item = this._queue.shift();
+    if (item.node && item.node.isConnected) item.node.remove();
+    this.sendUser(item.text);   // a normal turn; its completion flushes the next
   }
 
   async sendUser(text) {
@@ -948,6 +972,44 @@ class ChatController {
     } catch (e) {
       if (!quiet) this.note(e.message);
       return null;
+    }
+  }
+
+  /* ---- 整理记忆 (compaction): confirm → loading button → progress line ---- */
+  confirmCompaction(btn) {
+    if (this.client.streaming || this._appTurn) { toast(t("busy-cmd")); return; }
+    const body = el("div", { class: "confirm-box" },
+      el("h4", null, t("compact-title")),
+      el("p", { class: "confirm-body" }, t("compact-body")));
+    const cancel = el("button", { class: "btn soft" }, t("cancel"));
+    cancel.onclick = () => closeModal();
+    const ok = el("button", { class: "btn primary" }, t("compact-ok"));
+    ok.onclick = () => { closeModal(); this.runCompaction(btn); };
+    body.appendChild(el("div", { class: "confirm-acts" }, cancel, ok));
+    openModal(body);
+  }
+
+  async runCompaction(btn) {
+    if (this._compacting) return;
+    this._compacting = true;
+    if (btn) { btn.disabled = true; btn.classList.add("loading"); }
+    // A progress line in the conversation (compaction is one summary pass —
+    // we show it running, then replace it with the result).
+    const note = el("div", { class: "sys-note compacting" }, t("compact-running"));
+    $("stream-inner").appendChild(note);
+    this.scrollDown(true);
+    try {
+      const reply = await this.client.command("/compact");
+      note.classList.remove("compacting");
+      note.textContent = (reply && reply.text) || t("compact-done");
+      this.refreshSnapshot();
+    } catch (e) {
+      note.classList.remove("compacting");
+      note.classList.add("err");
+      note.textContent = rpcErrText(e);
+    } finally {
+      this._compacting = false;
+      if (btn) { btn.disabled = false; btn.classList.remove("loading"); }
     }
   }
 
@@ -1072,13 +1134,20 @@ class ChatController {
       chev: true,
       click: (ev) => this.openModelPopover(ev),
     }));
+    // Context — the ring the owner likes (only this block differs from a prow).
     const pctCtx = snap.context_max ? Math.round(100 * snap.context_tokens / snap.context_max) : 0;
-    st.appendChild(this.prow({
-      label: t("p-context"),
-      bar: pctCtx,
-      val: `${(snap.context_tokens / 1000).toFixed(1)}k / ${(snap.context_max / 1000).toFixed(0)}k · ${pctCtx}%`,
-      tidy: () => this.command("/compact"),
-    }));
+    const ring = el("div", { class: "ctx-ring" + (pctCtx >= 75 ? " hot" : "") });
+    ring.style.setProperty("--p", String(pctCtx));
+    const tidyBtn = el("button", { class: "btn soft ctx-tidy" }, t("tidy-mem"));
+    tidyBtn.onclick = () => this.confirmCompaction(tidyBtn);
+    st.appendChild(el("div", { class: "ctx-sec" },
+      el("div", { class: "ctx-sec-label" }, t("p-context")),
+      el("div", { class: "ctx-big" },
+        ring,
+        el("div", { class: "ctx-nums" },
+          el("b", null, `${pctCtx}%`),
+          el("div", null, `${(snap.context_tokens / 1000).toFixed(1)}k / ${(snap.context_max / 1000).toFixed(0)}k tokens`)),
+        tidyBtn)));
     const pctMem = snap.memory_max ? Math.round(100 * snap.memory_chars / snap.memory_max) : 0;
     st.appendChild(this.prow({
       label: t("p-memory"),
@@ -1826,11 +1895,12 @@ class ChatController {
       }
     };
     $("send-btn").onclick = () => {
-      if (this.client.streaming) {
-        // Optimistic: show the interrupt landed instantly (button → stopping,
-        // disabled) — runStream's finally restores it when the turn winds down.
+      const hasText = $("composer-input").value.trim().length > 0;
+      // Busy + text in the box = stage it (queue), don't interrupt. Busy + empty
+      // box = the ■ button means stop, so interrupt. Idle = just send.
+      if (this.client.streaming && !hasText) {
         const btn = $("send-btn");
-        btn.classList.add("stopping");
+        btn.classList.add("stopping");   // optimistic: interrupt landed
         btn.disabled = true;
         this.client.interrupt().catch(() => {});
       } else this.submit();
@@ -1864,14 +1934,17 @@ class ChatController {
   async submit() {
     const input = $("composer-input");
     const text = input.value.trim();
-    if (!text || this.client.streaming) return;
-    input.value = "";
-    input.style.height = "auto";
+    if (!text) return;
+    const busy = this.client.streaming || this._appTurn;
     if (text.startsWith("/")) {
+      if (busy) { toast(t("busy-cmd")); return; }   // control commands wait for a quiet moment
+      input.value = ""; input.style.height = "auto";
       const reply = await this.command(text);
       if (reply && reply.text) this.note(reply.text);
       return;
     }
-    await this.sendUser(text);
+    input.value = ""; input.style.height = "auto";
+    if (busy) this.queueMessage(text);   // stage it, don't interrupt
+    else await this.sendUser(text);
   }
 }
