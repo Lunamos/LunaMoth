@@ -151,6 +151,7 @@ class CharaClient {
     this.sock = new RpcSocket(`/chara/${encodeURIComponent(name)}`);
     this.onProtocolEvent = null; // (ev) protocol event dicts
     this.onPermissionAsk = null; // ({id, kind, reason, detail, wait_seconds})
+    this.onPeerMessage = null;  // ({text, source, sender}) inbound from another channel (WeChat)
     this.onLifeState = null;    // supervisor life.state
     this.onRejoinGap = null;    // () => fresh attach
     this.onClose = null;
@@ -164,6 +165,7 @@ class CharaClient {
       }
       if (method === "event" && this.onProtocolEvent) this.onProtocolEvent(params);
       else if (method === "permission_ask" && this.onPermissionAsk) this.onPermissionAsk(params);
+      else if (method === "peer_message" && this.onPeerMessage) this.onPeerMessage(params);
       else if (method === "life.state" && this.onLifeState) this.onLifeState(params);
       else if (method === "rejoin.gap") {
         this.rejoinGap = true;

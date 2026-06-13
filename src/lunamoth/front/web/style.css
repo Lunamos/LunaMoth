@@ -304,6 +304,7 @@ body.technical .chan-badge{display:inline-block}
   white-space:pre-wrap; overflow-wrap:break-word;
 }
 .user-msg{align-self:flex-end; max-width:78%}
+.user-msg .via-tag{font-size:10px; color:var(--text-3); text-align:right; margin-top:3px; letter-spacing:.3px}
 .user-msg .bubble{
   background:rgba(91,159,212,.13); border-radius:14px 14px 4px 14px; padding:9px 13px;
   font-size:14px; line-height:1.6; white-space:pre-wrap; overflow-wrap:break-word;

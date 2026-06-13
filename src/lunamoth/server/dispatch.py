@@ -313,6 +313,15 @@ class JsonRpcDispatcher:
             self._attached = True
             self._attach_info = info
 
+    def emit_peer_message(self, text: str, source: str = "", sender: str = "") -> None:
+        """Tell an attached client a message arrived from another channel (e.g.
+        WeChat) so it shows in the window as an incoming bubble. A messaging
+        turn streams the chara's REPLY as events, but the inbound text itself is
+        never an event — without this the app saw the reply but not the message
+        that prompted it. A transport notification (like permission_ask), not a
+        stream Event, so clients that don't know it simply ignore the frame."""
+        self._emit("peer_message", {"text": str(text), "source": str(source), "sender": str(sender)})
+
     def _messaging(self, method: str) -> dict[str, Any]:
         host = self._messaging_host
         if host is None:

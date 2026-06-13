@@ -309,6 +309,7 @@ class ChatController {
       await this.client.connect();
       this.client.onProtocolEvent = (ev) => this.onEvent(ev);
       this.client.onPermissionAsk = (p) => this.onPermission(p);
+      this.client.onPeerMessage = (p) => this.onPeerMessage(p);
       this.client.onLifeState = (p) => this.onLifeState(p);
       this.client.onRejoinGap = () => {
         // Ring couldn't replay (child restarted → seq reset). Just forget the
@@ -864,6 +865,23 @@ class ChatController {
     $("stream-inner").appendChild(el("div", { class: "user-msg" }, el("div", { class: "bubble" }, text)));
     this.scrollDown(true);
     await this.runStream(() => this.client.send(text));
+  }
+
+  // A message that arrived from another channel (WeChat): show it as an incoming
+  // user bubble with a small "via 微信" tag, ahead of the chara's streamed reply.
+  onPeerMessage(p) {
+    const text = (p && p.text) || "";
+    if (!text) return;
+    this.clearEmpty();
+    this.closeCurrent();
+    const row = el("div", { class: "user-msg" }, el("div", { class: "bubble" }, text));
+    const src = (p && p.source) || "";
+    if (src) {
+      const label = (typeof gwPlatLabel === "function") ? gwPlatLabel(src) : src;
+      row.appendChild(el("div", { class: "via-tag" }, "via " + label));
+    }
+    $("stream-inner").appendChild(row);
+    this.scrollDown(true);
   }
 
   /* ---- mood layer v2：安静的在场 ----

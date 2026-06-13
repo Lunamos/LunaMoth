@@ -14,6 +14,7 @@ idle — it only relays inbound ↔ say. One chara, reachable from every channel
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import queue
 import threading
@@ -201,6 +202,11 @@ class MessagingHost:
                 if isinstance(ev, TextDelta) and ev.channel == SAY:
                     chunks.append(ev.text)
 
+            # Show the incoming message in the app window first (an incoming
+            # bubble), THEN stream the chara's reply — so the conversation reads
+            # whole from every channel, not just the chara's half.
+            with contextlib.suppress(Exception):
+                self._dispatcher.emit_peer_message(text, source=adapter.name, sender=msg.sender_name or sender)
             # Route through the dispatcher so the turn ALSO streams to the app
             # window (one agent, one conversation, seen from every channel).
             self._dispatcher.run_stream_sync(

@@ -75,6 +75,13 @@ def test_wechat_turn_shares_agent_say_to_adapter_events_to_transport():
     assert handle.user_calls == ["hi"]
     # (c) only say-channel text went back to WeChat
     assert adapter.sent == ["hi there"]
+    # the incoming message is surfaced to the app as a peer_message BEFORE the
+    # reply events, so the window shows the message that prompted the reply.
+    methods = [f.get("method") for f in frames]
+    assert "peer_message" in methods
+    peer = next(f for f in frames if f.get("method") == "peer_message")
+    assert peer["params"]["text"] == "hi" and peer["params"]["source"] == "weixin"
+    assert methods.index("peer_message") < methods.index("event")
     # (b) the turn's events streamed onto the transport (the app sees it live),
     # including muse/tool events the adapter intentionally never receives.
     channels = [
