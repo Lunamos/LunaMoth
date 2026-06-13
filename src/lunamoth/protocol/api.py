@@ -115,11 +115,11 @@ class CharaHandle:
         # greets once per life, not once per page-load. A background (present
         # =False) adopt never sets it, so it can't eat the human's greeting.
         self._greeted = False
-        # Visit bookkeeping: a visit is presence-true → presence-false. If the
-        # operator never says a word, the visit leaves NO trace in context —
-        # the arrival ceremony is rolled back and no departure note is added.
-        self._visit_mark: "int | None" = None
+        # Visit bookkeeping: a visit is presence-true → presence-false. A
+        # wordless visit leaves NO trace; the first words insert a neutral
+        # "entered" marker (once) and leaving after speaking adds a "left" one.
         self._visit_spoke = False
+        self._visit_announced = False
 
     # ---- lifecycle -------------------------------------------------------------
 
@@ -173,23 +173,15 @@ class CharaHandle:
                 show_thinking=bool(a.settings.show_thinking),
                 restored=restored, opening="none", opening_text="",
             )
-        # The greeting decision tree, decided ONCE per life:
-        # first meeting gets the card's designed opener (SillyTavern first_mes);
-        # a return visit gets the card's on_attach arrival turn; a fresh session
-        # without either gets a probe; a restored session continues silently.
+        # Entering the room never forces a turn: you can just watch the chara
+        # do its own thing. The ONLY opener is the card's designed first_mes,
+        # shown ONCE at the first meeting (a brand-new chara introducing
+        # itself). A return visit, or a card with no first_mes, opens silently
+        # — the chara learns you arrived only when YOU speak (see stream_user).
         greeting = a.greeting() or ""
-        attach_text = a.attach_event_text()
         first = a.presence.first_meeting() and not restored
         if greeting and first:
             opening, opening_text = "greeting", greeting
-        elif attach_text:
-            opening, opening_text = "arrival", attach_text
-        elif greeting and not restored:
-            opening, opening_text = "greeting", greeting
-        elif not restored:
-            opening, opening_text = "probe", (
-                "你是谁？只用一句话回答。" if a.lang == "zh" else "Who are you? Answer in one sentence."
-            )
         else:
             opening, opening_text = "none", ""
         info = AttachInfo(
@@ -204,9 +196,16 @@ class CharaHandle:
         return info
 
     def _begin_visit(self) -> None:
-        if self._session is not None and self._visit_mark is None:
-            self._visit_mark = len(self._session.context.messages)
-            self._visit_spoke = False
+        self._visit_spoke = False
+        self._visit_announced = False
+
+    def _presence_marker(self, kind: str) -> str:
+        """A NEUTRAL platform fact (the platform never roleplays presence). In
+        the card's language so the chara reads it plainly."""
+        zh = self._agent.lang == "zh"
+        if kind == "entered":
+            return "［操作者进入了对话。］" if zh else "[The operator joined the conversation.]"
+        return "［操作者离开了对话。］" if zh else "[The operator left the conversation.]"
 
     def record_greeting(self, text: str) -> None:
         """Commit a displayed card greeting (first_mes) to the conversation."""
@@ -215,19 +214,18 @@ class CharaHandle:
     def detach(self) -> None:
         """Presence bookkeeping on the way out (idempotence is the caller's job).
 
-        A wordless visit leaves no trace: the arrival ceremony (kind="visit")
-        is rolled back off the context tail and the card's on_detach note is
-        skipped — entering and leaving the room are not conversation."""
+        A wordless visit leaves NO trace — entering and leaving are not
+        conversation. Only a visit where the operator actually spoke gets a
+        single neutral departure marker (so the chara, at its next own cycle,
+        knows you came, talked, and left)."""
         s = self._session
-        if s is not None:
-            if self._visit_mark is not None and not self._visit_spoke:
-                dropped = s.context.drop_visit_tail(self._visit_mark)
-                if dropped:
-                    self._agent.audit.write("presence_event", kind="silent_visit", dropped=dropped)
-            else:
-                self._agent.note_detach(s)
-        self._visit_mark = None
+        if s is not None and self._visit_spoke:
+            marker = self._presence_marker("left")
+            s.context.add("system", marker)
+            self._agent.presence.queue_event(marker)  # for a cross-process adopter
+            self._agent.audit.write("presence_event", kind="left", text=marker[:120])
         self._visit_spoke = False
+        self._visit_announced = False
         self._agent.state.set_present(False)
 
     def set_present(self, present: bool) -> None:
@@ -238,6 +236,14 @@ class CharaHandle:
     # ---- conversation (generators of protocol events) ---------------------------
 
     def stream_user(self, text: str) -> "Iterator[Event]":
+        # The first words of a visit insert a neutral "operator entered" fact
+        # before the message — entering was silent, engaging is what the chara
+        # registers. Once per visit.
+        if self._session is not None and not self._visit_announced:
+            self._visit_announced = True
+            marker = self._presence_marker("entered")
+            self._session.context.add("system", marker)
+            self._agent.audit.write("presence_event", kind="entered", text=marker[:120])
         self._visit_spoke = True
         return self._agent.stream_handle(text, self._session)
 

@@ -74,28 +74,6 @@ class ContextBuffer:
         self._prune_thinks()
         self.trim()
 
-    def drop_visit_tail(self, mark: int) -> int:
-        """Drop the arrival ceremony of a visit that ended without a word.
-
-        `mark` is the buffer length when the visit began. The tail is dropped
-        only when it demonstrably IS pure ceremony: it starts with a
-        kind="visit" line (the on_attach event), contains no user message and
-        none of the chara's own idle life (kind="think"). Compaction shrinking
-        the buffer past the mark also refuses. Returns the dropped count.
-
-        Rolling back the TAIL keeps the history prefix byte-identical, so the
-        prompt cache survives the cleanup.
-        """
-        if mark < 0 or mark >= len(self.messages):
-            return 0
-        tail = self.messages[mark:]
-        if tail[0].get("kind") != "visit":
-            return 0
-        if any(m.get("role") == "user" or m.get("kind") == "think" for m in tail):
-            return 0
-        del self.messages[mark:]
-        return len(tail)
-
     def _prune_thinks(self) -> None:
         """Drop idle monologues beyond THINK_WINDOW from the buffer itself.
 

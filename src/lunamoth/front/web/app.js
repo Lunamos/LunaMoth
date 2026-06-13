@@ -344,16 +344,22 @@ function statusOf(s) {
   return { dot: "live", line: t("st-idle-live"), cls: "" };
 }
 
-/* Status words are factual statements only. idle_countdown is mechanism, not
-   mood — it reads as the same register as working (owner decision). */
+/* Status words are factual statements only — the platform does not roleplay.
+   `working` is an LLM turn actually in flight; `idle_countdown` is the gap
+   between self-paced cycles (it is NOT working — earlier it was mislabeled the
+   same as working, which read as "always busy"). */
 function lifeText(life) {
   if (!life) return "";
-  if (life.state === "working" || life.state === "idle_countdown") return t("life-working");
+  if (life.state === "working") return t("life-working");
+  if (life.state === "idle_countdown") {
+    const n = life.next_cycle_at ? Math.max(0, Math.round((life.next_cycle_at - Date.now() / 1000) / 60)) : null;
+    return n && n >= 1 ? t("life-idle-next", { n }) : t("life-idle");
+  }
   if (life.state === "waiting") return t("life-waiting");
   if (life.state === "resting" && life.rest_until) return t("life-resting-until", { time: fmtClock(life.rest_until) });
   if (life.state === "resting") return t("st-resting");
   if (life.state === "backoff") return `${t("life-backoff")}${life.detail ? " · " + life.detail : ""}`;
-  return t("st-idle-live");
+  return t("life-idle");
 }
 
 function isoGlyph(iso) {

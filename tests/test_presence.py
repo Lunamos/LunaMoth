@@ -128,67 +128,74 @@ def test_attach_never_wakes_a_resting_chara(agent):
     assert a.state.load()["user_present"] is True
 
 
-# ---- wordless visits leave no trace (owner decision 2026-06-13) -------------------
+# ---- entering never forces a turn; speak inserts entered; leave only if spoke ----
 
-def test_drop_visit_tail_guards():
-    from lunamoth.core.context import ContextBuffer
-
-    c = ContextBuffer()
-    c.add("user", "hi")
-    mark = len(c.messages)
-    c.add("system", "arrival", kind="visit")
-    c.add("assistant", "hello there", kind="visit")
-    assert c.drop_visit_tail(mark) == 2 and len(c.messages) == 1
-    # refuses when a user message landed in the tail
-    mark = len(c.messages)
-    c.add("system", "arrival", kind="visit")
-    c.add("user", "spoke")
-    assert c.drop_visit_tail(mark) == 0
-    # refuses when the tail is not a ceremony (protects the chara's own life)
-    mark2 = len(c.messages)
-    c.add("assistant", "musing on my own")
-    assert c.drop_visit_tail(mark2) == 0
-    # refuses when the buffer shrank past the mark (compaction)
-    assert c.drop_visit_tail(len(c.messages) + 5) == 0
-
-
-def test_wordless_visit_leaves_no_trace(agent):
-    """Enter, watch, leave without a word: the arrival ceremony is rolled
-    back, no departure note is added, no handoff is queued."""
-    from lunamoth.protocol.api import CharaHandle
-
-    a = agent()
-    a.state.set_rest_until(0)  # SANDBOX_ROOT is import-time global; reset shared state
-    a.presence.mark_met()  # not the first meeting -> arrival path, not first_mes
-    handle = CharaHandle(agent=a)
-    info = handle.attach(present=True)
-    assert info.opening == "arrival" and info.opening_text
-    before = len(handle._session.context.messages)
-    list(handle.stream_event(info.opening_text))  # the client runs the arrival turn
-    assert len(handle._session.context.messages) > before
-    handle.detach()
-    assert len(handle._session.context.messages) == before
-    assert all(role != "system" or "visit" not in (m.get("kind") or "")
-               for (role, _), m in zip(handle._session.context.pairs(), handle._session.context.messages))
-    assert a.presence.pop_event() == ""  # no departure handoff
-
-
-def test_spoken_visit_keeps_ceremony_and_departure(agent):
+def test_entering_a_return_visit_forces_nothing(agent):
+    """Entering a chara you've met before opens silently — no arrival turn,
+    you just watch it do its own thing (owner decision 2026-06-13)."""
     from lunamoth.protocol.api import CharaHandle
 
     a = agent()
     a.state.set_rest_until(0)
-    a.presence.mark_met()
+    a.transcript.reset()           # isolate from the shared repo sandbox transcript
+    a.presence.mark_met()  # already met -> not the first_mes path
     handle = CharaHandle(agent=a)
     info = handle.attach(present=True)
-    list(handle.stream_event(info.opening_text))
-    list(handle.stream_user("在吗？"))
-    n_before_detach = len(handle._session.context.messages)
+    assert info.opening == "none" and not info.opening_text
+
+
+def test_first_meeting_still_shows_the_card_greeting(agent):
+    """A brand-new chara introduces itself once (first_mes)."""
+    from lunamoth.protocol.api import CharaHandle
+
+    a = agent()
+    a.state.set_rest_until(0)
+    a.transcript.reset()                     # isolate from the shared repo sandbox transcript
+    a.presence.path.unlink(missing_ok=True)  # shared SANDBOX_ROOT: ensure first meeting
+    handle = CharaHandle(agent=a)
+    info = handle.attach(present=True)
+    assert info.opening == "greeting" and info.opening_text
+
+
+def test_wordless_visit_leaves_no_trace(agent):
+    """Enter, watch, leave without a word: nothing was added on entry and no
+    departure marker is written — entering and leaving are not conversation."""
+    from lunamoth.protocol.api import CharaHandle
+
+    a = agent()
+    a.state.set_rest_until(0)
+    a.transcript.reset()
+    a.presence.mark_met()
+    handle = CharaHandle(agent=a)
+    handle.attach(present=True)
+    before = len(handle._session.context.messages)
     handle.detach()
-    msgs = handle._session.context.messages
-    assert len(msgs) == n_before_detach + 1  # the on_detach line
-    assert msgs[-1]["role"] == "system"
-    assert a.presence.pop_event() != ""  # handoff queued as before
+    assert len(handle._session.context.messages) == before
+    assert a.presence.pop_event() == ""  # no departure handoff
+
+
+def test_speaking_inserts_an_entered_marker_once_then_leaving_marks_departure(agent):
+    from lunamoth.protocol.api import CharaHandle
+
+    a = agent()
+    a.state.set_rest_until(0)
+    a.transcript.reset()
+    a.presence.mark_met()
+    handle = CharaHandle(agent=a)
+    handle.attach(present=True)
+    list(handle.stream_user("在吗？"))
+    systems = [m["content"] for m in handle._session.context.messages if m.get("role") == "system"]
+    entered = [s for s in systems if "进入" in s or "joined" in s]
+    assert len(entered) == 1  # the entered marker, exactly once
+    # a second message does NOT add another entered marker
+    list(handle.stream_user("还在吗"))
+    systems = [m["content"] for m in handle._session.context.messages if m.get("role") == "system"]
+    assert len([s for s in systems if "进入" in s or "joined" in s]) == 1
+    # leaving after speaking writes one departure marker
+    handle.detach()
+    systems = [m["content"] for m in handle._session.context.messages if m.get("role") == "system"]
+    assert len([s for s in systems if "离开" in s or "left" in s]) == 1
+    assert a.presence.pop_event() != ""
 
 
 def test_visit_to_a_resting_chara_leaves_no_departure_note(agent):
@@ -207,14 +214,14 @@ def test_visit_to_a_resting_chara_leaves_no_departure_note(agent):
 
 
 def test_reattach_does_not_replay_the_opening(agent):
-    """A resident greets once per life, not once per page-load: the cached
-    AttachInfo comes back with its opening neutered."""
+    """A resident greets once per life, not once per page-load."""
     from lunamoth.protocol.api import CharaHandle
     from lunamoth.server.dispatch import JsonRpcDispatcher
 
     a = agent()
     a.state.set_rest_until(0)
-    a.presence.mark_met()
+    a.transcript.reset()                     # isolate from the shared repo sandbox transcript
+    a.presence.path.unlink(missing_ok=True)  # shared SANDBOX_ROOT: ensure first meeting
     out = []
     d = JsonRpcDispatcher(out.append, handle=CharaHandle(agent=a))
 
@@ -223,9 +230,9 @@ def test_reattach_does_not_replay_the_opening(agent):
         return res["opening"] if isinstance(res, dict) else res.opening
 
     r1 = d.dispatch({"jsonrpc": "2.0", "id": 1, "method": "attach", "params": {}})
-    assert opening(r1) == "arrival"
+    assert opening(r1) == "greeting"  # first meeting greets
     r2 = d.dispatch({"jsonrpc": "2.0", "id": 2, "method": "attach", "params": {}})
-    assert opening(r2) == "none"
+    assert opening(r2) == "none"      # reconnect does not
 
 
 def test_background_adopt_then_human_attach_still_greets(agent):
@@ -237,6 +244,8 @@ def test_background_adopt_then_human_attach_still_greets(agent):
 
     a = agent()
     a.state.set_rest_until(0)
+    a.transcript.reset()
+    a.presence.path.unlink(missing_ok=True)    # shared SANDBOX_ROOT: ensure first meeting
     handle = CharaHandle(agent=a)
     bg = handle.attach(present=False)          # daemon adopts first
     assert bg.opening == "none"
@@ -256,6 +265,7 @@ def test_reconnect_shows_the_conversation_so_far(agent):
 
     a = agent()
     a.state.set_rest_until(0)
+    a.transcript.reset()
     handle = CharaHandle(agent=a)
     handle.attach(present=False)
     handle.attach(present=True)

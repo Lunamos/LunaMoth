@@ -43,6 +43,8 @@ const I18N = {
   "st-connecting": ["连接中…", "Connecting…"],
   "st-arrived": ["· 你来了 ·", "· you are here ·"],
   "life-working": ["在做自己的事", "Working on its own"],
+  "life-idle": ["空闲", "Idle"],
+  "life-idle-next": ["空闲 · 约 {n} 分钟后自发一次", "Idle · next self-paced turn in ~{n} min"],
   "life-waiting": ["等你回复", "Waiting for you"],
   "life-waiting-back": ["等你回复 · ~{n} 分钟后回去做自己的事", "Waiting for you · back to its own work in ~{n} min"],
   "life-resting-until": ["休息到 {time}", "Resting until {time}"],
