@@ -50,13 +50,23 @@ class AttachInfo:
     `opening` is the DECIDED first move (the greeting decision tree lives here,
     not in each frontend): 'greeting' = display opening_text and call
     record_greeting · 'arrival' = stream_event(opening_text) · 'probe' =
-    stream_user(opening_text) · 'none' = continue silently."""
+    stream_user(opening_text) · 'none' = continue silently.
+
+    NOTE: attach() today only ever decides 'greeting' (first meeting) or 'none'.
+    'arrival' and 'probe' are RESERVED, forward-compat values — the card's
+    on_attach arrival prompt (agent.arrival_prompt / presence.prompts) is wired
+    end-to-end here and in every frontend, but the presence model deliberately
+    keeps a RE-attach silent (the chara registers you only when you speak), so
+    nothing currently emits them. They stay in the contract (and the frontend
+    branches stay live) for the on_attach hook / GM-layer work; do NOT mistake
+    them for dead code, and do NOT remove the 'event' stream path — stream_event
+    uses it for world events independently of these openings."""
     char_name: str
     lang: str
     mode: str
     show_thinking: bool
     restored: tuple          # restored transcript tail (message dicts, read-only)
-    opening: str             # greeting | arrival | probe | none
+    opening: str             # greeting | none today; arrival | probe reserved (see above)
     opening_text: str
 
 
