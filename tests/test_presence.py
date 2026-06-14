@@ -194,8 +194,10 @@ def test_speaking_inserts_an_entered_marker_once_then_leaving_marks_departure(ag
     list(handle.stream_user("还在吗"))
     assert n_sys() == base + 1  # a second message does NOT add another entered marker
     handle.detach()
-    assert n_sys() == base + 2  # leaving after speaking writes one departure marker
-    assert a.presence.pop_event() != ""
+    # Departure is NON-BLOCKING: NOT injected into the live context now (that would
+    # interrupt work in flight); it is QUEUED, flushed at the chara's next own cycle.
+    assert n_sys() == base + 1            # no immediate departure marker
+    assert a.presence.pop_event() != ""   # but it was queued for the next cycle
 
 
 def test_visit_to_a_resting_chara_leaves_no_departure_note(agent):
@@ -255,6 +257,44 @@ def test_background_adopt_then_human_attach_still_greets(agent):
     # a reconnect (second human attach) is presence-only, no re-greet
     again = handle.attach(present=True)
     assert again.opening == "none"
+
+
+def test_detach_marker_is_flushed_at_the_next_self_work_cycle(agent):
+    """The departure queued on detach is injected at the START of the next idle
+    cycle (so in-flight work finishes first), NOT immediately on detach."""
+    from lunamoth.protocol.api import CharaHandle
+
+    a = agent()
+    a.state.set_rest_until(0)
+    a.transcript.reset()
+    a.presence.mark_met()
+    handle = CharaHandle(agent=a)
+    handle.attach(present=True)
+    list(handle.stream_user("做个任务"))          # operator spoke → visit_spoke=True
+    handle.detach()                               # queues the departure (non-blocking)
+    session = handle._session
+    before = sum(1 for m in session.context.messages if m.get("role") == "system")
+    list(a.stream_think(session))                 # next self-work cycle flushes it first
+    after = sum(1 for m in session.context.messages if m.get("role") == "system")
+    assert after >= before + 1                    # the queued departure marker landed
+    assert a.presence.pop_event() == ""           # consumed, not left dangling
+
+
+def test_first_meeting_greets_even_after_self_work(agent):
+    """A live chara may self-work (writing transcript) before you first open the
+    chat; the first human attach must STILL show its first_mes intro — the greeting
+    is gated on first_meeting(), not on an empty transcript."""
+    from lunamoth.protocol.api import CharaHandle
+
+    a = agent()
+    a.state.set_rest_until(0)
+    a.transcript.reset()
+    a.presence.path.unlink(missing_ok=True)
+    a.transcript.append_message({"role": "assistant", "content": "(it muses to itself)", "kind": "think"})
+    handle = CharaHandle(agent=a)
+    info = handle.attach(present=True)
+    assert info.opening == "greeting" and info.opening_text   # not suppressed by prior self-work
+    assert info.restored                                      # the self-work still restores for display
 
 
 def test_reconnect_shows_the_conversation_so_far(agent):

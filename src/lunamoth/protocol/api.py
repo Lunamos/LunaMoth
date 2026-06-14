@@ -191,7 +191,12 @@ class CharaHandle:
         # itself). A return visit, or a card with no first_mes, opens silently
         # — the chara learns you arrived only when YOU speak (see stream_user).
         greeting = a.greeting() or ""
-        first = a.presence.first_meeting() and not restored
+        # The first-meeting flag is the authority (mark_met() flips it after this
+        # attach, so a reconnect never re-greets). Do NOT also gate on `restored`:
+        # a live chara that already did some self-work before you first open the
+        # chat has a non-empty transcript, but this is STILL its first meeting with
+        # you and its first_mes intro must show.
+        first = a.presence.first_meeting()
         if greeting and first:
             opening, opening_text = "greeting", greeting
         else:
@@ -243,15 +248,16 @@ class CharaHandle:
     def detach(self) -> None:
         """Presence bookkeeping on the way out (idempotence is the caller's job).
 
-        A wordless visit leaves NO trace — entering and leaving are not
-        conversation. Only a visit where the operator actually spoke gets a
-        single neutral departure marker (so the chara, at its next own cycle,
-        knows you came, talked, and left)."""
-        s = self._session
-        if s is not None and self._visit_spoke:
+        A wordless visit leaves NO trace. A visit where the operator spoke queues
+        a single neutral departure marker — NON-BLOCKING: it is NOT injected into
+        the live context now. Injecting immediately would interrupt work in flight
+        (the common case: you assign a task, then leave it to run). Instead the
+        chara finishes the current turn, then picks the marker up at its next own
+        cycle (stream_think flushes the queue) or when another process adopts it —
+        so it registers 'you left' AFTER wrapping up, then goes fully autonomous."""
+        if self._visit_spoke:
             marker = self._presence_marker("left")
-            s.context.add("system", marker)
-            self._agent.presence.queue_event(marker)  # for a cross-process adopter
+            self._agent.presence.queue_event(marker)  # deferred; flushed at the next cycle
             self._agent.audit.write("presence_event", kind="left", text=marker[:120])
         self._visit_spoke = False
         self._visit_announced = False

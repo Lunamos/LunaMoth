@@ -35,13 +35,27 @@ function thinkingEl(label, opts) {
    popover for an instruction (empty = free rephrase) → the field becomes a
    shared loading box → the rewritten text fills it. Used by the card editor,
    the wake content step, and the create-shape review. */
-function aiEditButton(fieldNode, fieldKey, charName) {
+/* `ctx` is either a name string OR a function returning a rich context string
+   (the card's other fields) — so a single-field rewrite stays in character
+   instead of going OOC. Resolved lazily at rewrite time (snapshots live edits). */
+function cardCtxString(o) {
+  o = o || {};
+  const bits = [];
+  if (o.name) bits.push("Name: " + o.name);
+  if (o.description) bits.push("Description: " + String(o.description).slice(0, 1200));
+  if (o.personality) bits.push("Personality: " + String(o.personality).slice(0, 600));
+  if (o.scenario) bits.push("Scenario: " + String(o.scenario).slice(0, 600));
+  if (o.tagline) bits.push("Tagline: " + String(o.tagline).slice(0, 200));
+  return bits.join("\n");
+}
+
+function aiEditButton(fieldNode, fieldKey, ctx) {
   const btn = el("button", { class: "ai-edit-btn", type: "button", title: t("ai-edit-title") }, t("ai-edit"));
-  btn.addEventListener("click", (ev) => { ev.stopPropagation(); openAiFieldEdit(fieldNode, fieldKey, charName); });
+  btn.addEventListener("click", (ev) => { ev.stopPropagation(); openAiFieldEdit(fieldNode, fieldKey, ctx); });
   return btn;
 }
 
-function openAiFieldEdit(fieldNode, fieldKey, charName) {
+function openAiFieldEdit(fieldNode, fieldKey, ctx) {
   const input = el("textarea", { class: "ai-edit-input", placeholder: t("ai-edit-ph") });
   const go = el("button", { class: "btn primary", type: "button" }, t("ai-edit-go"));
   const cancel = el("button", { class: "btn text", type: "button" }, t("cancel"));
@@ -52,7 +66,7 @@ function openAiFieldEdit(fieldNode, fieldKey, charName) {
   const close = () => overlay.remove();
   overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(); });
   cancel.addEventListener("click", close);
-  go.addEventListener("click", () => { const instr = input.value.trim(); close(); runFieldRewrite(fieldNode, fieldKey, charName, instr); });
+  go.addEventListener("click", () => { const instr = input.value.trim(); close(); runFieldRewrite(fieldNode, fieldKey, ctx, instr); });
   document.body.appendChild(overlay);
   input.focus();
 }
@@ -67,21 +81,21 @@ function cardFieldEl(value, phKey, editable) {
   }
   return div;
 }
-function cardBlockEl(labelKey, node, fieldKey, charName) {
+function cardBlockEl(labelKey, node, fieldKey, ctx) {
   const h = el("h4", null, t(labelKey));
-  if (fieldKey) h.appendChild(aiEditButton(node, fieldKey, charName));
+  if (fieldKey) h.appendChild(aiEditButton(node, fieldKey, ctx));
   return el("div", { class: "cv-block" }, h, node);
 }
 
-async function runFieldRewrite(fieldNode, fieldKey, charName, instruction) {
+async function runFieldRewrite(fieldNode, fieldKey, ctx, instruction) {
   const original = fieldNode.textContent;
+  const context = typeof ctx === "function" ? ctx() : (ctx ? "Name: " + ctx : "");
   const loading = thinkingEl(t("ai-thinking"), { block: true });
   fieldNode.style.display = "none";
   fieldNode.parentNode.insertBefore(loading, fieldNode);
   try {
     const r = await hub.call("card.rewrite_field", {
-      field: fieldKey, value: original, instruction: instruction || "",
-      context: charName ? ("Name: " + charName) : "",
+      field: fieldKey, value: original, instruction: instruction || "", context,
     }, 180000);
     fieldNode.textContent = (r && r.text) || original;
   } catch (e) {
@@ -1069,10 +1083,17 @@ async function viewCard(c) {
     }
     return div;
   }
+  // Context for in-character AI rewrites: snapshot the core identity fields at
+  // rewrite time (the field nodes exist by the time the button is clicked).
+  const editorCtx = () => cardCtxString({
+    name: c.name || full.name,
+    description: descField.textContent, personality: persField.textContent,
+    scenario: scenField.textContent, tagline: taglineField.textContent,
+  });
   const block = (labelKey, node, has, fieldKey) => {
     if (!(editable || has)) return null;
     const h = el("h4", null, t(labelKey));
-    if (editable && fieldKey) h.appendChild(aiEditButton(node, fieldKey, c.name || full.name));
+    if (editable && fieldKey) h.appendChild(aiEditButton(node, fieldKey, editorCtx));
     return el("div", { class: "cv-block" }, h, node);
   };
 
@@ -1668,19 +1689,23 @@ async function openWakeSheet(card) {
   const fOnAttach = cardFieldEl(String(ext0.on_attach || ""), "cve-presence-ph", true);
   const fOnDetach = cardFieldEl(String(ext0.on_detach || ""), "cve-presence-ph", true);
 
+  const wakeCtx = () => cardCtxString({
+    name: fName.textContent, description: fDesc.textContent,
+    personality: fPers.textContent, scenario: fScen.textContent, tagline: fTagline.textContent,
+  });
   const step1Body = el("div", { class: "wake-content" },
-    cardBlockEl("sec-name", fName, null, charName),
-    cardBlockEl("sec-user-name", fUserName, "user_name", charName),
-    cardBlockEl("sec-user-persona", fUserPersona, "user_persona", charName),
-    cardBlockEl("cve-description", fDesc, "description", charName),
-    cardBlockEl("cve-personality", fPers, "personality", charName),
-    cardBlockEl("cve-scenario", fScen, "scenario", charName),
-    cardBlockEl("cv-first", fFirst, "first_mes", charName),
-    cardBlockEl("sec-tagline", fTagline, "tagline", charName),
-    cardBlockEl("cve-goals", fGoals, "goals", charName),
-    cardBlockEl("cve-world", fWorld, "world_entries", charName),
-    cardBlockEl("cve-on-attach", fOnAttach, "on_attach", charName),
-    cardBlockEl("cve-on-detach", fOnDetach, "on_detach", charName));
+    cardBlockEl("sec-name", fName, null, wakeCtx),
+    cardBlockEl("sec-user-name", fUserName, "user_name", wakeCtx),
+    cardBlockEl("sec-user-persona", fUserPersona, "user_persona", wakeCtx),
+    cardBlockEl("cve-description", fDesc, "description", wakeCtx),
+    cardBlockEl("cve-personality", fPers, "personality", wakeCtx),
+    cardBlockEl("cve-scenario", fScen, "scenario", wakeCtx),
+    cardBlockEl("cv-first", fFirst, "first_mes", wakeCtx),
+    cardBlockEl("sec-tagline", fTagline, "tagline", wakeCtx),
+    cardBlockEl("cve-goals", fGoals, "goals", wakeCtx),
+    cardBlockEl("cve-world", fWorld, "world_entries", wakeCtx),
+    cardBlockEl("cve-on-attach", fOnAttach, "on_attach", wakeCtx),
+    cardBlockEl("cve-on-detach", fOnDetach, "on_detach", wakeCtx));
 
   function collectCardData() {
     const data = rawCard.data;
@@ -1779,6 +1804,8 @@ async function openWakeSheet(card) {
 /* AI 重写链只跟这些段；名字对/用户设定/视觉/embodiment 单独渲染。 */
 const SECTION_DEFS = [
   ["description", "sec-description"],
+  ["personality", "cve-personality"],
+  ["scenario", "cve-scenario"],
   ["first_mes", "sec-first"],
   ["world_entries", "sec-world"],
   ["seed_goals", "sec-goals"],
@@ -2141,16 +2168,10 @@ function renderTellStep(root, flow) {
 
   // Default path: background the generation, drop a placeholder in the deck,
   // and let the user out of the modal immediately — never trapped waiting.
-  const bgBtn = el("button", { class: "btn primary big", onclick: () => {
-    flow.origin = box.value.trim();
-    if (!flow.origin) return;
-    startDraftGeneration(flow.origin, {});
-    closeCreateFlow();
-    navTo("#/deck");
-  } }, t("tell-go-bg"));
-
-  // Fallback path: the legacy in-modal blocking flow (edit before saving).
-  const goBtn = el("button", { class: "btn soft", onclick: async () => {
+  // ONE generate path: draft → the shape/edit step (so the user reviews & edits
+  // before the card lands). No background "into the deck" button (it surfaced raw
+  // draft-schema errors with no chance to fix).
+  const goBtn = el("button", { class: "btn primary big", onclick: async () => {
     flow.origin = box.value.trim();
     if (!flow.origin) return;
     if (flow.lastDraftAt && !confirm(t("draft-overwrite-q"))) return;
@@ -2164,7 +2185,6 @@ function renderTellStep(root, flow) {
     }, 1000);
     inner.appendChild(progress);
     goBtn.disabled = true;
-    bgBtn.disabled = true;
     try {
       flow.draft = normalizeDraft(await hub.call("cards.draft", { inspiration: flow.origin }, 240000));
       flow.lastDraftAt = Date.now();
@@ -2175,7 +2195,6 @@ function renderTellStep(root, flow) {
     } catch (e) {
       clearInterval(tick);
       goBtn.disabled = false;
-      bgBtn.disabled = false;
       progress.remove();
       inner.appendChild(el("div", { class: "draft-error" },
         el("b", null, rpcErrText(e)),
@@ -2187,8 +2206,7 @@ function renderTellStep(root, flow) {
   root.appendChild(el("div", { class: "flow-bar" },
     el("button", { class: "btn text", onclick: closeCreateFlow }, t("cancel")),
     el("div", { class: "grow" }),
-    goBtn,
-    bgBtn));
+    goBtn));
   box.focus();
 }
 
@@ -2250,7 +2268,7 @@ function renderShapeStep(root, flow) {
     } }, t("revert"));
     // Directed per-field AI rewrite (natural-language instruction, or free
     // rephrase when empty) — the same affordance as the editor and the wake step.
-    const aiBtn = aiEditButton(textDiv, key, flow.draft.name || "");
+    const aiBtn = aiEditButton(textDiv, key, () => { collect(); return cardCtxString(flow.draft); });
     inner.appendChild(el("div", { class: "sec", "data-sec": key },
       el("h3", null, t(labelKey), verLabel, revertBtn, aiBtn),
       textDiv));

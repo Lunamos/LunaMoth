@@ -52,6 +52,8 @@ def draft_payload():
         "user_name": "visitor",
         "description": "Aster is a lantern keeper from a quiet orbital garden. "
         "They speak gently, collect small impossible weather signs, and keep careful notes for visitors.",
+        "personality": "Gentle, patient, quietly curious.",
+        "scenario": "Dusk in the orbital garden; the lanterns are waking.",
         "first_mes": "The lanterns are awake. Did you bring a question for the dark?",
         "world_entries": [
             {"keys": ["Orbital Garden"], "content": "A ring habitat where seasons are tuned by old mirrors.", "constant": True},
@@ -341,6 +343,8 @@ def test_cards_draft_happy_path_uses_default_model(monkeypatch):
     r = result("cards.draft", {"inspiration": "an orbital lantern keeper"})
     assert r["name"] == "Aster"
     assert r["user_name"] == "visitor"   # who "you" are in the world rides the draft
+    assert r["personality"] == "Gentle, patient, quietly curious."
+    assert r["scenario"].startswith("Dusk in the orbital garden")
     assert r["world_entries"][0]["keys"] == ["Orbital Garden"]
     assert r["seed_goals"] == ["Map the mirror-season drift", "Welcome careful visitors"]
     assert r["theme_color"] == "#7C5CFF"
@@ -351,6 +355,22 @@ def test_cards_draft_happy_path_uses_default_model(monkeypatch):
     assert payload["response_format"] == {"type": "json_object"}
     assert payload["temperature"] == 0.75
     assert seen[0]["api_key"] == "sk-test"
+
+
+def test_cards_draft_tolerates_odd_world_and_goal_counts(monkeypatch):
+    # The old strict "world_entries must contain 2-4" rejected valid drafts; now odd
+    # counts (1, 5, or 0) and missing optional fields are tolerated, not errors.
+    set_defaults()
+    payload = draft_payload()
+    payload["world_entries"] = [{"keys": ["only"], "content": "one entry", "constant": False}]  # just 1
+    payload["seed_goals"] = []                                                                    # 0
+    del payload["personality"]                                                                    # missing optional
+    mock_completion(monkeypatch, json.dumps(payload))
+    r = result("cards.draft", {"inspiration": "a lone keeper"})
+    assert r["name"] == "Aster"
+    assert len(r["world_entries"]) == 1
+    assert r["seed_goals"] == []
+    assert r["personality"] == ""   # missing optional defaults to empty, no error
 
 
 def test_cards_draft_invalid_json_is_clear_error_and_no_save(monkeypatch):

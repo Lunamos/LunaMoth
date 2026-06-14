@@ -465,6 +465,8 @@ The object must have exactly these keys:
   "name": string,
   "user_name": string,
   "description": string,
+  "personality": string,
+  "scenario": string,
   "first_mes": string,
   "world_entries": [{"keys": [string, ...], "content": string, "constant": boolean}],
   "seed_goals": [string],
@@ -475,9 +477,11 @@ The object must have exactly these keys:
 Requirements:
 - user_name: who "you" — the human who will talk to this character — ARE inside this world: a short name or role and your relationship to the character. Use whatever the inspiration says about the reader / "you". If the inspiration does NOT say who you are, do NOT invent a second protagonist: assign a neutral, moderate role that simply fits the world — name it neutrally (e.g. "friend" / "朋友") and make "you" an ordinary person of this world. Never leave it empty.
 - description: the character persona, 150-400 words when the language uses spaces; for CJK, a similarly rich 2-5 paragraphs. Convey the character's goals and motivations, not just appearance.
-- first_mes: an opening message in character.
-- world_entries: 2-4 lorebook entries. keys are short trigger words/names. At most one entry may be constant=true.
-- seed_goals: 1-3 short ongoing pursuits.
+- personality: a concise distillation of the character's temperament and traits (a phrase or a few sentences).
+- scenario: the current situation / setting the character is in right now (1-3 sentences).
+- first_mes: an opening message in character — the FIRST thing the character says, in their own voice.
+- world_entries: up to 4 lorebook entries (0 is fine). keys are short trigger words/names. At most one entry may be constant=true.
+- seed_goals: up to 3 short ongoing pursuits (0 is fine).
 - tagline: one line.
 - theme_color: a hex color like "#5B9FD4".
 The avatar is NOT generated here — the human uploads one or generates it on demand later."""
@@ -566,39 +570,32 @@ def _string_field(obj: dict[str, Any], key: str) -> str:
 
 
 def _validate_world_entries(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list) or not (2 <= len(value) <= 4):
-        raise _invalid_draft("world_entries must contain 2-4 entries")
+    """Lenient: keep the well-formed entries (cap 4, at most one constant) and skip
+    the rest. An empty or odd-sized list is fine — a card may simply have little
+    world. Generation must NOT fail because the model returned the wrong count."""
     out: list[dict[str, Any]] = []
     constants = 0
-    for idx, entry in enumerate(value):
-        if not isinstance(entry, dict):
-            raise _invalid_draft(f"world_entries[{idx}] must be an object")
+    if not isinstance(value, list):
+        return out
+    for entry in value:
+        if len(out) >= 4 or not isinstance(entry, dict):
+            continue
         keys = entry.get("keys")
-        if not isinstance(keys, list) or not keys:
-            raise _invalid_draft(f"world_entries[{idx}].keys must be a non-empty array")
-        clean_keys = [str(k).strip() for k in keys if isinstance(k, str) and str(k).strip()]
-        if not clean_keys:
-            raise _invalid_draft(f"world_entries[{idx}].keys must contain strings")
+        clean_keys = [str(k).strip() for k in keys if isinstance(k, str) and str(k).strip()] if isinstance(keys, list) else []
         content = entry.get("content")
-        if not isinstance(content, str) or not content.strip():
-            raise _invalid_draft(f"world_entries[{idx}].content must be a non-empty string")
-        constant = entry.get("constant")
-        if not isinstance(constant, bool):
-            raise _invalid_draft(f"world_entries[{idx}].constant must be boolean")
+        if not clean_keys or not isinstance(content, str) or not content.strip():
+            continue
+        constant = bool(entry.get("constant")) and constants == 0
         constants += 1 if constant else 0
         out.append({"keys": clean_keys[:6], "content": content.strip(), "constant": constant})
-    if constants > 1:
-        raise _invalid_draft("world_entries may have at most one constant entry")
     return out
 
 
 def _validate_seed_goals(value: Any) -> list[str]:
-    if not isinstance(value, list) or not (1 <= len(value) <= 3):
-        raise _invalid_draft("seed_goals must contain 1-3 strings")
-    goals = [str(g).strip() for g in value if isinstance(g, str) and str(g).strip()]
-    if len(goals) != len(value) or not goals:
-        raise _invalid_draft("seed_goals must contain only non-empty strings")
-    return goals[:3]
+    """Lenient: keep up to 3 non-empty goals; an empty list is fine."""
+    if not isinstance(value, list):
+        return []
+    return [str(g).strip() for g in value if isinstance(g, str) and str(g).strip()][:3]
 
 
 # Who "you" are in the world, when the model leaves it blank: a neutral, moderate
@@ -624,30 +621,37 @@ def _parse_card_draft(raw: str) -> dict[str, Any]:
         ) from exc
     if not isinstance(obj, dict):
         raise _invalid_draft("top-level JSON must be an object")
-    expected = {"name", "user_name", "description", "first_mes", "world_entries", "seed_goals",
-                "tagline", "theme_color"}
+    # Tolerant schema: the essentials must be present (else it's not a card draft),
+    # extra keys are rejected (a wholly-wrong/parallel schema), but the rest may be
+    # absent and are defaulted — generation should not fail on a small deviation.
+    required = {"name", "description"}
+    allowed = required | {"user_name", "personality", "scenario", "first_mes",
+                          "world_entries", "seed_goals", "tagline", "theme_color"}
     got = set(obj)
-    if got != expected:
-        missing = ", ".join(sorted(expected - got))
-        extra = ", ".join(sorted(got - expected))
+    missing = required - got
+    extra = got - allowed
+    if missing or extra:
         parts = []
         if missing:
-            parts.append(f"missing: {missing}")
+            parts.append(f"missing: {', '.join(sorted(missing))}")
         if extra:
-            parts.append(f"unexpected: {extra}")
+            parts.append(f"unexpected: {', '.join(sorted(extra))}")
         raise _invalid_draft("draft keys must match the requested schema (" + "; ".join(parts) + ")")
     name = _string_field(obj, "name")
     description = _string_field(obj, "description")
+    opt = lambda k: str(obj.get(k) or "").strip()  # noqa: E731 — soft string field
     # The card's language drives the neutral user_name fallback (朋友 / friend).
     lang = detect_language(text=f"{description} {name}")
     draft = {
         "name": name,
         "user_name": _validate_user_name(obj.get("user_name"), lang),
         "description": description,
-        "first_mes": _string_field(obj, "first_mes"),
+        "personality": opt("personality"),
+        "scenario": opt("scenario"),
+        "first_mes": opt("first_mes"),
         "world_entries": _validate_world_entries(obj.get("world_entries")),
         "seed_goals": _validate_seed_goals(obj.get("seed_goals")),
-        "tagline": _string_field(obj, "tagline"),
+        "tagline": opt("tagline"),
         "theme_color": _theme_color(obj.get("theme_color")),
         "embodiment": "literal",
     }

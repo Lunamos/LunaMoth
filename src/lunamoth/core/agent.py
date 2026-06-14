@@ -756,6 +756,12 @@ class LunaMothAgent:
     def stream_think(self, session: Session):
         session.ticks += 1
         cycle = session.ticks
+        # Flush a deferred presence fact (e.g. the operator left while the chara was
+        # mid-task) at the START of a fresh self-work cycle — so it's registered
+        # AFTER the in-flight work wrapped up, never injected mid-turn.
+        pending = self.presence.pop_event()
+        if pending:
+            session.context.add("system", pending)
         agent_loop = self._agent_loop_active()
         speech: list[str] = []
         committed = False
