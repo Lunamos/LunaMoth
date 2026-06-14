@@ -61,6 +61,22 @@ class MessagingHost:
         self._platform = ""
         self._state = "stopped"
         self._detail = ""
+        self._ack: str | None = None  # cached "got it" receipt (char name + lang)
+
+    def _ack_text(self) -> str:
+        """A one-line receipt sent the moment an inbound message arrives, so the
+        operator knows the gateway is live; the chara's real reply follows. Cached
+        — char name + language are stable for the session."""
+        if self._ack is None:
+            name, zh = "", False
+            try:
+                snap = self._dispatcher.handle.snapshot()
+                name, zh = (snap.char_name or ""), (snap.lang == "zh")
+            except Exception:  # noqa: BLE001 — a missing snapshot must not block delivery
+                pass
+            self._ack = (f"{name}收到，思考/工作中，请稍等…" if zh
+                         else f"{name} got it — thinking, one moment…")
+        return self._ack
 
     # ---- control ------------------------------------------------------------
 
@@ -204,6 +220,12 @@ class MessagingHost:
             peer_text = text or "[媒体]"
             with contextlib.suppress(Exception):
                 self._dispatcher.emit_peer_message(peer_text, source=adapter.name, sender=msg.sender_name or sender)
+            # Immediate receipt so the operator knows the gateway is live; the
+            # chara's real reply follows once its turn completes. Sent directly
+            # (not via the agent) so it never enters the conversation, and its own
+            # getupdates echo is dropped by the adapter's send-dedup.
+            with contextlib.suppress(Exception):
+                self._send(adapter, self._ack_text())
             # Route through the dispatcher so the turn ALSO streams to the app
             # window (one agent, one conversation, seen from every channel).
             # Pass attachments through to the agent's ingest path; keep the

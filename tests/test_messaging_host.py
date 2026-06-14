@@ -74,7 +74,8 @@ def test_wechat_turn_shares_agent_say_to_adapter_events_to_transport():
     # (a) the turn ran on the shared handle
     assert handle.user_calls == ["hi"]
     # (c) only say-channel text went back to WeChat
-    assert adapter.sent == ["hi there"]
+    assert adapter.sent[-1] == "hi there"   # the chara's say-channel reply
+    assert len(adapter.sent) == 2            # preceded by the immediate "got it" receipt
     # the incoming message is surfaced to the app as a peer_message BEFORE the
     # reply events, so the window shows the message that prompted the reply.
     methods = [f.get("method") for f in frames]
@@ -107,7 +108,8 @@ def test_wechat_empty_allowlist_is_open():
 
     host._process(adapter, InboundMessage("anyone", "Stranger", "hi"))
     assert handle.user_calls == ["hi"]
-    assert adapter.sent == ["hi there"]
+    assert adapter.sent[-1] == "hi there"   # the chara's say-channel reply
+    assert len(adapter.sent) == 2            # preceded by the immediate "got it" receipt
 
 
 def test_wechat_unauthorized_sender_refused_not_run():
