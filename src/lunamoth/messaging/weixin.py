@@ -11,6 +11,7 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TextIO
@@ -27,6 +28,8 @@ QRCODE_VALID_SECONDS = 5 * 60
 QRCODE_REFRESHES = 3
 SESSION_TIMEOUT_ERRCODE = -14
 WEIXIN_TEXT_MAX = 4000
+# How long a just-sent message stays eligible to be recognized as its own echo.
+ECHO_DEDUP_TTL_S = 180.0
 CHANNEL_VERSION = "lunamoth"
 
 
@@ -403,6 +406,13 @@ class WeixinAdapter(Adapter):
         self.sync_buf = ""
         self.context_tokens: dict[str, str] = {}
         self.needs_relogin = False
+        # Echo dedup: in personal WeChat the bound id (ilink_user_id) is BOTH the
+        # operator typing to the chara AND the echo of the chara's OWN replies (a
+        # sent message is "from you"). We can't tell them apart by sender, so we
+        # remember the texts we just sent and drop only their echoes — the
+        # operator's own messages pass through (the bug: the old guard dropped the
+        # whole id, silently swallowing everything the operator typed).
+        self._recent_sends: "deque[tuple[str, float]]" = deque()
         self._reply_target = ""
         self._last_sender = ""
         self._load_state()
@@ -602,10 +612,37 @@ class WeixinAdapter(Adapter):
             raise DeliveryDeferred(message)
         payload = self._api.send_text(token=self.token, to_user_id=target, context_token=context_token, text=text)
         if _ok(payload):
+            self._remember_send(text)  # so its getupdates echo is dropped, not re-answered
             return
         if _errcode(payload) == SESSION_TIMEOUT_ERRCODE:
             self._handle_session_timeout("sendmessage", payload)
         raise RuntimeError(f"WeChat iLink sendmessage failed: {_format_api_error(payload)}")
+
+    # ---- self-send echo dedup (so the operator's own messages aren't dropped) ----
+    def _prune_recent_sends(self, now: float) -> None:
+        while self._recent_sends and now - self._recent_sends[0][1] > ECHO_DEDUP_TTL_S:
+            self._recent_sends.popleft()
+
+    def _remember_send(self, text: str) -> None:
+        t = (text or "").strip()
+        if not t:
+            return
+        now = self._monotonic()
+        self._prune_recent_sends(now)
+        self._recent_sends.append((t, now))
+
+    def _is_echo_of_recent_send(self, text: str) -> bool:
+        """True if `text` matches a message we sent recently (its echo). Consumes
+        the match, so a later identical message the operator types is NOT eaten."""
+        t = (text or "").strip()
+        if not t:
+            return False
+        self._prune_recent_sends(self._monotonic())
+        for i, (sent, _ts) in enumerate(self._recent_sends):
+            if sent == t:
+                del self._recent_sends[i]
+                return True
+        return False
 
     def _handle_inbound_message(self, msg: dict[str, Any], inbox: "queue.Queue[InboundMessage]") -> bool:
         sender_id = (
@@ -614,12 +651,14 @@ class WeixinAdapter(Adapter):
         if not sender_id:
             _log.debug("ignored WeChat iLink message without sender id")
             return False
-        # Self-echo guard: getupdates can surface the bot's OWN sent messages.
-        # Without this, an open (empty) allow-list would let the bot ingest and
-        # answer itself in a loop (sender_allowed treats empty as open). Drop
-        # anything whose sender is this account's own id.
-        if sender_id in {self.account_id, self.ilink_bot_id, self.ilink_user_id} - {""}:
-            _log.debug("ignored WeChat iLink self-echo from %s", sender_id)
+        # Self-echo guard. The bot's @im.bot service ids are pure self → always
+        # drop. The bound WeChat id (ilink_user_id, @im.wechat) is BOTH the
+        # operator typing to the chara AND the echo of the chara's own replies —
+        # so it is NOT dropped wholesale here (that was the bug: it swallowed
+        # every message the operator sent). Echoes of our own replies are dropped
+        # by content below; everything else from that id is the operator.
+        if sender_id in {self.account_id, self.ilink_bot_id} - {""}:
+            _log.debug("ignored WeChat iLink self-echo from bot id %s", sender_id)
             return False
         context_token = str(msg.get("context_token") or "").strip()
         dirty = False
@@ -627,6 +666,11 @@ class WeixinAdapter(Adapter):
             self.context_tokens[sender_id] = context_token
             dirty = True
         text, attachments = item_list_to_parts(msg.get("item_list"))
+        # Drop ONLY an echo of a reply we just sent (same bound id); a genuine
+        # operator message with different content passes through.
+        if sender_id and sender_id == self.ilink_user_id and self._is_echo_of_recent_send(text):
+            _log.debug("ignored WeChat iLink echo of our own reply")
+            return dirty
         # A media-only message has no text but DOES carry markers (folded into
         # `text`) and/or attachments — deliver it so the chara isn't left blind
         # to a photo/file/sticker. Only a truly empty item_list is skipped.

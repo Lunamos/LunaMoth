@@ -379,6 +379,42 @@ def test_weixin_drops_self_echo_from_own_account(tmp_path):
     assert inbox.empty()  # only the real user surfaced; the self-echo was dropped
 
 
+def test_weixin_delivers_operator_messages_but_drops_reply_echoes(tmp_path):
+    """The bound WeChat id (ilink_user_id) is BOTH the operator typing to the
+    chara AND the echo of the chara's own replies. The operator's messages MUST
+    reach the chara (the regression: the old guard dropped the whole id, silently
+    swallowing everything the operator sent); only an echo of a reply we just
+    sent is dropped."""
+    from lunamoth.messaging.weixin import WeixinAdapter
+
+    transport = FakeWeixinTransport([
+        {"qrcode": "qr-token", "qrcode_img_content": "img"},
+        {"status": "confirmed", "bot_token": "tok", "ilink_bot_id": "bot-1",
+         "ilink_user_id": "owner-1", "baseurl": "https://ilink.example"},
+        {"ret": 0, "errcode": 0, "get_updates_buf": "cursor-2", "msgs": [
+            # an echo of a reply the chara just sent — must be dropped
+            {"from_user_id": "owner-1", "context_token": "ctx-1",
+             "item_list": [{"type": 1, "text_item": {"text": "pong"}}]},
+            # the operator's OWN new message (same bound id) — must reach the chara
+            {"from_user_id": "owner-1", "context_token": "ctx-1",
+             "item_list": [{"type": 1, "text_item": {"text": "ping"}}]},
+        ]},
+    ])
+    adapter = WeixinAdapter(
+        {}, opener=transport, state_path=tmp_path / "weixin_state.json",
+        output=type("Out", (), {"write": lambda self, s: None, "flush": lambda self: None})(),
+        sleep=lambda _seconds: None,
+    )
+    inbox = queue.Queue()
+    adapter._remember_send("pong")   # the chara replied "pong" just before
+    adapter.poll_once(inbox)
+    got = []
+    while not inbox.empty():
+        got.append(inbox.get_nowait())
+    assert [m.text for m in got] == ["ping"]          # operator delivered, echo dropped
+    assert got[0].sender_id == "owner-1"              # ...even though it's the bound id
+
+
 def test_weixin_reuses_saved_token_and_send_requires_context_token(tmp_path):
     from lunamoth.messaging.base import DeliveryDeferred, InboundMessage
     from lunamoth.messaging.weixin import WeixinAdapter
