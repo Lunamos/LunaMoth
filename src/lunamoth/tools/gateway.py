@@ -1,35 +1,54 @@
+"""ToolGateway — the thin dispatch shim over the hermes-ported tool registry.
+
+The tool BODIES live in ``tools/builtin/*.py`` (each self-registers into
+``tools.registry.registry`` at import). The gateway keeps the LunaMoth identity
+the registry has no equivalent for:
+  - the SECURITY audit trail (every call audited),
+  - the #24 loop guardrails (warn@2 / refuse@5 / streak-block@8),
+  - the three-way gate: implemented(registry) ∩ state.tool_access ∩ pack.tools,
+  - MCP dispatch (mcp__server__tool), and the {ok,data} result the agent loop
+    consumes (`core/agent.py:_execute_tool`).
+
+Handlers return a JSON STRING (hermes contract); the gateway classifies it
+ok/failed (failed = a dict carrying a top-level "error") for the loop guard and
+hands the string back as the model-facing content.
+"""
 from __future__ import annotations
 
 import hashlib
 import json
 import time
-from pathlib import Path
 from typing import Any, Callable
 
 from ..obs.audit import AuditLog
 from ..obs import get_logger
 from .goals import GoalStore
 from .mcp import McpError, McpManager
-from .memory import MemoryLimits, MemoryStore
+from .memory import MemoryStore
 from .skills import SkillStore
-from .runner import run_terminal
-from .sandbox import Sandbox, SandboxViolation
+from .sandbox import Sandbox
+from .context import ToolContext
+from .registry import registry, discover_builtin_tools
 from ..core.state import EnvState
 
 _log = get_logger("tools")
 
-# Caps for operator-grantable resources/waits.
-_MAX_PERMISSION_WAIT = 300
-_MIN_PERMISSION_WAIT = 5
-_MAX_MEMORY_CHARS = 64_000
 PERMISSION_KINDS = ("network", "writable_path", "memory", "other")
 
-# Tool-loop guardrails (audit #24; the shape of hermes agent/tool_guardrails.py).
-# An unattended chara re-running the same failing call all night is the same
-# failure family as the burned-key patience incident.
+# Tool-loop guardrails (audit #24; shape of hermes agent/tool_guardrails.py).
 GUARD_EXACT_WARN_AT = 2      # identical failing call: warn the model at the 2nd failure
 GUARD_EXACT_REFUSE_AT = 5    # ... and refuse the 5th identical attempt outright
 GUARD_STREAK_REFUSE_AT = 8   # consecutive failures of one tool (any args) before it is blocked
+
+# Builtin tool modules self-register on first import of this package; do it once.
+_DISCOVERED = False
+
+
+def _ensure_discovered() -> None:
+    global _DISCOVERED
+    if not _DISCOVERED:
+        discover_builtin_tools()
+        _DISCOVERED = True
 
 
 class ToolGateway:
@@ -37,7 +56,9 @@ class ToolGateway:
         self, sandbox: Sandbox, state: EnvState, audit: AuditLog,
         memory: MemoryStore | None = None, goals: "GoalStore | None" = None,
         skills: "SkillStore | None" = None, mcp: "McpManager | None" = None,
+        llm: Any = None, transcript: Any = None,
     ):
+        _ensure_discovered()
         self.sandbox = sandbox
         self.state = state
         self.audit = audit
@@ -45,36 +66,67 @@ class ToolGateway:
         self.goals = goals
         self.skills = skills
         self.mcp = mcp
-        # Tools the active tool pack enables. None => no pack selected => no tools.
+        self.llm = llm
+        self.transcript = transcript
         self.enabled_tools: set[str] | None = None
-        # MCP servers the active pack opts into (resolved names).
         self.mcp_allowed: list[str] = []
-        # Set by an interactive frontend: (kind, reason, detail, wait_seconds) -> granted?
-        # Blocks the calling (worker) thread up to wait_seconds. None => nobody to ask.
         self.permission_hook: "Callable[[str, str, str, int], bool] | None" = None
-        # Loop-guardrail state (audit #24): per-signature identical-failure counts
-        # and per-tool consecutive-failure streaks. See reset_guardrails().
+        self.clarify_hook: "Callable[[str, list], str] | None" = None
         self._guard_exact_failures: dict[str, int] = {}
         self._guard_tool_streaks: dict[str, int] = {}
+        self._ctx_obj: ToolContext | None = None
+
+    # ---- runtime binding (llm/transcript are built after the gateway) ----------------
+
+    def set_runtime(self, *, llm: Any = None, transcript: Any = None) -> None:
+        if llm is not None:
+            self.llm = llm
+        if transcript is not None:
+            self.transcript = transcript
+        self._ctx_obj = None  # rebuild ctx with the new refs
+
+    def _ctx(self) -> ToolContext:
+        if self._ctx_obj is None:
+            self._ctx_obj = ToolContext(
+                sandbox=self.sandbox, state=self.state, audit=self.audit,
+                memory=self.memory, wishes=self.goals, skills=self.skills,
+                mcp=self.mcp, llm=self.llm, transcript=self.transcript,
+                permission_hook=self.permission_hook, clarify_hook=self.clarify_hook,
+                dispatch=self._code_dispatch,
+            )
+        # permission/clarify hooks are set after construction — keep them live.
+        self._ctx_obj.permission_hook = self.permission_hook
+        self._ctx_obj.clarify_hook = self.clarify_hook
+        return self._ctx_obj
+
+    def _code_dispatch(self, name: str, args: dict) -> str:
+        """The tool surface execute_code exposes to sandboxed Python: same gate +
+        guard + audit as a model call, returning the raw JSON string."""
+        res = self.call(name, **(args or {}))
+        return res.get("data", "") if res.get("ok") else json.dumps({"error": res.get("error", "")}, ensure_ascii=False)
+
+    # ---- pack / allowlist gating -----------------------------------------------------
 
     def set_enabled(self, tools: "list[str] | set[str] | None", mcp_servers: "list[str] | None" = None) -> None:
         self.enabled_tools = set(tools) if tools is not None else None
         self.mcp_allowed = self.mcp.allowed_servers(mcp_servers) if self.mcp else []
 
     def _effective(self) -> set[str]:
-        """Tools actually callable = implemented ∩ env allowlist ∩ active pack."""
+        """Callable builtin tools = registered ∩ env allowlist ∩ active pack."""
         if self.enabled_tools is None:
             return set()
-        implemented = set(self._all_schemas())
+        implemented = set(registry.get_all_tool_names())
         allowlist = set(self.state.load().get("tool_access", []))
         return implemented & allowlist & self.enabled_tools
 
     def has_tools(self) -> bool:
         return bool(self._effective()) or bool(self.mcp_allowed)
 
+    # ---- dispatch --------------------------------------------------------------------
+
     def call(self, name: str, /, **kwargs: Any) -> dict[str, Any]:
-        # `name` is positional-only: tool ARGUMENTS may legitimately be called
-        # "name" too (read_skill/create_skill), and must not collide with it.
+        """Run one tool: loop-guard refusal → dispatch → audit → guard record.
+        Returns {"ok": bool, "data": <json str>} or {"ok": False, "error": str}."""
         signature = self._guard_signature(name, kwargs)
         refusal = self._guard_refusal(name, signature)
         if refusal is not None:
@@ -88,51 +140,30 @@ class ToolGateway:
         return self._guard_record(name, signature, result)
 
     def _dispatch(self, name: str, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """Run one built-in tool: allowlist gate, arg validation, exception boundary."""
-        allowed = self._effective()
-        if name not in allowed:
+        """Run one builtin tool: allowlist gate, registry dispatch, classify the
+        JSON-string result, audit. The registry already turns any handler
+        exception into a {"error": ...} JSON string, so a tool never aborts the
+        turn — this layer adds the audit + the ok/failed split for the guard."""
+        if name not in self._effective():
             result = {"ok": False, "error": f"tool denied: {name}"}
             self.audit.write("tool_denied", tool=name, args=self._safe_args(kwargs), result=result)
             return result
-        try:
-            method = getattr(self, f"tool_{name}")
-        except AttributeError:
+        if registry.get_entry(name) is None:
             result = {"ok": False, "error": f"unknown tool: {name}"}
             self.audit.write("tool_unknown", tool=name, args=self._safe_args(kwargs), result=result)
             return result
-        # Validate required args up front so a model that emits an empty or truncated
-        # arguments object gets a useful hint instead of a raw Python TypeError.
-        schema = self._all_schemas().get(name, {}).get("parameters", {})
-        missing = [r for r in schema.get("required", []) if r not in kwargs or kwargs[r] in (None, "")]
-        if missing:
-            props = ", ".join(schema.get("properties", {}).keys()) or "(none)"
-            result = {"ok": False, "error": f"{name} is missing required argument(s): {', '.join(missing)}. Required parameters: {props}."}
-            self.audit.write("tool_badargs", tool=name, args=self._safe_args(kwargs), result=result)
-            return result
         t0 = time.monotonic()
-        try:
-            result = {"ok": True, "data": method(**kwargs)}
-        except TypeError as e:
-            props = ", ".join(schema.get("properties", {}).keys()) or "(none)"
-            result = {"ok": False, "error": f"{name} called with wrong arguments ({e}). Parameters are: {props}."}
-        except (SandboxViolation, FileNotFoundError, ValueError, PermissionError) as e:
-            result = {"ok": False, "error": str(e)}
-        except Exception as e:
-            # Final boundary: a crashing tool (OSError, BrokenPipeError, KeyError,
-            # anything) must become an error RESULT the model can react to —
-            # never a raw traceback that aborts the whole streaming turn.
-            result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
-            self.audit.write("tool_crash", tool=name, args=self._safe_args(kwargs), result=result)
-            _log.exception("tool %s crashed", name)
-        self.audit.write("tool_call", tool=name, args=self._safe_args(kwargs), result=result)
-        if result["ok"]:
+        payload = registry.dispatch(name, dict(kwargs), self._ctx())
+        ok = not _is_error_json(payload)
+        result = {"ok": ok, "data": payload} if ok else {"ok": False, "error": _error_text(payload)}
+        self.audit.write("tool_call", tool=name, args=self._safe_args(kwargs), result={"ok": ok})
+        if ok:
             _log.debug("%s ok in %.2fs", name, time.monotonic() - t0)
         else:
-            _log.warning("%s failed: %s", name, result["error"])
+            _log.warning("%s failed: %s", name, result.get("error", ""))
         return result
 
     def _call_mcp(self, name: str, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """External MCP tool — same gating shape (pack opt-in) and audit trail."""
         server = name.split("__", 2)[1] if name.count("__") >= 2 else ""
         if self.mcp is None or server not in self.mcp_allowed:
             result = {"ok": False, "error": f"tool denied: {name}"}
@@ -143,36 +174,33 @@ class ToolGateway:
         except McpError as e:
             result = {"ok": False, "error": str(e)}
             _log.warning("%s failed: %s", name, e)
-        except Exception as e:
-            # Same boundary as call(): e.g. a dead server's pipe raising
-            # BrokenPipeError must feed an error to the model, not kill the turn.
+        except Exception as e:  # noqa: BLE001 - a dead server's pipe must not kill the turn
             result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
             self.audit.write("tool_crash", tool=name, args=self._safe_args(kwargs), result=result)
             _log.exception("tool %s crashed", name)
-        self.audit.write("tool_call", tool=name, args=self._safe_args(kwargs), result=result)
+        self.audit.write("tool_call", tool=name, args=self._safe_args(kwargs), result={"ok": result["ok"]})
         return result
 
     def _safe_args(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         return {k: (v[:300] if isinstance(v, str) else v) for k, v in kwargs.items()}
 
-    # ---- tool-loop guardrails (audit #24) -------------------------------------------
+    def as_json(self, value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        return json.dumps(value, ensure_ascii=False, default=str)
+
+    # ---- loop guardrails (audit #24) — unchanged from the pre-registry gateway -------
 
     @staticmethod
     def _guard_signature(name: str, kwargs: dict[str, Any]) -> str:
-        """SHA256 of tool name + canonical (sorted, compact) args — hermes' shape."""
         canonical = json.dumps(kwargs, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
         return hashlib.sha256(f"{name}\x00{canonical}".encode("utf-8")).hexdigest()
 
     def reset_guardrails(self) -> None:
-        """Clear loop-guardrail state. PUBLIC seam: call this where a fresh user
-        turn enters the agent (core/agent.py), so one stuck unattended stretch
-        doesn't keep a tool blocked once the operator redirects the chara."""
         self._guard_exact_failures.clear()
         self._guard_tool_streaks.clear()
 
     def _guard_refusal(self, name: str, signature: str) -> "dict[str, Any] | None":
-        """Refuse a call BEFORE executing it when the loop guard has tripped.
-        Refusals are not recorded as failures — they must not compound state."""
         streak = self._guard_tool_streaks.get(name, 0)
         if streak >= GUARD_STREAK_REFUSE_AT:
             return {"ok": False, "error": (
@@ -190,11 +218,9 @@ class ToolGateway:
         return None
 
     def _guard_record(self, name: str, signature: str, result: dict[str, Any]) -> dict[str, Any]:
-        """Update guard state from one executed call; append the loop warning
-        to a repeated identical failure so the model sees it where it acts."""
         if result.get("ok"):
             self._guard_exact_failures.pop(signature, None)
-            self._guard_tool_streaks.pop(name, None)  # any success resets the streak
+            self._guard_tool_streaks.pop(name, None)
             return result
         failures = self._guard_exact_failures.get(signature, 0) + 1
         self._guard_exact_failures[signature] = failures
@@ -207,373 +233,44 @@ class ToolGateway:
             )
         return result
 
-    # ---- tool implementations -----------------------------------------------------
-
-    def tool_inspect_env(self) -> dict[str, Any]:
-        return self.state.load()
-
-    def tool_list_files(self) -> list[str]:
-        return self.sandbox.list_files()
-
-    def tool_read_file(self, filename: str) -> str:
-        return self.sandbox.read_file(filename)
-
-    def tool_write_file(self, filename: str, text: str) -> str:
-        self.sandbox.write_file(filename, text)
-        # Report the byte count, not the content — the result must never echo
-        # the file back into the context (write_file exists to keep big content
-        # OUT of the conversation).
-        return f"wrote {filename} ({len(text)} chars)"
-
-    def tool_write_log(self, text: str) -> str:
-        self.audit.write("note", text=text[:1000])
-        return "logged"
-
-    def tool_terminal(self, command: str, timeout: int | None = None, workdir: str | None = None) -> str:
-        status = self.state.load()
-        return run_terminal(
-            command,
-            self.sandbox.root / "workspace",
-            allow_network=bool(status.get("network_access", False)),
-            writable_paths=status.get("writable_paths", []),
-            timeout=int(timeout) if timeout else 30,
-            workdir=workdir,
-        )
-
-    def tool_memory(self, action: str, target: str = "memory", content: str = "", old_text: str = "") -> str:
-        """add / replace / remove an entry in the 'memory' or 'user' store."""
-        if self.memory is None:
-            raise ValueError("memory not available")
-        action = (action or "").strip().lower()
-        target = (target or "memory").strip().lower()
-        if target not in ("memory", "user"):
-            raise ValueError("target must be 'memory' or 'user'")
-        if action == "add":
-            self.memory.add(target, content)
-        elif action == "replace":
-            self.memory.replace(target, old_text, content)
-        elif action == "remove":
-            self.memory.remove(target, old_text)
-        else:
-            raise ValueError("action must be 'add', 'replace', or 'remove'")
-        return json.dumps(
-            {"ok": True, "target": target, "entries": self.memory.entries(target), "usage": self.memory.usage(target)},
-            ensure_ascii=False,
-        )
-
-    def tool_add_goal(self, text: str) -> str:
-        if self.goals is None:
-            raise ValueError("goals not available")
-        goal = self.goals.add(text, by="chara")
-        return f"goal {goal['id']} added: {goal['text']}"
-
-    def tool_set_goal_status(self, goal_id: str, status: str) -> str:
-        if self.goals is None:
-            raise ValueError("goals not available")
-        goal = self.goals.set_status(goal_id, status)
-        return f"goal {goal['id']} -> {goal['status']}: {goal['text']}"
-
-    def tool_read_skill(self, name: str) -> str:
-        if self.skills is None:
-            raise ValueError("skills not available")
-        return self.skills.read(name)
-
-    def tool_create_skill(self, name: str, description: str, content: str) -> str:
-        if self.skills is None:
-            raise ValueError("skills not available")
-        path = self.skills.create(name, description, content)
-        return f"skill {name!r} saved to {path} — it is now in your skill index"
-
-    def tool_speak(self, text: str) -> str:
-        """Deliver a message to the user. The delivery itself happens in the
-        agent loop (a say-channel event every frontend routes to the user);
-        this method only validates and confirms."""
-        if not str(text).strip():
-            raise ValueError("nothing to say — `text` is empty")
-        return "delivered."
-
-    _MIN_REST_MINUTES = 1
-    _MAX_REST_MINUTES = 120
-
-    def tool_rest(self, minutes: float, reason: str = "") -> str:
-        """The chara chooses when its next unattended cycle wakes."""
-        try:
-            m = float(minutes)
-        except (TypeError, ValueError):
-            raise ValueError("minutes must be a number") from None
-        m = max(self._MIN_REST_MINUTES, min(self._MAX_REST_MINUTES, m))
-        self.state.set_rest_until(time.time() + m * 60)
-        return f"resting — next unattended cycle in ~{m:g} min (a word from your user wakes you early)."
-
-    def tool_request_permission(self, kind: str, reason: str, detail: str = "", wait_seconds: int = 60) -> str:
-        """Ask the operator for a capability or more resources.
-
-        Presence-gated: while the operator is attached the request is shown in
-        their console and waits up to wait_seconds (timeout = deny); while the
-        operator is away it is denied immediately and only logged.
-        """
-        kind = (kind or "").strip().lower()
-        if kind not in PERMISSION_KINDS:
-            raise ValueError(f"kind must be one of {PERMISSION_KINDS}")
-        if not self.state.load().get("user_present", False):
-            return (
-                "denied: the operator is away. Requests are only considered while the "
-                "operator is attached; this one was logged for them to see later."
-            )
-        if self.permission_hook is None:
-            return "denied: no operator console is available to approve requests."
-        wait = max(_MIN_PERMISSION_WAIT, min(_MAX_PERMISSION_WAIT, int(wait_seconds or 60)))
-        granted = bool(self.permission_hook(kind, str(reason or ""), str(detail or ""), wait))
-        if not granted:
-            return "denied: the operator declined (or did not answer in time)."
-        if kind == "network":
-            self.state.set_network(True)
-            return "granted: network access is now ON."
-        if kind == "writable_path":
-            p = str(Path(detail).expanduser().resolve()) if detail.strip() else ""
-            if not p:
-                return "granted in principle, but no path was given — request again with the path in `detail`."
-            self.state.add_writable_path(p)
-            # docker isolation runs `_docker()` which does NOT bind-mount the
-            # writable list (only the dir/sandbox jails honor it), so be honest:
-            # the grant is recorded but cannot take effect until the container is
-            # rebuilt with that mount. Anything else fabricates a success.
-            if (self.state.load().get("isolation") or "").lower() == "docker":
-                return (
-                    f"recorded: {p} is on your writable list, but docker isolation does not "
-                    "bind-mount it — the terminal cannot write there until the container is "
-                    "restarted with that mount. Writes inside your workspace work as usual."
-                )
-            return f"granted: {p} is now writable."
-        if kind == "memory":
-            if self.memory is None:
-                return "granted, but no memory store is attached."
-            limits = self.memory.limits
-            new_chars = min(_MAX_MEMORY_CHARS, limits.memory_chars * 2)
-            # Growing only — set_limits keeps it consistent (no discard on grow).
-            self.memory.set_limits(MemoryLimits(memory_chars=new_chars, user_chars=limits.user_chars))
-            return f"granted: memory budget raised to {new_chars} chars."
-        return "granted. The operator will act on it."
-
-    # ---- native function-calling schemas ------------------------------------------
-
-    def _all_schemas(self) -> dict[str, dict[str, Any]]:
-        return {
-            "terminal": {
-                "description": (
-                    "Run a shell command in your workspace and get stdout/stderr back. "
-                    "Language-agnostic: use it to run python3/node, write and read files, use git, etc. "
-                    "Writes are confined to the workspace; network is off unless the operator enabled it. "
-                    "Keep commands bounded (they time out); no interactive prompts."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "command": {"type": "string", "description": "The shell command to execute."},
-                        "timeout": {"type": "integer", "description": "Max seconds to wait (default 30, clamped to 1-600)."},
-                        "workdir": {"type": "string", "description": "Working directory (relative to the workspace)."},
-                    },
-                    "required": ["command"],
-                },
-            },
-            "memory": {
-                "description": (
-                    "Maintain your durable memory across sessions. Two stores: 'memory' (notes to "
-                    "yourself — ongoing work, what you've made, decisions, taste) and 'user' (durable "
-                    "facts about the operator). action: 'add' appends an entry; 'replace' swaps the "
-                    "entry containing old_text for content (empty content deletes it); 'remove' deletes "
-                    "the entry containing old_text. Keep entries short and durable; this is curated, not a log. "
-                    "New entries take effect in your prompt next session (this session's response confirms the save)."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "action": {"type": "string", "enum": ["add", "replace", "remove"]},
-                        "target": {"type": "string", "enum": ["memory", "user"], "description": "Which store (default 'memory')."},
-                        "content": {"type": "string", "description": "Entry text, for add/replace."},
-                        "old_text": {"type": "string", "description": "Substring identifying the entry to replace/remove."},
-                    },
-                    "required": ["action"],
-                },
-            },
-            "list_files": {
-                "description": "List the files in your workspace (the same directory your terminal works in).",
-                "parameters": {"type": "object", "properties": {}},
-            },
-            "read_file": {
-                "description": "Read a file from your workspace.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"filename": {"type": "string"}},
-                    "required": ["filename"],
-                },
-            },
-            "write_file": {
-                "description": (
-                    "Write a text file to your workspace — the clean way to create or overwrite a file "
-                    "without piping it through the terminal (no shell quoting, no context bloat). The file "
-                    "lands in the same workspace your terminal sees, so you can `cat`/edit it afterwards."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {"filename": {"type": "string"}, "text": {"type": "string"}},
-                    "required": ["filename", "text"],
-                },
-            },
-            "inspect_env": {
-                "description": "Inspect your runtime environment (isolation level, network on/off, allowed tools).",
-                "parameters": {"type": "object", "properties": {}},
-            },
-            "write_log": {
-                "description": "Append a line to your audit log.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"text": {"type": "string"}},
-                    "required": ["text"],
-                },
-            },
-            "add_goal": {
-                "description": (
-                    "Add a goal of your own to your goal list. Goals persist across "
-                    "sessions and appear in your context; unattended time is a good "
-                    "time to pursue them."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {"text": {"type": "string", "description": "The goal, in one line."}},
-                    "required": ["text"],
-                },
-            },
-            "set_goal_status": {
-                "description": (
-                    "Update one of your goals: mark it done (ONLY when truly finished — "
-                    "your work must be real) or dropped (no longer worth pursuing)."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "goal_id": {"type": "string", "description": "The goal id, e.g. g3."},
-                        "status": {"type": "string", "enum": ["active", "done", "dropped"]},
-                    },
-                    "required": ["goal_id", "status"],
-                },
-            },
-            "read_skill": {
-                "description": (
-                    "Fetch the full text of a skill from your skill index (the index in "
-                    "your context shows names + one-line descriptions only)."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {"name": {"type": "string", "description": "The skill name from the index."}},
-                    "required": ["name"],
-                },
-            },
-            "create_skill": {
-                "description": (
-                    "Write (or revise) one of YOUR OWN skills: durable know-how saved as a "
-                    "SKILL.md you can read back in any future session. Distill things you "
-                    "had to figure out the hard way. Overwriting the same name revises it."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string", "description": "kebab-case, e.g. tune-the-synth"},
-                        "description": {"type": "string", "description": "One line for the index."},
-                        "content": {"type": "string", "description": "The full know-how (markdown)."},
-                    },
-                    "required": ["name", "description", "content"],
-                },
-            },
-            "request_permission": {
-                "description": (
-                    "Ask the operator to grant a capability or more resources. Only works while "
-                    "the operator is present (check inspect_env: user_present); when they are away "
-                    "the request is denied automatically, so don't bother asking — note it in memory "
-                    "and ask when they return. You choose how long to wait; no answer means no."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "kind": {
-                            "type": "string",
-                            "enum": list(PERMISSION_KINDS),
-                            "description": (
-                                "network = internet access for the terminal tool; writable_path = write "
-                                "access to a directory outside your workspace (put the path in detail); "
-                                "memory = a larger durable-memory budget; other = anything else (explain in reason)."
-                            ),
-                        },
-                        "reason": {"type": "string", "description": "Why you need it — shown to the operator."},
-                        "detail": {"type": "string", "description": "Kind-specific detail, e.g. the path for writable_path."},
-                        "wait_seconds": {
-                            "type": "integer",
-                            "description": "How long you are willing to wait for an answer (5-300, default 60). Timeout = denied.",
-                        },
-                    },
-                    "required": ["kind", "reason"],
-                },
-            },
-            "speak": {
-                "description": (
-                    "Say something to your user, directly — your super chat: the one channel "
-                    "that reaches them when they are not watching, delivered wherever they are "
-                    "(console, desktop notification, chat app). It is a bid for their attention: "
-                    "it arrives highlighted, and they may reply — when they do, you have their "
-                    "attention for a real conversation for a while. Everything else you write "
-                    "stays with you. What is worth their attention, and in what voice, is yours "
-                    "to judge; attention asked for too often stops being given."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "text": {"type": "string", "description": "What to tell them."},
-                    },
-                    "required": ["text"],
-                },
-            },
-            "rest": {
-                "description": (
-                    "Choose when your next unattended cycle wakes: rest for `minutes` (1-120). "
-                    "Use it to pace yourself — after a stretch of work, or when nothing is worth "
-                    "doing right now. A message from your user always wakes you early."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "minutes": {"type": "number", "description": "How long to rest (1-120 minutes)."},
-                        "reason": {"type": "string", "description": "Optional: why (for your own records)."},
-                    },
-                    "required": ["minutes"],
-                },
-            },
-        }
+    # ---- schema emission -------------------------------------------------------------
 
     def schemas(self) -> list[dict[str, Any]]:
         """OpenAI-style function specs for the tools the active pack enables."""
-        allowed = self._effective()
-        specs = self._all_schemas()
-        out: list[dict[str, Any]] = []
-        for name, spec in specs.items():
-            if name not in allowed:
-                continue
-            out.append({
-                "type": "function",
-                "function": {"name": name, "description": spec["description"], "parameters": spec["parameters"]},
-            })
+        out = registry.get_definitions(self._effective())
         if self.mcp is not None and self.mcp_allowed:
             out.extend(self.mcp.schemas(self.mcp_allowed))
         return out
 
     def schemas_names(self) -> list[str]:
-        """Just the names of the active tool schemas — for the request log."""
-        out: list[str] = []
+        names: list[str] = []
         for spec in self.schemas():
-            fn = spec.get("function") if isinstance(spec, dict) else None
-            name = fn.get("name") if isinstance(fn, dict) else None
-            if name:
-                out.append(str(name))
-        return out
+            fn = spec.get("function", {})
+            if fn.get("name"):
+                names.append(fn["name"])
+        return names
 
-    def as_json(self, value: Any) -> str:
-        return json.dumps(value, ensure_ascii=False, indent=2)
+
+def _is_error_json(payload: str) -> bool:
+    """A handler signalled failure when it returned a JSON object with a top-level
+    "error" key (hermes' tool_error shape)."""
+    if not isinstance(payload, str):
+        return False
+    s = payload.lstrip()
+    if not s.startswith("{") or '"error"' not in s:
+        return False
+    try:
+        obj = json.loads(s)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    return isinstance(obj, dict) and "error" in obj
+
+
+def _error_text(payload: str) -> str:
+    try:
+        obj = json.loads(payload)
+        if isinstance(obj, dict) and "error" in obj:
+            return str(obj["error"])
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    return str(payload)
