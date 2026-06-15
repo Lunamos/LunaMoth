@@ -22,6 +22,12 @@ messaging = [
     "qrcode>=8",
     "websockets>=12",
 ]
+# Full skills nested-frontmatter parsing (flat SKILL.md works without it).
+tools = ["pyyaml>=6"]
+# The browser_* tools shell out to the Node `agent-browser` CLI + Chromium
+# (installed via `lunamoth setup`, not pip); only browser_cdp/dialog need a
+# Python dep. The real weight is non-Python and per-host.
+browser = ["websockets>=12"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

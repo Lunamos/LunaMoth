@@ -56,7 +56,8 @@ example) and Quinn 小Q (the default).)
 
 - **The card is the soul — and the ONE external file.** Identity, voice, world
   (embedded `character_book`), rules hooks, permissions (toolpack), memory
-  size, seed goals (`extensions.lunamoth.goals`) all live in the card. The
+  size, seed wishes (`extensions.lunamoth.wishes`, legacy `.goals` still read)
+  all live in the card. The
   engine injects no identity and ships ZERO default flavor text: a card that
   doesn't declare a prompt gets silence, not a default.
 - **No specific character anywhere in src/** — not in code, comments, or
@@ -162,15 +163,42 @@ zero internal deps; `obs/` imports only `config`.
   `rules.py` (the neutral Rules layer), `themes.py` (built-in TUI theme;
   theme files are user-supplied — no bundled themes dir),
   `knobs.py` (chara-knob defaults + the UI copy describing each embodiment stance).
-- `tools/` — the tool domain: `gateway.py` (`ToolGateway`, allowlisted dispatch,
-  `call(name, /)` positional-only), `runner.py` (terminal under dir/sandbox/docker),
-  `sandbox.py` (ONE working dir — `workspace/`; write_file/read_file/list_files
-  and the terminal share it; the legacy split `files/` tree is gone, folded
-  into `workspace/` on first sandbox touch), `mcp.py` (stdio JSON-RPC client;
-  `schema_sanitizer.py` hardens untrusted MCP tool schemas), `skills.py` (SKILL.md +
-  create_skill self-improvement), `goals.py`, `memory.py` (frozen-snapshot
-  two-store), `toolpacks.py`. Chara-life tools: `speak` (deliver to the user),
-  `rest` (self-paced wake, 1–120min), `request_permission` (presence-gated).
+- `tools/` — the tool domain. The TOOL SURFACE is hermes-IDENTICAL (apple-to-apple
+  port, 2026-06-15): a hermes-style self-registering registry, NOT a hand-rolled
+  gateway.
+  - `registry.py` — ported from hermes `tools/registry.py`: the `registry`
+    singleton, `register(name, toolset, schema, handler, check_fn, …)`,
+    `get_definitions()` (OpenAI schemas, 30 s check_fn TTL), `dispatch()`,
+    `discover_builtin_tools()` (AST-scan + import). Handlers are pure
+    `def name(args: dict, ctx) -> str` returning a JSON string; `tool_error`/
+    `tool_result` helpers.
+  - `context.py` — `ToolContext`: the runtime touchpoints a handler reaches
+    (sandbox/workspace, state, run_terminal, llm, transcript, memory, wishes,
+    skills, mcp, permission_hook, clarify_hook, dispatch, + ephemeral per-session
+    todo/processes/browser). hermes' per-task env → LunaMoth's one-per-chara ctx.
+  - `gateway.py` — `ToolGateway` is now a THIN shim over the registry: the SECURITY
+    audit trail, the #24 loop guardrails (warn@2/refuse@5/streak-block@8), the
+    3-way gate (registered ∩ state.tool_access ∩ pack.tools), MCP dispatch, and the
+    `{ok,data}` result the agent loop consumes. No tool bodies live here.
+  - `builtin/` — each tool is an island that self-registers at import. Hermes
+    surface: `file_tools.py` (read_file offset/limit, write_file syntax-diff,
+    patch = fuzzy replace + V4A multi-file), `search.py` (search_files grep+glob),
+    `terminal.py`+`process.py` (terminal +background, the process registry),
+    `web.py` (web_search/web_extract), `memory.py`, `skills.py` (skills_list/
+    skill_view/skill_manage), `todo.py`, `session_search.py`, `clarify.py`,
+    `execute_code.py`, `delegate_task.py`, `browser.py` (12 browser_*, check_fn-
+    gated on the agent-browser driver). LunaMoth's OWN chara-life tools:
+    `chara_life.py` — speak, rest, wish (the renamed goal — distinct from todo).
+    (The old inspect_env/write_log/request_permission tools were retired
+    2026-06-15: env facts already ride the volatile tail, the chara has memory
+    for notes, and network is on by default so the permission-ask was moot.)
+    Helpers are `_underscore.py` modules (not discovered).
+  - Supporting infra: `runner.py` (terminal under dir/sandbox/docker — shared by
+    terminal/process/search/execute_code via ctx.run_terminal), `sandbox.py` (ONE
+    working dir `workspace/`), `mcp.py` (stdio JSON-RPC; `schema_sanitizer.py`),
+    `memory.py`/`skills.py`/`goals.py` stores (hermes-shaped, per-chara), `toolpacks.py`.
+    Network is ON by default (`/net off` to disable); browser tools also need
+    dir/docker isolation + the installed driver.
 - `obs/` — diagnostics (leaf infra): `log.py` (rotating sandbox/logs/lunamoth.log
   + errors.log, credential redaction, session tag, `--debug`), `broker.py`
   (in-memory ring → `/panel log`), `audit.py` (the SECURITY trail — separate
@@ -256,7 +284,7 @@ Every API request is assembled as **three zones**:
    > bundled rules closer (the latter two only when tools are enabled).
 
 Card override hooks: `extensions.lunamoth.{rules,rules_closer,embodiment,
-embodiment_bridge,goals,toolpack,memory_chars,on_attach,on_detach}`;
+embodiment_bridge,wishes,toolpack,memory_chars,on_attach,on_detach}`;
 global `~/.lunamoth/rules.md`. (`on_attach`/`on_detach` override the wording of
 the neutral enter/leave conversation MARKER — a passive fact line, NOT a reaction
 turn; empty = the bundled neutral default. They're an Advanced card-editor field;
@@ -312,8 +340,8 @@ into the session's card, key stripped.)
 - **Two output registers**: muse (its own life; panoramic frontends only) vs
   say (delivered everywhere — the `speak` tool is how it decides to reach you).
 - **Isolation** per chara: `dir` / `sandbox` (default; sandbox-exec/bwrap) /
-  `docker`; network runtime-toggleable (`/net on`), `request_permission` while
-  you're present.
+  `docker`; network is ON by default (`/net off` to disable; the operator can
+  re-enable with `/net on`).
 - Three memory-ish things, distinct: context window (sliding) · transcript
   (SQLite, restore) · durable memory (frozen-snapshot two-store + `memory` tool).
 

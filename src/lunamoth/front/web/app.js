@@ -846,7 +846,10 @@ function closeModal() { $("modal-layer").classList.remove("open"); }
 $("modal-layer").addEventListener("click", (ev) => { if (ev.target === $("modal-layer")) closeModal(); });
 document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { closeModal(); closeMenus(); closePopovers(); } });
 
-function closePopovers() { document.querySelectorAll(".popover").forEach((p) => p.remove()); }
+function closePopovers() {
+  document.querySelectorAll(".popover, .attach-menu").forEach((p) => p.remove());
+  document.querySelectorAll(".attach-btn.on").forEach((b) => b.classList.remove("on"));
+}
 
 /* ============================ DECK ============================ */
 /* Duplicate must NOT shadow the original: the backend dedupes by name+lang and
@@ -1112,7 +1115,9 @@ async function viewCard(c) {
       keys: e2.keys || [], content: e2.content || "", constant: !!e2.constant })),
   }, "world_entries");
   const worldField = field(worldText);
-  const goalsText = (Array.isArray(ext.goals) ? ext.goals : []).map(String).join("\n");
+  // Seed wishes: read the new `wishes` key first, fall back to legacy `goals`.
+  const wishesSrc = Array.isArray(ext.wishes) ? ext.wishes : (Array.isArray(ext.goals) ? ext.goals : []);
+  const goalsText = wishesSrc.map(String).join("\n");
   const goalsField = field(goalsText);
   const notesField = field(full.creator_notes);
   // Advanced: override the neutral enter/leave conversation markers (passive fact
@@ -1158,8 +1163,9 @@ async function viewCard(c) {
       const lm = data.extensions.lunamoth = data.extensions.lunamoth || {};
       const tagline = taglineField.textContent.trim();
       if (tagline) lm.tagline = tagline; else delete lm.tagline;
-      const goals = goalsField.textContent.split("\n").map((s) => s.trim()).filter(Boolean);
-      if (goals.length) lm.goals = goals; else delete lm.goals;
+      const wishes = goalsField.textContent.split("\n").map((s) => s.trim()).filter(Boolean);
+      if (wishes.length) lm.wishes = wishes; else delete lm.wishes;
+      delete lm.goals;  // migrate the legacy key on save
       // Advanced: enter/leave conversation marker overrides (empty → neutral default)
       const onAttach = onAttachField.textContent.trim();
       if (onAttach) lm.on_attach = onAttach; else delete lm.on_attach;
@@ -1681,7 +1687,8 @@ async function openWakeSheet(card) {
   const fScen = cardFieldEl((fullCard && fullCard.scenario) || "", null, true);
   const fFirst = cardFieldEl((fullCard && fullCard.first_mes) || "", null, true);
   const fTagline = cardFieldEl(String(ext0.tagline || card.tagline || ""), "sec-tagline", true);
-  const goalsText = (Array.isArray(ext0.goals) ? ext0.goals : []).map(String).join("\n");
+  const wishesSrc0 = Array.isArray(ext0.wishes) ? ext0.wishes : (Array.isArray(ext0.goals) ? ext0.goals : []);
+  const goalsText = wishesSrc0.map(String).join("\n");
   const fGoals = cardFieldEl(goalsText, null, true);
   const book = (fullCard && fullCard.character_book && Array.isArray(fullCard.character_book.entries)) ? fullCard.character_book : null;
   const worldText = sectionText({ world_entries: (book ? book.entries : []).map((e2) => ({ keys: e2.keys || [], content: e2.content || "", constant: !!e2.constant })) }, "world_entries");
@@ -1723,8 +1730,9 @@ async function openWakeSheet(card) {
     setOrDel("tagline", fTagline);
     setOrDel("on_attach", fOnAttach);
     setOrDel("on_detach", fOnDetach);
-    const goals = fGoals.textContent.split("\n").map((s) => s.trim()).filter(Boolean);
-    if (goals.length) lm.goals = goals; else delete lm.goals;
+    const wishes = fGoals.textContent.split("\n").map((s) => s.trim()).filter(Boolean);
+    if (wishes.length) lm.wishes = wishes; else delete lm.wishes;
+    delete lm.goals;  // migrate the legacy key on save
     if (packInput.value.trim()) lm.toolpack = packInput.value.trim();
     const tmp = {};
     putSection(tmp, "world_entries", fWorld.textContent);
