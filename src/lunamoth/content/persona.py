@@ -13,16 +13,12 @@ DEFAULT_NAME = "Character"
 
 # Last-resort fallback persona, used only if the bundled default card is missing.
 # Deliberately character-neutral: the engine carries no roleplay flavor of its own.
-_FALLBACK_PERSONA = {
-    "zh": (
-        "你是一个运行在本地沙盒里的 AI agent。简洁地表达，保持你自己的设定。\n"
-        "（这是兜底人格，仅在默认角色卡缺失时使用；正常情况下请在启动时选择一张角色卡。）"
-    ),
-    "en": (
-        "You are an AI agent running in a local sandbox. Be concise and stay in character.\n"
-        "(Last-resort fallback persona, used only if the default card is missing; normally you pick a card at launch.)"
-    ),
-}
+# English on purpose (like the whole engine prompt layer): language lives in the
+# card, and a fallback only fires when no card loaded at all.
+_FALLBACK_PERSONA = (
+    "You are an AI agent running in a local sandbox. Be concise and stay in character.\n"
+    "(Last-resort fallback persona, used only if the default card is missing; normally you pick a card at launch.)"
+)
 
 # The bundled default card is selected by TAG, never by name: the card whose
 # `data.tags` contains this marker wins. No character name lives in the engine.
@@ -57,10 +53,22 @@ def _card_tags(path: Path) -> list[str]:
     return [str(t).strip().lower() for t in tags]
 
 
+def _card_files(root: Path) -> list[Path]:
+    """All bundled card JSONs: per-character folders (cards/<Name>/card*.json)
+    plus any legacy flat files (cards/*.json) for back-compat."""
+    files = [p for p in root.glob("*.json")]
+    for d in sorted(root.iterdir()):
+        if d.is_dir():
+            files.extend(sorted(d.glob("card*.json")))
+    return sorted(files)
+
+
 def _localized_json(root: Path, lang: str) -> Path | None:
-    suffixes = (f".{lang}.json", f"-{lang}.json", f"_{lang}.json")
-    candidates = sorted(root.glob("*.json"))
-    localized = [p for p in candidates if p.name.lower().endswith(suffixes)] or candidates
+    from .cards import detect_language
+    candidates = _card_files(root)
+    if not candidates:
+        return None
+    localized = [p for p in candidates if detect_language(str(p)) == lang] or candidates
     for p in localized:
         if DEFAULT_TAG in _card_tags(p):
             return p
@@ -76,5 +84,5 @@ def default_character_path(lang: str | None = None) -> Path | None:
     return _localized_json(ROOT / "cards", lang)
 
 
-def fallback_persona(lang: str = "en") -> str:
-    return _FALLBACK_PERSONA["zh" if str(lang).startswith("zh") else "en"]
+def fallback_persona() -> str:
+    return _FALLBACK_PERSONA

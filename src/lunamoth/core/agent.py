@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import base64
 import os
+import shutil
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -139,6 +141,7 @@ class LunaMothAgent:
         )
         self._load_toolpack()
         self._stable_prefix_cache: list[str] | None = None
+        self._art_staged = False  # workspace/assets populated once per session, not per prefix build
         self.llm = LLMClient(self.settings.to_llm_config())
         self.thought_cfg = ThoughtConfig()
         self.presence = presence.PresenceState(SANDBOX_ROOT)
@@ -313,19 +316,19 @@ class LunaMothAgent:
         self._memory_snapshot = self.memory.snapshot()
 
     def _memory_text(self) -> str:
-        """The frozen snapshot rendered as the system-prompt memory block (bilingual)."""
+        """The frozen snapshot rendered as the system-prompt memory block.
+
+        English labels (the engine prompt layer is English); the entries
+        themselves are whatever the chara wrote, in its card's language."""
         snap = getattr(self, "_memory_snapshot", None) or {}
         mem, usr = snap.get("memory") or [], snap.get("user") or []
         if not mem and not usr:
             return ""
-        zh = str(self.lang).startswith("zh")
         parts: list[str] = []
         if mem:
-            head = "你为自己留存的记忆：" if zh else "Your memory (notes you've kept for yourself):"
-            parts.append(head + "\n" + "\n".join(f"- {e}" for e in mem))
+            parts.append("Your memory (notes you've kept for yourself):\n" + "\n".join(f"- {e}" for e in mem))
         if usr:
-            head = "关于操作者：" if zh else "About the operator:"
-            parts.append(head + "\n" + "\n".join(f"- {e}" for e in usr))
+            parts.append("About the operator:\n" + "\n".join(f"- {e}" for e in usr))
         return "\n\n".join(parts)
 
     # Attach restores only the transcript tail; the full history stays on disk.
@@ -429,6 +432,53 @@ class LunaMothAgent:
     def _freeze_skills(self) -> None:
         self._skills_snapshot = self.skills.render_block()
 
+    def _stage_art_assets(self) -> str:
+        """Copy the card's bundled art into workspace/assets (so the chara can
+        reach and send it via its file tools) and return a NEUTRAL one-line note
+        naming what's there — a fact, never an instruction about what to want.
+        Returns '' when the card carries no art. Runs once per session (the
+        stable prefix is cached)."""
+        card = self.character
+        if card is None or not getattr(card, "has_art", None) or not card.has_art():
+            return ""
+        dest = self.sandbox.workspace_dir / "assets"
+        # Copy ONCE per session (not on every prefix rebuild / reset): the prompt
+        # cache keys on prefix bytes, so this must be an idempotent setup step.
+        if not self._art_staged:
+            def _put(src: "Path | None", rel: str) -> None:
+                if src is None:
+                    return
+                try:
+                    target = dest / rel
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    if not target.exists():
+                        shutil.copyfile(src, target)
+                except OSError as exc:
+                    _log.warning("could not stage art asset %s: %s", rel, exc)
+            _put(card.asset_path("sprite"), "sprite.png")
+            _put(card.asset_path("keyvisual"), "keyvisual.webp")
+            _put(card.asset_path("background"), "background.webp")
+            for i, sp in enumerate(card.sticker_paths()):
+                _put(sp, f"stickers/{i:02d}.png")
+            self._art_staged = True
+        # Build the note from what is ACTUALLY on disk (never assert a missing file).
+        parts: list[str] = []
+        if (dest / "sprite.png").is_file():
+            parts.append("a full-body portrait (assets/sprite.png)")
+        if (dest / "keyvisual.webp").is_file():
+            parts.append("a character key-visual sheet (assets/keyvisual.webp)")
+        if (dest / "background.webp").is_file():
+            parts.append("a scene background (assets/background.webp)")
+        sdir = dest / "stickers"
+        n_stick = len(list(sdir.glob("*.png"))) if sdir.is_dir() else 0
+        if n_stick:
+            parts.append(f"{n_stick} expression stickers (assets/stickers/)")
+        if not parts:
+            return ""
+        return ("[Your art] In workspace/assets you have your own visual set: "
+                + "; ".join(parts)
+                + ". You can send any of these to the foreground when it fits (e.g. with send_file).")
+
     def _stable_prefix(self) -> list[str]:
         """Session-stable prompt prefix. The same list object is reused until a
         session boundary/reconfigure/reset explicitly invalidates it."""
@@ -444,6 +494,8 @@ class LunaMothAgent:
         card_ext = self.character.defaults() if self.character else {}
         card_rules = str(card_ext.get("rules", "") or "")
         card_bridge = str(card_ext.get("embodiment_bridge", "") or "")
+        card_practice = str(card_ext.get("practice", "") or "")
+        card_tooluse = str(card_ext.get("tool_use", "") or "")
 
         # 1) Who it is — the character card IS the soul. Identity, voice and
         #    autonomy all come from the card; the engine adds no identity of its own.
@@ -456,23 +508,30 @@ class LunaMothAgent:
             if user_persona:
                 msgs.append(user_persona)
         else:
-            msgs.append(fallback_persona(self.lang))
+            msgs.append(fallback_persona())
 
         # 2) Rules — a neutral, character-agnostic operating standard (agency over
         #    your sandbox + your work must be real + act through tools). ONLY when
         #    the chara actually has tools; a tool-less chara is free to narrate.
+        #    All engine prompt text is English; the card carries language.
         if tools_on:
             if self.effective_embodiment() == "actor":
-                msgs.append(apply_macros(rules_layer.embodiment_bridge(self.lang, card_bridge), char, user))
-            msgs.append(apply_macros(rules_layer.rules(self.lang, card_rules), char, user))
-            # Native tool schemas already describe each tool, so no prose tool spec.
-            # Dynamic env facts are volatile and appended after history instead.
-            msgs.append(
-                "You have tools available via native function calling. Call them directly when "
-                "you want to act; never paste code in prose or claim a result before the tool returns."
-            )
+                msgs.append(apply_macros(rules_layer.embodiment_bridge(card_bridge), char, user))
+            msgs.append(apply_macros(rules_layer.rules(card_rules), char, user))
+            # Neutral capability practice (expression, looking things up, skills,
+            # judicious tool use) then the tool-use mechanics (emit the call, batch
+            # independent calls, sequence dependent ones, adapt on failure). The
+            # native tool schemas already describe each tool, so no prose tool spec;
+            # dynamic env facts ride the volatile tail.
+            msgs.append(apply_macros(rules_layer.capabilities(card_practice), char, user))
+            msgs.append(apply_macros(rules_layer.tool_use(card_tooluse), char, user))
             if self.toolpack and self.toolpack.note.strip():
                 msgs.append(self.toolpack.note.strip())
+            # If the card bundles its own art, stage it into workspace/assets and
+            # name it neutrally (a fact, not a directive) so the chara can send it.
+            art_note = self._stage_art_assets()
+            if art_note:
+                msgs.append(art_note)
         if memory.strip():
             msgs.append(memory)  # already headed (memory / user blocks)
         if tools_on:
@@ -502,7 +561,7 @@ class LunaMothAgent:
             return ""
         card_ext = self.character.defaults() if self.character else {}
         card_closer = str(card_ext.get("rules_closer", "") or "")
-        return apply_macros(rules_layer.closer(self.lang, card_closer), char, user)
+        return apply_macros(rules_layer.closer(card_closer), char, user)
 
     def _keyword_world_info_blocks(self, scan_text: str, session: Session) -> list[str]:
         char, user = self.char_name(), self.settings.user_name
@@ -586,7 +645,7 @@ class LunaMothAgent:
             from . import compaction
 
             if force or compaction.should_compact(session.context, self.llm):
-                changed = compaction.compact(session.context, self.lang, self.llm, force=force)
+                changed = compaction.compact(session.context, self.llm, force=force)
                 if changed:
                     self._reinject_todo(session)
                     self.audit.write("compacted", tokens=session.context.token_count())
@@ -662,6 +721,34 @@ class LunaMothAgent:
             # no dim machinery line — the words ARE the visible result.
             out["say"] = str(args.get("text", ""))
             out["display"] = ""
+        elif name == "send_file" and result.get("ok"):
+            # Read the workspace file and hand the loop a ready attachment payload
+            # (a data-URI, so no extra serving route) → an Attachment event.
+            try:
+                meta = _json.loads(result.get("data") or "{}")
+            except _json.JSONDecodeError:
+                meta = {}
+            relp = str(meta.get("path") or args.get("path") or "")
+            mime = str(meta.get("mime") or "application/octet-stream")
+            caption = str(meta.get("caption") or args.get("caption") or "")
+            try:
+                fp = self.sandbox.resolve_inside(relp, base=self.sandbox.workspace_dir)
+                if fp.stat().st_size > 8 * 1024 * 1024:  # re-check at read time (TOCTOU)
+                    raise ValueError("file grew past the 8MB send limit")
+                data_b64 = base64.b64encode(fp.read_bytes()).decode("ascii")
+                out["attachment"] = {
+                    "url": f"data:{mime};base64,{data_b64}",
+                    "mime": mime,
+                    "name": Path(relp).name,
+                    "caption": caption,
+                }
+                out["display"] = f"🖼️ sent {Path(relp).name}"
+            except Exception as exc:  # noqa: BLE001 - surface the failure, don't fake success
+                # The tool said delivered=True, but the file couldn't be read: make the
+                # failure visible to the chara (no silent no-op) so it can react.
+                out["ok"] = False
+                out["display"] = f"⚙ send_file ✗ {_abbrev(str(exc), 120)}"
+                out["content"] = f"ERROR: could not send {relp!r}: {exc}"
         return out
 
     def _ingest_attachments(self, attachments) -> IngestResult:
@@ -756,11 +843,8 @@ class LunaMothAgent:
             return
         hours = (now - last) / 3600
         gap = f"{hours:.1f} hours" if hours < 48 else f"{hours / 24:.1f} days"
-        zh = str(self.lang).startswith("zh")
-        note = (
-            f"[现在是 {self._now_text()}，距上一次交流已过去 {gap}]" if zh
-            else f"[it is now {self._now_text()} — {gap} since the last exchange]"
-        )
+        # English, like the rest of the engine's injected context lines.
+        note = f"[it is now {self._now_text()} — {gap} since the last exchange]"
         session.context.add("system", note)
 
     def _record_think(self, session: Session):
