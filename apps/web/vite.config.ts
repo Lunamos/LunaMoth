@@ -24,6 +24,14 @@ export default defineConfig({
         entryFileNames: "assets/[name].js",
         chunkFileNames: "assets/[name].js",
         assetFileNames: "assets/[name][extname]",
+        // Split the heavy, rarely-changing vendor libs into their own (stable,
+        // non-hashed) chunks so the app chunk stays small + cacheable across
+        // rebuilds — closes the >500 kB single-chunk advisory.
+        manualChunks: {
+          react: ["react", "react-dom"],
+          markdown: ["react-markdown", "remark-gfm"],
+          xterm: ["@xterm/xterm", "@xterm/addon-fit"],
+        },
       },
     },
   },
