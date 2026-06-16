@@ -407,6 +407,25 @@ parity with `reference/hermes-agent` for commodity surfaces), confirms
 delete), then **removes the item from this list**. Anyone (incl. subagents) may
 add a diagnosed problem here with a priority. Independent items run in parallel.
 
+## SEC-1 (HIGH, follow-up from the 2026-06-16 security review) — authenticate /asset GET
+The CRITICAL key-leak is FIXED (the /asset route no longer serves config.json /
+session.json / transcript.db — non-images now come only from sandbox/workspace|assets,
+plus a name denylist; commit below). REMAINING defense-in-depth: the /asset GET is still
+UNauthenticated, so a local process that knows the random port + an absolute path can read
+card-art images and the chara's workspace files (no secrets after the fix, but still the
+chara's private work). Add a token/cookie check like /rpc. Tricky bit: /asset URLs are
+built server-side (hub._asset_url) AND in the serve CHILD (agent send_file), and the child
+doesn't know the desktop token — so a query-token requires the renderer to tokenize every
+<img src>/background-image, OR (cleaner) a SameSite=Strict cookie set on the page load and
+checked alongside ?token=. Design it so image loading can't silently break.
+
+## SEC-low (from the same review) — image-gen blocking + key-on-disk readability
+- generate_image is synchronous: ark_generate 240s×5 + download 120s×5 can freeze the chara
+  for minutes on a flapping endpoint. Tune retries/timeouts down for image-gen.
+- macOS sandbox profile allows file-read* globally (documented: confine writes, not reads),
+  so the chara's own terminal could `cat` its session config.json and read its provider
+  api_key. Consider tightening reads, or not storing the key where the jailed shell reads it.
+
 ## R5-followup (LOW) — card-view art editing + richer world/expressions
 R5 shipped the multi-page card view (display + 设定/世界 editing). Deferred:
 per-asset upload for 立绘/主视觉/背景 + stickers (need upload RPCs like avatar_upload);

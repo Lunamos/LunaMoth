@@ -930,8 +930,13 @@ class LLMClient:
                     # image, vision models only): inject it as a user message AFTER
                     # every tool result, so the tool replies for this assistant turn
                     # stay contiguous and the image_url rides a user message.
+                    # TURN-LOCAL ONLY — do NOT record() it: an image_url data-URI is
+                    # ~2MB of base64, and the durable transcript/context never prunes
+                    # user messages (compaction only drops role:tool), so recording it
+                    # would persist megabytes per image forever and replay on restore.
+                    # The model sees it for the rest of THIS turn via `messages`; its
+                    # reply is recorded normally. (hermes keeps vision turn-local.)
                     for follow in img_followups:
-                        record(follow)
                         messages.append(follow)
                     continue
 

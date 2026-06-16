@@ -704,3 +704,54 @@ def test_asset_route_serves_image_confines_and_rejects_nonimage():
         assert code(str((H.bundled_cards_dir() / "Quinn" / "card.json").resolve())) == 404  # non-image
     finally:
         srv.shutdown()
+
+
+def test_asset_route_never_leaks_session_secrets(tmp_path, monkeypatch):
+    """SECURITY: /asset must NOT serve a session's config.json (the provider
+    api_key) or transcript.db — non-images under the session ROOT. Only the
+    chara's workspace/assets non-images (send_file docs) and card-art images are
+    served. Closes the unauthenticated-key-leak hole."""
+    import types
+    import urllib.parse, urllib.request, urllib.error
+    from lunamoth.server import supervisor as SV
+
+    # A fake session laid out like a real one.
+    root = (tmp_path / "sessions" / "probe").resolve()
+    sb = root / "sandbox"
+    (sb / "workspace" / "works").mkdir(parents=True)
+    (sb / "assets").mkdir(parents=True)
+    (root / "config.json").write_text('{"api_key":"sk-SECRET-LEAK"}', encoding="utf-8")
+    (root / "session.json").write_text("{}", encoding="utf-8")
+    (sb / "transcript.db").write_text("PRIVATE CHAT", encoding="utf-8")
+    (root / "sprite.png").write_bytes(b"\x89PNG\r\n\x1a\n")          # living-chara art sidecar
+    (sb / "workspace" / "works" / "report.pdf").write_bytes(b"%PDF-1.4 doc")  # a send_file doc
+    (sb / "workspace" / "works" / "art.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    meta = types.SimpleNamespace(root=root, sandbox_dir=sb)
+    monkeypatch.setattr(SV.S, "list_sessions", lambda: [meta])
+
+    port = SV.free_port()
+    srv = SV.start_http("127.0.0.1", port, token="t", supervisor=None)
+
+    def get(abspath):
+        url = f"http://127.0.0.1:{port}/asset?p=" + urllib.parse.quote(str(abspath))
+        try:
+            r = urllib.request.urlopen(url, timeout=5)
+            return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, b""
+
+    try:
+        # the secrets — all refused, body never served
+        assert get(root / "config.json")[0] == 404
+        assert get(root / "session.json")[0] == 404
+        assert get(sb / "transcript.db")[0] == 404
+        # legitimate: card-art sidecar image + a send_file doc/image under workspace
+        assert get(root / "sprite.png")[0] == 200
+        assert get(sb / "workspace" / "works" / "report.pdf")[0] == 200
+        assert get(sb / "workspace" / "works" / "art.png")[0] == 200
+        # belt-and-suspenders: even if a secret were under workspace, deny by name
+        (sb / "workspace" / "config.json").write_text('{"api_key":"x"}', encoding="utf-8")
+        assert get(sb / "workspace" / "config.json")[0] == 404
+    finally:
+        srv.shutdown()

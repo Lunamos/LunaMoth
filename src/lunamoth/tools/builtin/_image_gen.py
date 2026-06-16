@@ -15,6 +15,7 @@ import json
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -122,7 +123,13 @@ def download_bytes(url: str, *, timeout: int = 120, tries: int = 5,
     """GET ``url`` and return the raw bytes (capped at ``max_bytes`` so a runaway
     or malformed response can't exhaust memory), retrying transient errors 5 × 5 s.
     Raises ``RuntimeError`` carrying the last error on final failure, or if the
-    body exceeds the cap."""
+    body exceeds the cap.
+
+    SSRF guard: the URL comes from Ark's API response, not the model — but we still
+    only fetch http(s), never file://, ftp://, data:, etc., so a malformed/hostile
+    result URL can't read a local file or reach an internal scheme."""
+    if urllib.parse.urlparse(url).scheme not in ("http", "https"):
+        raise RuntimeError(f"refusing to fetch a non-http(s) image URL: {url[:80]!r}")
     last = ""
     for attempt in range(1, tries + 1):
         try:

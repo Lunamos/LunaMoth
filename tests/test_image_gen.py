@@ -259,3 +259,10 @@ def test_download_bytes_caps_size(monkeypatch):
                         lambda url, timeout=0: _Resp(b"x" * 50))
     with pytest.raises(RuntimeError):
         _image_gen.download_bytes("http://x/big", max_bytes=10)
+
+
+def test_download_bytes_rejects_non_http_scheme():
+    # SSRF guard: a file:// (or any non-http(s)) URL is refused before any fetch.
+    for bad in ("file:///etc/passwd", "ftp://x/y", "data:text/plain,hi", "gopher://x"):
+        with pytest.raises(RuntimeError):
+            _image_gen.download_bytes(bad)
