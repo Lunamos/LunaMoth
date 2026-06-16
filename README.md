@@ -108,7 +108,7 @@ your-host.example.com {
 }
 ```
 
-Bookmark `https://your-host/#token=<TOKEN>` (NO `&ws=` — single-origin, so the client speaks `wss://your-host/…` and Caddy path-routes it). Read the token from `docker compose logs lunamoth`. Or [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) for no open inbound port — route the same two paths to `:6181` and the rest to `:6180`. (SSH-tunnel users don't need any of this: `lunamoth connect ssh://host` forwards both ports automatically.)
+**Allow-list the public domain** — the Host/Origin allowlist is loopback + the bound host only, so a reverse proxy forwarding `your-host.example.com` is rejected (403 / WS 4403) unless you name it: set `LUNAMOTH_ALLOW_HOST=your-host.example.com` (compose) or pass `--allow-host your-host.example.com`. Then bookmark `https://your-host/#token=<TOKEN>` (NO `&ws=` — single-origin, so the client speaks `wss://your-host/…` and Caddy path-routes it). Read the token from `docker compose logs lunamoth`. Or [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) for no open inbound port — route the same two paths to `:6181` and the rest to `:6180` (still set `LUNAMOTH_ALLOW_HOST`). (SSH-tunnel users need none of this: `lunamoth connect ssh://host` forwards both ports automatically.)
 
 **No exposure at all — SSH tunnel.** Easiest is `lunamoth connect ssh://user@server` (it reads the remote ports, builds the tunnel, opens the browser). Manual equivalent:
 

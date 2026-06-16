@@ -508,19 +508,25 @@ def cmd_desktop(args: argparse.Namespace) -> int:
         )
         return 2
 
+    # A non-loopback bind targets a reverse proxy, which needs STABLE, pinnable
+    # ports — a random bind-0 pair is unproxiable. So for a non-loopback bind
+    # default the HTTP port to 6180 even when --port is unset, so a bare
+    # `--host 0.0.0.0 --no-open` is proxiable (not random). Loopback keeps auto.
+    req_port = args.port
+    if req_port == 0 and not N.is_loopback_host(host):
+        req_port = 6180
+
     # WS port → bind 0 (OS-assigned, collision-free) for a loopback bind; the
     # supervisor bakes the chosen port into the printed URL + daemon.json.
-    # --ws-port honored if given. EXCEPTION: a non-loopback bind is meant to sit
-    # behind a reverse proxy, which must be able to PIN the WS port — a random
-    # bind-0 port is unproxiable. So default it next to the HTTP port (http+1),
-    # which the README's Caddyfile path-routes (/hub,/chara/* → this port).
+    # --ws-port honored if given. For a non-loopback bind, default it next to the
+    # HTTP port (http+1) so the README's Caddyfile can path-route /hub,/chara/* → it.
     ws_port = args.ws_port or 0
-    if ws_port == 0 and args.port and not N.is_loopback_host(host):
-        ws_port = args.port + 1
+    if ws_port == 0 and req_port and not N.is_loopback_host(host):
+        ws_port = req_port + 1
 
     # HTTP port handling (D2): if the requested port is taken, attach to OUR live
     # daemon (don't double-spawn); fail with attribution if it's a foreign holder.
-    http_port = args.port
+    http_port = req_port
     if http_port not in (0, None):
         data = read_daemon_json()
         if int(data.get("http_port") or 0) == int(http_port) and daemon_alive(data):

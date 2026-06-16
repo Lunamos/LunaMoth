@@ -108,7 +108,7 @@ your-host.example.com {
 }
 ```
 
-书签用 `https://your-host/#token=<TOKEN>`（**不要带 `&ws=`** —— 单源,客户端讲 `wss://your-host/…`,由 Caddy 按路径路由）。token 从 `docker compose logs lunamoth` 读。或用 [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) 实现零开放入站端口 —— 把同样两个路径转给 `:6181`、其余转给 `:6180`。（SSH 隧道用户无需这些：`lunamoth connect ssh://host` 自动转发两个端口。）
+**放行公网域名** —— Host/Origin 白名单只含回环 + 绑定的 host,反代转发的 `your-host.example.com` 会被拒(403 / WS 4403),除非显式放行:设 `LUNAMOTH_ALLOW_HOST=your-host.example.com`(compose)或传 `--allow-host your-host.example.com`。然后书签用 `https://your-host/#token=<TOKEN>`(**不要带 `&ws=`** —— 单源,客户端讲 `wss://your-host/…`,由 Caddy 按路径路由)。token 从 `docker compose logs lunamoth` 读。或用 [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) 实现零开放入站端口 —— 把同样两个路径转给 `:6181`、其余转给 `:6180`(同样要设 `LUNAMOTH_ALLOW_HOST`)。（SSH 隧道用户无需这些:`lunamoth connect ssh://host` 自动转发两个端口。）
 
 **完全不暴露 —— SSH 隧道。** 最省事是 `lunamoth connect ssh://user@server`（自动读取远端端口、建隧道、开浏览器）。手动等价：
 

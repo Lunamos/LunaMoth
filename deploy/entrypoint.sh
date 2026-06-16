@@ -6,6 +6,7 @@
 set -e
 
 PORT="${LUNAMOTH_PORT:-6180}"
+WS_PORT=$((PORT + 1))   # the supervisor's non-loopback default (http+1)
 
 if [ -z "${LUNAMOTH_TOKEN:-}" ]; then
   LUNAMOTH_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
@@ -20,8 +21,22 @@ else
   echo " LunaMoth: using the provided LUNAMOTH_TOKEN"
 fi
 echo " token: ${LUNAMOTH_TOKEN}"
-echo " open : http://<this-host>:${PORT}/#token=${LUNAMOTH_TOKEN}"
-echo " (put a TLS reverse proxy in front for anything past loopback — see README)"
+echo " direct (publish both ports ${PORT}+${WS_PORT}):"
+echo "   http://<this-host>:${PORT}/#token=${LUNAMOTH_TOKEN}&ws=${WS_PORT}"
+if [ -n "${LUNAMOTH_ALLOW_HOST:-}" ]; then
+  echo " behind your TLS reverse proxy (allow-host=${LUNAMOTH_ALLOW_HOST}):"
+  echo "   https://${LUNAMOTH_ALLOW_HOST}/#token=${LUNAMOTH_TOKEN}"
+else
+  echo " behind a TLS reverse proxy: set LUNAMOTH_ALLOW_HOST=<your-domain> so the"
+  echo "   Host/Origin allowlist accepts it, then open https://<your-domain>/#token=…"
+fi
+echo " (never expose ${PORT}/${WS_PORT} directly past loopback — see README)"
 echo "============================================================"
 
-exec lunamoth desktop --host 0.0.0.0 --port "${PORT}" --no-open
+# A non-loopback bind's Host/Origin allowlist is loopback + the bound host only;
+# a reverse proxy forwards the PUBLIC domain, so it must be allow-listed explicitly.
+set -- lunamoth desktop --host 0.0.0.0 --port "${PORT}" --no-open
+if [ -n "${LUNAMOTH_ALLOW_HOST:-}" ]; then
+  set -- "$@" --allow-host "${LUNAMOTH_ALLOW_HOST}"
+fi
+exec "$@"

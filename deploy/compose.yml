@@ -29,6 +29,10 @@ services:
       # your bookmark URL. To PIN a stable token (and a fixed bookmark URL), set it:
       # - LUNAMOTH_TOKEN=your-long-random-token
       # - LUNAMOTH_PORT=6180
+      # REQUIRED behind a named-domain reverse proxy: the Host/Origin allowlist is
+      # loopback + the bound host only, so the public domain must be allow-listed
+      # or the proxied GET/WS get 403/4403. Set it to your domain:
+      # - LUNAMOTH_ALLOW_HOST=your-host.example.com
     volumes:
       # Sessions, cards and config — the one thing that must survive a re-deploy.
       - ./data:/root/.lunamoth
