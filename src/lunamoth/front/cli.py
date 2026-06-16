@@ -543,6 +543,23 @@ def cmd_desktop(args: argparse.Namespace) -> int:
                          open_browser=(not args.no_open and not os.getenv("LUNAMOTH_DAEMON_CHILD")))
 
 
+def cmd_connect(args: argparse.Namespace) -> int:
+    """Reach a remote chara over an SSH tunnel: `lunamoth connect ssh://host`.
+
+    The remote lunamothd stays bound to 127.0.0.1; we forward its HTTP + WS
+    ports through `ssh -L` and open the browser at the tunneled localhost URL.
+    SSH provides encryption + auth; the server is never exposed (plan §3/§9)."""
+    from ..server.sshconnect import ConnectError, connect
+
+    try:
+        return connect(args.target, open_browser=not args.no_open)
+    except ConnectError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 0
+
+
 def cmd_daemon(args: argparse.Namespace) -> int:
     from ..server.supervisor import daemon_status, stop_daemon_process
 
@@ -882,6 +899,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--daemon", action="store_true", help="start lunamothd in the background")
     sp.add_argument("--debug", action="store_true", help="DEBUG-level diagnostics")
     sp.set_defaults(func=cmd_desktop)
+
+    sp = sub.add_parser("connect", help="reach a remote chara over an SSH tunnel: connect ssh://[user@]host[:port]")
+    sp.add_argument("target", help="ssh target, e.g. ssh://user@host:22 (encryption + auth via SSH; the remote stays bound to 127.0.0.1)")
+    sp.add_argument("--no-open", action="store_true", help="don't open the browser")
+    sp.set_defaults(func=cmd_connect)
 
     sp = sub.add_parser("daemon", help="manage the resident desktop supervisor")
     sp.add_argument("action", choices=["stop", "status"])
