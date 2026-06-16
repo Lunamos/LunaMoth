@@ -74,6 +74,26 @@ def test_ensure_password_precedence(tmp_path):
         A.ensure_password(env_password="short", path=tmp_path / "x.json")
 
 
+def test_auth_store_is_private_from_creation(tmp_path):
+    """The password record must be 0600 with NO group/world bits — and private
+    from creation (no write-then-chmod race), even if a stale tmp pre-existed."""
+    import os
+    import stat
+
+    p = tmp_path / "auth.json"
+    # a stale tmp left world-readable by a prior crash must not leak through
+    stale = p.with_suffix(".json.tmp")
+    stale.write_text("{}", encoding="utf-8")
+    os.chmod(stale, 0o644)
+    A.save_record({"algo": "pbkdf2_sha256", "iters": 600000, "salt": "aa", "hash": "bb"}, path=p)
+    mode = stat.S_IMODE(p.stat().st_mode)
+    assert mode == 0o600, oct(mode)
+    assert not (mode & 0o077)  # no group/other access
+    # round-trips as a real record, hash-only (no plaintext anywhere)
+    assert A.load_record(p) is not None
+    assert "pbkdf2" in p.read_text(encoding="utf-8")
+
+
 def test_rate_limiter_throttles_then_refills():
     rl = A.LoginRateLimiter(capacity=3, window=60.0)
     assert all(rl.allow("1.2.3.4") for _ in range(3))  # burst of 3
