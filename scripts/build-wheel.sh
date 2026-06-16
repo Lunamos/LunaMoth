@@ -24,6 +24,14 @@ DIST_DIR="$ROOT/dist"
 say() { printf '\033[1;36m[build-wheel]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m[build-wheel]\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Portable python: many environments (incl. uv-managed ones + CI) have no bare
+# `python` on PATH — fall back to python3, then `uv run python`.
+run_python() {
+  if command -v python3 >/dev/null 2>&1; then python3 "$@"
+  elif command -v python >/dev/null 2>&1; then python "$@"
+  else uv run python "$@"; fi
+}
+
 command -v npm >/dev/null 2>&1 || fail "npm is required to build the frontend"
 
 # --- 1. build the SPA into the gitignored webui/ ----------------------------
@@ -50,12 +58,12 @@ if command -v uv >/dev/null 2>&1; then
   uv build --wheel
 else
   say "uv not found; building wheel with python -m build ..."
-  python -m build --wheel
+  run_python -m build --wheel
 fi
 
 # --- 3. assert the wheel actually bundled the UI -----------------------------
 say "verifying the wheel bundles front/webui/ ..."
-python - <<'PY'
+run_python - <<'PY'
 import glob, sys, zipfile
 wheels = sorted(glob.glob("dist/*.whl"))
 if not wheels:
