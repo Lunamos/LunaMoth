@@ -1,16 +1,16 @@
 /* The right-side chat panel — tabbed: status | skills | wishes(愿望) | memory |
  * gateway | settings. Ported from chat.js renderStatusPane / renderSkillsPage /
- * renderGoalsPage / renderMemoryPage / renderSettingsPane.
+ * renderGoalsPage / renderMemoryPage / renderSettingsPane / renderGatewayPane.
  *
  * The STATUS tab is the priority (the live snapshot the owner reads at a glance);
- * skills/wishes/memory/settings are functional via command()/hub extras. The
- * gateway pane (WeChat QR + adapter config, ~250 LOC of bespoke flow) is left as a
- * scoped TODO placeholder — a working chat stream + status panel is the must-have.
- */
+ * skills/wishes/memory/settings are functional via command()/hub extras; the
+ * GATEWAY tab (WeChat QR login + adapter config + enable/disable) lives in
+ * GatewayPane. */
 
 import { useEffect, useState } from "react";
 import { useT } from "../../i18n";
 import { useHub } from "../../state/hub";
+import { GatewayPane } from "./GatewayPane";
 import type { CharaStream, Snapshot } from "../../hooks/useCharaStream";
 
 type PanelTab = "status" | "skills" | "goals" | "memory" | "gateway" | "settings";
@@ -42,7 +42,7 @@ export function ChatPanel({ stream, name }: { stream: CharaStream; name: string 
           {tab === "skills" && <SkillsPane stream={stream} name={name} />}
           {tab === "goals" && <WishesPane name={name} />}
           {tab === "memory" && <MemoryPane name={name} />}
-          {tab === "gateway" && <GatewayPane />}
+          {tab === "gateway" && <GatewayPane name={name} />}
           {tab === "settings" && <SettingsPane stream={stream} />}
         </div>
       </div>
@@ -361,20 +361,6 @@ function NumField({
           {t("save")}
         </button>
       </div>
-    </div>
-  );
-}
-
-/* TODO(gateway): port chat.js renderGatewayPane — the WeChat QR login flow
-   (weixin.qr → poll weixin.qr_status), the GW_PLATFORMS adapter config form with
-   field-level merge save (messaging.get/save), and the enable switch
-   (gateway.start/stop). ~250 LOC of bespoke flow; deferred so the must-have chat
-   stream lands first. A working placeholder until then. */
-function GatewayPane() {
-  const t = useT();
-  return (
-    <div className="placeholder-pane">
-      {t("p-gateway")} — TODO (WeChat QR + adapter config; use the global Gateways view for now)
     </div>
   );
 }

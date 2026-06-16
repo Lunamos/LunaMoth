@@ -15,6 +15,7 @@ import { useHub, type BoardSession } from "../state/hub";
 import { useNavigate } from "../hooks/useHashRoute";
 import { rpcErrText } from "../lib/status";
 import { gwPlatLabel, gwStatusBits } from "../components/gateways/status";
+import { CharaPicker } from "../components/gateways/CharaPicker";
 import { deckToast } from "../components/ui/deckToast";
 
 interface GatewayRow {
@@ -31,10 +32,29 @@ export function Gateways() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<Set<string>>(new Set());
+  const [picking, setPicking] = useState(false);
 
   const sessions = (snapshot?.sessions as BoardSession[] | undefined) || [];
   const byName: Record<string, BoardSession> = {};
   for (const s of sessions) byName[s.name] = s;
+
+  // A new gateway always binds to a chara (app.js openNewGateway): no chara → a
+  // toast; exactly one → straight to its gateway tab; many → the picker popover.
+  const newGateway = () => {
+    if (!sessions.length) {
+      deckToast(t("gw-no-chara"), true);
+      return;
+    }
+    if (sessions.length === 1) {
+      nav(`#/chara/${encodeURIComponent(sessions[0].name)}`);
+      return;
+    }
+    setPicking((p) => !p);
+  };
+  const pickChara = (name: string) => {
+    setPicking(false);
+    nav(`#/chara/${encodeURIComponent(name)}`);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,23 +108,30 @@ export function Gateways() {
         <button className="btn soft" disabled={loading} onClick={() => void load()}>
           {loading ? <span className="spin" /> : t("gw-refresh")}
         </button>
-        {/* TODO(gateways): ＋新建网关 opens a chara picker popover that deep-links to
-            the chara's gateway tab (app.js openNewGateway). Until the picker
-            lands, new gateways are configured from a chara's gateway tab. */}
-        <button className="btn primary" onClick={() => goNewGateway(sessions, nav, t)}>
-          {t("gw-new")}
-        </button>
+        {/* ＋新建网关 → a chara-picker popover that deep-links to the chara's
+            gateway tab (app.js openNewGateway). */}
+        <div style={{ position: "relative" }}>
+          <button className="btn primary" onClick={newGateway}>
+            {t("gw-new")}
+          </button>
+          {picking && (
+            <CharaPicker sessions={sessions} onPick={pickChara} onClose={() => setPicking(false)} />
+          )}
+        </div>
       </div>
 
       <div className="gw-overview">
         {err ? (
           <div className="gw-error">{err}</div>
         ) : !configured.length ? (
-          <div className="empty-state">
+          <div className="empty-state" style={{ position: "relative" }}>
             <p>{t("gw-empty")}</p>
-            <button className="btn primary" onClick={() => goNewGateway(sessions, nav, t)}>
+            <button className="btn primary" onClick={newGateway}>
               {t("gw-new")}
             </button>
+            {picking && (
+              <CharaPicker sessions={sessions} onPick={pickChara} onClose={() => setPicking(false)} />
+            )}
           </div>
         ) : (
           configured.map((r) => {
@@ -140,18 +167,4 @@ export function Gateways() {
       </div>
     </div>
   );
-}
-
-function goNewGateway(
-  sessions: BoardSession[],
-  nav: (hash: string) => void,
-  t: ReturnType<typeof useT>,
-): void {
-  if (!sessions.length) {
-    deckToast(t("gw-no-chara"), true);
-    return;
-  }
-  // A gateway always binds to a chara; deep-link to the first chara's gateway tab.
-  // TODO(gateways): a chara-picker popover (app.js openNewGateway) when >1 chara.
-  nav(`#/chara/${encodeURIComponent(sessions[0].name)}`);
 }

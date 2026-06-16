@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { assetUrl } from "../../rpc";
 import { useT, type TKey } from "../../i18n";
 import { useHub } from "../../state/hub";
+import { useOverlay } from "../../state/overlay";
 import { rpcErrText } from "../../lib/status";
 import { glyphOf, paletteClass } from "../../lib/format";
 import { sectionText, putSection, type NormalizedDraft } from "../../lib/cards";
@@ -36,6 +37,7 @@ export function CardEditor({
 }) {
   const t = useT();
   const { hub } = useHub();
+  const overlay = useOverlay();
   const [full, setFull] = useState<FullCard | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("set");
@@ -207,6 +209,13 @@ export function CardEditor({
   const cardForVisual: DeckCard = card;
   const th = themeOf(card);
   const hasAnyArt = !!(card.sprite_url || card.keyvisual_url || card.bg_url || avatarSrc(card));
+  // The avatar/theme editor edits presentation only (sidecar avatar + dual theme),
+  // soul untouched; it surfaces its own read-only notes for builtin/PNG/locked cards
+  // (app.js viewCard wires it on the header avatar + the avatar art tile).
+  const openAvatar = () => {
+    onClose();
+    overlay.open({ kind: "avatar", card });
+  };
 
   return (
     <DeckModal open variant="cardview" onClose={onClose} style={themeStyle(card)}>
@@ -217,7 +226,7 @@ export function CardEditor({
           </div>
         )}
         <div className="cv-header">
-          <Avatar name={charName} card={card} cls="avatar-s" />
+          <Avatar name={charName} card={card} cls="avatar-s" onClick={openAvatar} title={t("av-title")} />
           <div className="cv-id">
             <CardField ref={fName} editable={editable} initial={full.name || ""} className="cve-name" />
             {(editable || taglineValue) && (
@@ -296,7 +305,7 @@ export function CardEditor({
                   <ArtTile labelKey="cv-art-sprite" url={cardForVisual.sprite_url} name={charName} />
                   <ArtTile labelKey="cv-art-keyvisual" url={cardForVisual.keyvisual_url} name={charName} />
                   <ArtTile labelKey="cv-art-bg" url={cardForVisual.bg_url} name={charName} sq />
-                  <ArtTile labelKey="cv-art-avatar" url={avatarSrc(card)} name={charName} sq />
+                  <ArtTile labelKey="cv-art-avatar" url={avatarSrc(card)} name={charName} sq onClick={openAvatar} title={t("av-title")} />
                 </div>
               ) : (
                 <div className="cv-empty">
@@ -385,13 +394,35 @@ export function CardEditor({
   );
 }
 
-function ArtTile({ labelKey, url, name, sq }: { labelKey: TKey; url?: string; name: string; sq?: boolean }) {
+function ArtTile({
+  labelKey,
+  url,
+  name,
+  sq,
+  onClick,
+  title,
+}: {
+  labelKey: TKey;
+  url?: string;
+  name: string;
+  sq?: boolean;
+  onClick?: () => void;
+  title?: string;
+}) {
   const t = useT();
   return (
     <div className={"cv-tile" + (sq ? " sq" : "")}>
       <div
         className={"cv-art" + (url ? "" : " empty " + paletteClass(name))}
-        style={url ? { backgroundImage: `url("${assetUrl(String(url)).replace(/"/g, "%22")}")` } : undefined}
+        style={
+          url
+            ? { backgroundImage: `url("${assetUrl(String(url)).replace(/"/g, "%22")}")`, ...(onClick ? { cursor: "pointer" } : {}) }
+            : onClick
+              ? { cursor: "pointer" }
+              : undefined
+        }
+        onClick={onClick}
+        title={onClick ? title : undefined}
       >
         {!url && <div className="cv-art-glyph">{glyphOf(name)}</div>}
       </div>
