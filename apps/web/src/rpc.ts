@@ -47,7 +47,13 @@ export const BOOT: Boot = (() => {
 
 export function wsUrl(path: string): string {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${BOOT.host}:${BOOT.wsPort}${path}?token=${encodeURIComponent(BOOT.token)}`;
+  // Local/SSH-tunnel: HTTP + WS are on distinct ports, so BOOT.wsPort is set and
+  // we target host:wsPort. Behind a reverse proxy the page is single-origin (the
+  // bookmark omits &ws=), so wsPort is empty → target the page origin (no :port,
+  // which would otherwise emit a malformed `wss://host:/path`) and let the proxy
+  // path-route the upgrade to the backend WS port.
+  const hostport = BOOT.wsPort ? `${BOOT.host}:${BOOT.wsPort}` : BOOT.host;
+  return `${proto}//${hostport}${path}?token=${encodeURIComponent(BOOT.token)}`;
 }
 
 /* The SPA's token rides the URL hash (client-only), so the shell GET sets no auth

@@ -98,23 +98,25 @@ docker compose logs lunamoth           # read the auto-generated access token fo
 
 The image carries the built UI inside the wheel — **no Node, no source in the container**. Sessions, cards and config persist in `./data` (mounted at `/root/.lunamoth`). The container binds `0.0.0.0` inside; never expose that port directly.
 
-**Put TLS in front (required past loopback).** The supervisor serves HTTP + a WebSocket; your proxy must upgrade WS. With [Caddy](https://caddyserver.com) (auto-HTTPS):
+**Put TLS in front (required past loopback).** The supervisor serves the UI on the HTTP port (`6180`) and the WebSocket gateway on `6180+1 = 6181` (the deterministic non-loopback default, so it's pinnable). Your proxy presents one HTTPS origin and **path-routes the WS upgrade** to the WS port. **[Caddy](https://caddyserver.com)** (auto-HTTPS) is the blessed setup:
 
 ```caddyfile
 your-host.example.com {
-    reverse_proxy 127.0.0.1:6180   # Caddy proxies WebSocket upgrades automatically
+    @ws path /hub* /chara/*           # the WebSocket routes
+    reverse_proxy @ws 127.0.0.1:6181  # → WS gateway (upgrades proxied automatically)
+    reverse_proxy 127.0.0.1:6180      # → everything else (UI, /rpc, /asset, /auth)
 }
 ```
 
-Or [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) for no open inbound port (`cloudflared tunnel --url http://127.0.0.1:6180`, WS upgrade on by default). Either way you reach `https://your-host/` and the client speaks `wss://` automatically.
+Bookmark `https://your-host/#token=<TOKEN>` (NO `&ws=` — single-origin, so the client speaks `wss://your-host/…` and Caddy path-routes it). Read the token from `docker compose logs lunamoth`. Or [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) for no open inbound port — route the same two paths to `:6181` and the rest to `:6180`. (SSH-tunnel users don't need any of this: `lunamoth connect ssh://host` forwards both ports automatically.)
 
-**No exposure at all — SSH tunnel.** Bind to loopback on the server and forward a port:
+**No exposure at all — SSH tunnel.** Easiest is `lunamoth connect ssh://user@server` (it reads the remote ports, builds the tunnel, opens the browser). Manual equivalent:
 
 ```bash
 # on the server:
-lunamoth desktop --host 127.0.0.1 --no-open
-# from your laptop:
-ssh -L 6180:127.0.0.1:6180 user@server   # then open the printed http://127.0.0.1:6180/#… URL
+lunamoth desktop --host 127.0.0.1 --no-open    # prints http://127.0.0.1:<http>/#token=…&ws=<ws>
+# from your laptop (forward BOTH printed ports):
+ssh -L <http>:127.0.0.1:<http> -L <ws>:127.0.0.1:<ws> user@server
 ```
 
 **Frontend dev loop** (two terminals): run the backend, then the Vite dev server which proxies `/rpc` + the WS to it.

@@ -36,9 +36,10 @@ RUN set -eux; \
 ENV LUNAMOTH_HOME=/root/.lunamoth
 VOLUME ["/root/.lunamoth"]
 
-# The supervisor's HTTP renderer + WS gateway. Bound to 0.0.0.0 by the entrypoint;
-# put a TLS reverse proxy in front for anything past loopback (see README).
-EXPOSE 6180
+# The supervisor's HTTP renderer (6180) + WS gateway (6181 = http+1, the
+# deterministic non-loopback default so a reverse proxy can pin it). Bound to
+# 0.0.0.0 by the entrypoint; put a TLS reverse proxy in front past loopback (README).
+EXPOSE 6180 6181
 
 # The entrypoint generates an access token if LUNAMOTH_TOKEN is unset and prints
 # it (the wildcard bind needs a token — the gate), then serves headless. Set

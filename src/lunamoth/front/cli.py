@@ -508,9 +508,15 @@ def cmd_desktop(args: argparse.Namespace) -> int:
         )
         return 2
 
-    # WS port → bind 0 (OS-assigned, collision-free); the supervisor bakes the
-    # chosen port into the printed URL + daemon.json. --ws-port honored if given.
+    # WS port → bind 0 (OS-assigned, collision-free) for a loopback bind; the
+    # supervisor bakes the chosen port into the printed URL + daemon.json.
+    # --ws-port honored if given. EXCEPTION: a non-loopback bind is meant to sit
+    # behind a reverse proxy, which must be able to PIN the WS port — a random
+    # bind-0 port is unproxiable. So default it next to the HTTP port (http+1),
+    # which the README's Caddyfile path-routes (/hub,/chara/* → this port).
     ws_port = args.ws_port or 0
+    if ws_port == 0 and args.port and not N.is_loopback_host(host):
+        ws_port = args.port + 1
 
     # HTTP port handling (D2): if the requested port is taken, attach to OUR live
     # daemon (don't double-spawn); fail with attribution if it's a foreign holder.

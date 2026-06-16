@@ -20,7 +20,8 @@ services:
     security_opt:
       - no-new-privileges:true
     ports:
-      - "6180:6180" # LunaMoth desktop UI + WS gateway
+      - "6180:6180" # LunaMoth desktop UI (HTTP)
+      - "6181:6181" # WS gateway (http+1; your reverse proxy path-routes /hub,/chara/* here)
     environment:
       - TZ=Asia/Shanghai
       # The entrypoint generates an access token if LUNAMOTH_TOKEN is unset and
