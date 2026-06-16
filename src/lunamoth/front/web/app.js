@@ -898,6 +898,9 @@ function openModal(content, wide) {
   const box = $("modal-box");
   box.classList.toggle("sheet", !!wide);
   box.classList.toggle("wide", wide === "wide");
+  // The card view (R5) is a fixed-height flex column: tag the box so it drops the
+  // modal's own padding/scroll and lets only its inner pane scroll.
+  box.classList.toggle("cardview", !!(content && content.classList && content.classList.contains("cardview")));
   box.innerHTML = "";
   box.appendChild(content);
   $("modal-layer").classList.add("open");
@@ -1279,35 +1282,138 @@ async function viewCard(c) {
     }
   } }, t("save")) : null;
 
-  openModal(el("div", null,
-    el("div", { class: "cv-head" }, avatar,
-      el("div", { class: "cv-id" },
-        nameField,
-        (editable || taglineValue) ? taglineField : null,
-        badges)),
-    note ? el("div", { class: "cv-note" }, note) : null,
+  // ---- 设定 pane: the core identity fields + Advanced + raw JSON ----
+  const setPane = el("div", { class: "cv-pane", "data-pane": "set" },
     block("cve-description", descField, !!full.description, "description"),
     block("cve-personality", persField, !!full.personality, "personality"),
     block("cve-scenario", scenField, !!full.scenario, "scenario"),
     block("cv-first", firstField, !!full.first_mes, "first_mes"),
-    block("cve-world", worldField, !!worldText, "world_entries"),
     block("cve-goals", goalsField, !!goalsText, "goals"),
     block("cve-notes", notesField, !!full.creator_notes),
     advanced,
     full.raw ? el("details", { class: "cv-raw" },
       el("summary", null, t("cv-raw")),
-      el("pre", null, JSON.stringify(full.raw, null, 2))) : null,
-    el("div", { class: "acts", style: "margin-top:16px" },
-      el("button", { class: "btn text", onclick: closeModal }, t("cancel")),
-      el("div", { class: "grow" }),
-      (!c.builtin && !c.frozen) ? el("button", { class: "btn soft", onclick: async () => {
-        if (!confirm(t("deck-delete-q"))) return;
-        try { await hub.call("card.delete", { path: c.path }, 10000); closeModal(); refreshHub(); }
-        catch (e) { toast(e.message, true); }
-      } }, t("menu-delete")) : null,
-      dupBtn,
-      saveBtn,
-      el("button", { class: "btn primary", onclick: () => { closeModal(); ensureModel(() => openWakeSheet(c)); } }, t("deck-wake")))), "wide");
+      el("pre", null, JSON.stringify(full.raw, null, 2))) : null);
+
+  // ---- 视觉 pane: 4 art tiles + theme swatches; themed placeholder fallback ----
+  const artTile = (labelKey, url, sq, onClick) => {
+    const art = el("div", { class: "cv-art" + (url ? "" : " empty " + paletteClass(full.name)) });
+    if (url) art.style.backgroundImage = `url("${String(url).replace(/"/g, "%22")}")`;
+    else art.appendChild(el("div", { class: "cv-art-glyph" }, glyphOf(full.name)));
+    const cap = el("div", { class: "cv-art-cap" }, el("b", null, t(labelKey)),
+      url ? null : el("span", { class: "cv-art-none" }, t("cv-art-none")));
+    const tile = el("div", { class: "cv-tile" + (sq ? " sq" : "") + (onClick ? " clickable" : "") }, art, cap);
+    if (onClick) tile.addEventListener("click", onClick);
+    return tile;
+  };
+  const th = themeOf(c);
+  const hasAnyArt = !!(c.sprite_url || c.keyvisual_url || c.bg_url || avatarSrc(card));
+  const swatch = (labelKey, color) => color
+    ? el("div", { class: "cv-swatch" }, el("i", { style: `background:${color}` }),
+        el("span", null, `${t(labelKey)} ${color}`))
+    : null;
+  const themebar = (th.primary || th.secondary)
+    ? el("div", { class: "cv-themebar" }, el("b", null, t("cv-theme-label")),
+        swatch("cv-theme-primary", th.primary), swatch("cv-theme-secondary", th.secondary),
+        el("span", { class: "cv-theme-note" }, t("cv-theme-note")))
+    : null;
+  const visPane = el("div", { class: "cv-pane", "data-pane": "vis", style: "display:none" });
+  if (hasAnyArt) {
+    visPane.appendChild(el("div", { class: "cv-tiles" },
+      artTile("cv-art-sprite", c.sprite_url, false, null),
+      artTile("cv-art-keyvisual", c.keyvisual_url, false, null),
+      artTile("cv-art-bg", c.bg_url, true, null),
+      artTile("cv-art-avatar", avatarSrc(card), true, () => { closeModal(); openAvatarEditor(c); })));
+    if (themebar) visPane.appendChild(themebar);
+  } else {
+    // No art at all: one friendly themed placeholder + a neutral note.
+    const ph = el("div", { class: "cv-empty-art " + paletteClass(full.name) },
+      el("div", { class: "cv-art-glyph" }, glyphOf(full.name)));
+    visPane.appendChild(el("div", { class: "cv-empty" }, ph, el("div", { class: "cv-empty-note" }, t("cv-no-art"))));
+    if (themebar) visPane.appendChild(themebar);
+  }
+
+  // ---- 表情 pane: sticker thumbnails (display-only v1) or fallback note ----
+  const emoPane = el("div", { class: "cv-pane", "data-pane": "emo", style: "display:none" });
+  const stickers = Array.isArray(c.stickers_urls) ? c.stickers_urls.filter(Boolean) : [];
+  if (stickers.length) {
+    const grid = el("div", { class: "cv-emos" });
+    for (const url of stickers) {
+      const pic = el("div", { class: "cv-emo-pic" });
+      pic.style.backgroundImage = `url("${String(url).replace(/"/g, "%22")}")`;
+      grid.appendChild(el("div", { class: "cv-emo" }, pic));
+    }
+    emoPane.appendChild(grid);
+  } else {
+    emoPane.appendChild(el("div", { class: "cv-empty" },
+      el("div", { class: "cv-empty-art " + paletteClass(full.name) }, el("div", { class: "cv-art-glyph" }, glyphOf(full.name))),
+      el("div", { class: "cv-empty-note" }, t("cv-no-emo"))));
+  }
+
+  // ---- 世界 pane: editable text round-trip OR pretty read-only entries ----
+  const worldPane = el("div", { class: "cv-pane", "data-pane": "world", style: "display:none" });
+  if (editable) {
+    worldPane.appendChild(block("cve-world", worldField, true, "world_entries"));
+  } else {
+    const entries = book ? book.entries : [];
+    if (!entries.length) {
+      worldPane.appendChild(el("div", { class: "cv-empty-note" }, t("cv-world-empty")));
+    } else {
+      entries.forEach((e2, i) => {
+        const keys = (e2.keys || []).slice(0, 5).join(" · ");
+        worldPane.appendChild(el("details", { class: "cv-we", open: i === 0 ? "" : null },
+          el("summary", null,
+            el("span", { class: "cv-st " + (e2.constant ? "const" : "kw") }, t(e2.constant ? "cv-world-const" : "cv-world-kw")),
+            keys ? el("span", { class: "cv-we-keys" }, keys) : null),
+          el("div", { class: "cv-we-body" }, String(e2.content || ""))));
+      });
+    }
+  }
+
+  // ---- tab bar (theme-color active underline) ----
+  const panes = { set: setPane, vis: visPane, emo: emoPane, world: worldPane };
+  const tabDefs = [["set", "cv-tab-set"], ["vis", "cv-tab-vis"], ["emo", "cv-tab-emo"], ["world", "cv-tab-world"]];
+  const tabBar = el("div", { class: "cv-tabs" });
+  const tabEls = {};
+  for (const [key, labelKey] of tabDefs) {
+    const tab = el("div", { class: "cv-tab" + (key === "set" ? " on" : ""), "data-tab": key }, t(labelKey));
+    tabEls[key] = tab;
+    tabBar.appendChild(tab);
+  }
+  tabBar.addEventListener("click", (ev) => {
+    const tab = ev.target.closest(".cv-tab");
+    if (!tab) return;
+    const key = tab.dataset.tab;
+    for (const [k, el2] of Object.entries(tabEls)) el2.classList.toggle("on", k === key);
+    for (const [k, p] of Object.entries(panes)) p.style.display = (k === key) ? "" : "none";
+  });
+
+  const footer = el("div", { class: "cv-foot" },
+    el("button", { class: "btn text", onclick: closeModal }, t("cancel")),
+    el("div", { class: "grow" }),
+    (!c.builtin && !c.frozen) ? el("button", { class: "btn soft", onclick: async () => {
+      if (!confirm(t("deck-delete-q"))) return;
+      try { await hub.call("card.delete", { path: c.path }, 10000); closeModal(); refreshHub(); }
+      catch (e) { toast(e.message, true); }
+    } }, t("menu-delete")) : null,
+    dupBtn,
+    saveBtn,
+    el("button", { class: "btn primary go", onclick: () => { closeModal(); ensureModel(() => openWakeSheet(c)); } }, t("deck-wake")));
+
+  const header = el("div", { class: "cv-header" }, avatar,
+    el("div", { class: "cv-id" },
+      nameField,
+      (editable || taglineValue) ? taglineField : null,
+      badges));
+
+  const root = el("div", { class: "cardview" },
+    note ? el("div", { class: "cv-note cv-note-top" }, note) : null,
+    header, tabBar,
+    el("div", { class: "cv-scroll" }, setPane, visPane, emoPane, worldPane),
+    footer);
+  const themeCss = themeStyle(c);
+  if (themeCss) root.setAttribute("style", themeCss);
+  openModal(root, "wide");
 }
 
 /* card import: file picker + whole-window drag-drop */

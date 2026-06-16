@@ -407,11 +407,16 @@ parity with `reference/hermes-agent` for commodity surfaces), confirms
 delete), then **removes the item from this list**. Anyone (incl. subagents) may
 add a diagnosed problem here with a priority. Independent items run in parallel.
 
-## R5 (P2) — Better card preview (multi-page, ideally editable)
-Game-style multi-page card view: 设定 / 视觉(立绘+主视觉) / 表情 / world. Editable.
+## R5-followup (LOW) — card-view art editing + richer world/expressions
+R5 shipped the multi-page card view (display + 设定/世界 editing). Deferred:
+per-asset upload for 立绘/主视觉/背景 + stickers (need upload RPCs like avatar_upload);
+a labeled-expression data model (`assets.stickers` → `[{label,file}]`, back-compat with
+bare strings) so 表情 becomes a named set; and the per-entry world editor for EDITABLE
+cards (read-only cards already show per-entry cards; editable still uses the text editor).
 
 ## R6 (P3) — Blank card → auto-generate a visual set via the image key (opt-in)
-Well-designed interaction; depends on R4.
+Well-designed interaction; now UNBLOCKED (R4 generate_image landed). Reuse the Seedream
+pipeline + the visuals/ brief approach to fill a blank card's 立绘/主视觉/头像/背景 set.
 
 
 DONE this loop: R1 tool-access single-source (4435d77), R2 on-disk image vision
@@ -421,6 +426,11 @@ R8 new-user character-select carousel + R8b deck filter (未唤醒/已唤醒 tog
 ✨默认 carousel entry; 8 built-ins, 2 swipeable pages, authored bilingual copy/tags in
 front/web/builtins.js; selecting routes to the existing wake flow; deck splits editable
 OCs from read-only living charas),
+R4 agent self-image-generation (generate_image → Seedream, key-gated, R7-confined,
+image-validated; live-Quinn verified), V4A Move guard coverage (R7-followup),
+R5 multi-page card view (设定/视觉/表情/世界 tabbed, white shell + gentle per-card theme,
+fixed-height scroll, no-art fallback, reuses the field/save/AI-rewrite machinery;
+audited; design mockups in archive/demos/),
 R4 agent self-image-generation (generate_image tool → Volcano Ark Seedream, gated on
 an image key via check_fn so no key = no tool = no spend; saves to workspace/works via
 the R7 write path; image-signature-validated, size-capped, no-fallback; security-audited;

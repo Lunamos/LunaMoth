@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>R5 · 多页角色卡 (mockup)</title>
+<!-- R5 design mockup — Direction B: gacha-style portrait-left + tabbed editable
+     detail-right, mapped to LunaMoth's real card fields. Real card data + art are
+     loaded from r5-data.js; art is referenced relative to cards/. Standalone, no
+     build — open this file directly. This is a VISUAL PROTOTYPE, not wired to the
+     backend (fields are contenteditable to show the "editable" feel; Save/Wake are
+     inert). -->
+<script src="r5-data.js"></script>
+<style>
+  :root{
+    --p:#7A3CFF; --s:#FF5FA2;
+    --bg:#0d1014; --panel:#161a21; --panel-2:#1d222b; --line:rgba(255,255,255,.08);
+    --text:#eef1f5; --text-2:#aab2be; --text-3:#727a86;
+    --font: -apple-system, "SF Pro SC", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg); color:var(--text); font-family:var(--font); overflow:hidden}
+  .app{height:100vh; display:flex; flex-direction:column}
+
+  /* top bar */
+  .top{display:flex; align-items:center; gap:14px; padding:12px 20px; border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg, rgba(255,255,255,.03), transparent)}
+  .top .wm{font-weight:700; letter-spacing:.5px}
+  .top .wm b{color:var(--p)}
+  .top .tag{font-size:12px; color:var(--text-3); padding:3px 9px; border:1px solid var(--line); border-radius:99px}
+  .grow{flex:1}
+  .top .hint{font-size:12px; color:var(--text-3)}
+
+  /* main split */
+  .main{flex:1; min-height:0; display:flex}
+
+  /* LEFT — the persistent portrait (Genshin/Arknights: big key-art, theme fills the panel) */
+  .portrait{position:relative; width:40%; min-width:360px; overflow:hidden;
+    background:linear-gradient(160deg, color-mix(in srgb, var(--p) 55%, #000), color-mix(in srgb, var(--s) 30%, #000))}
+  .portrait .bgart{position:absolute; inset:0; background-size:cover; background-position:center;
+    opacity:.30; filter:saturate(1.1)}
+  .portrait .sprite{position:absolute; inset:0; background-size:contain; background-position:center bottom;
+    background-repeat:no-repeat}
+  .portrait .scrim{position:absolute; inset:0;
+    background:linear-gradient(to top, rgba(8,10,13,.92) 4%, rgba(8,10,13,.35) 32%, transparent 60%)}
+  .portrait .meta{position:absolute; left:0; right:0; bottom:0; padding:26px 30px 30px; z-index:2}
+  .portrait .name{font-size:40px; font-weight:800; letter-spacing:1px; line-height:1}
+  .portrait .tagline{margin-top:10px; color:var(--text-2); font-size:15px; max-width:90%}
+  .portrait .badges{margin-top:16px; display:flex; gap:8px; flex-wrap:wrap}
+  .badge{font-size:12px; padding:4px 11px; border-radius:99px; border:1px solid color-mix(in srgb, var(--s) 50%, transparent);
+    color:#fff; background:color-mix(in srgb, var(--p) 28%, transparent); backdrop-filter:blur(4px)}
+  .badge.emb{border-color:color-mix(in srgb, var(--s) 70%, transparent); color:color-mix(in srgb, var(--s) 92%, #fff)}
+
+  /* RIGHT — tabbed editable detail */
+  .detail{flex:1; min-width:0; display:flex; flex-direction:column; background:var(--bg)}
+  .tabs{display:flex; gap:2px; padding:14px 22px 0; border-bottom:1px solid var(--line)}
+  .tabs .t{padding:11px 20px; font-size:15px; color:var(--text-3); cursor:pointer; border-radius:10px 10px 0 0;
+    position:relative; user-select:none}
+  .tabs .t:hover{color:var(--text-2)}
+  .tabs .t.on{color:var(--text); font-weight:650}
+  .tabs .t.on::after{content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:3px; border-radius:3px;
+    background:linear-gradient(90deg, var(--p), var(--s))}
+  .pane{flex:1; overflow-y:auto; padding:22px 26px 30px}
+  .pane{scrollbar-width:thin; scrollbar-color:var(--panel-2) transparent}
+
+  /* editable field cards */
+  .field{background:var(--panel); border:1px solid var(--line); border-radius:13px; padding:13px 15px; margin-bottom:14px;
+    transition:border-color .15s, background .15s}
+  .field:hover{border-color:color-mix(in srgb, var(--p) 40%, var(--line))}
+  .field .lab{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-3); margin-bottom:7px;
+    letter-spacing:.3px}
+  .field .lab .zh{color:var(--text-2); font-weight:600}
+  .field .ai{margin-left:auto; font-size:11px; color:var(--p); border:1px solid color-mix(in srgb, var(--p) 45%, transparent);
+    border-radius:99px; padding:2px 9px; cursor:pointer; opacity:.0; transition:opacity .15s}
+  .field:hover .ai{opacity:1}
+  .field .val{font-size:14px; line-height:1.75; color:var(--text); outline:none; white-space:pre-wrap}
+  .field .val:focus{color:#fff}
+  .field.short .val{color:var(--text)}
+  .row2{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  .chips{display:flex; gap:7px; flex-wrap:wrap}
+  .chip{font-size:12px; padding:4px 11px; border-radius:99px; background:var(--panel-2); color:var(--text-2);
+    border:1px solid var(--line)}
+  .adv{margin-top:6px; border:1px dashed var(--line); border-radius:13px; padding:4px 14px; background:rgba(255,255,255,.02)}
+  .adv summary{cursor:pointer; color:var(--text-2); font-size:13px; padding:9px 0; user-select:none}
+  .adv[open] summary{color:var(--text); margin-bottom:6px}
+
+  /* 视觉 page — art slots + theme swatches */
+  .slots{display:grid; grid-template-columns:repeat(2,1fr); gap:16px}
+  .slot{border:1px solid var(--line); border-radius:14px; overflow:hidden; background:var(--panel); position:relative}
+  .slot .art{aspect-ratio:1/1; background-size:cover; background-position:center top; background-repeat:no-repeat;
+    background-color:#0a0c10}
+  .slot.tall .art{aspect-ratio:3/4}
+  .slot .cap{display:flex; align-items:center; gap:8px; padding:10px 13px; font-size:13px}
+  .slot .cap .zh{color:var(--text); font-weight:600}
+  .slot .cap .en{color:var(--text-3); font-size:11px}
+  .slot .cap .swap{margin-left:auto; font-size:11px; color:var(--text-2); border:1px solid var(--line);
+    border-radius:8px; padding:3px 9px; cursor:pointer}
+  .theme-row{display:flex; align-items:center; gap:18px; margin-top:18px; padding:15px; background:var(--panel);
+    border:1px solid var(--line); border-radius:14px}
+  .sw{display:flex; align-items:center; gap:9px; font-size:13px; color:var(--text-2)}
+  .sw i{width:30px; height:30px; border-radius:9px; border:2px solid rgba(255,255,255,.2)}
+
+  /* 表情 page — labeled expression grid */
+  .emos{display:grid; grid-template-columns:repeat(auto-fill,minmax(108px,1fr)); gap:14px}
+  .emo{border:1px solid var(--line); border-radius:13px; overflow:hidden; background:var(--panel)}
+  .emo .pic{aspect-ratio:1/1; background-size:cover; background-position:center top}
+  .emo .nm{padding:8px 10px; font-size:12px; color:var(--text-2); text-align:center}
+  .emo .nm:focus{color:#fff; outline:none}
+  .emo.add{display:flex; align-items:center; justify-content:center; color:var(--text-3); font-size:13px;
+    border-style:dashed; cursor:pointer; min-height:140px}
+
+  /* 世界 page — character book entries */
+  .we{border:1px solid var(--line); border-radius:13px; margin-bottom:12px; background:var(--panel); overflow:hidden}
+  .we summary{display:flex; align-items:center; gap:11px; padding:13px 15px; cursor:pointer; user-select:none; list-style:none}
+  .we summary::-webkit-details-marker{display:none}
+  .we .st{font-size:11px; padding:3px 10px; border-radius:99px; font-weight:600}
+  .st.const{background:color-mix(in srgb,#5b9fd4 25%,transparent); color:#9fcdf0; border:1px solid #5b9fd455}
+  .st.kw{background:color-mix(in srgb,#62c08a 22%,transparent); color:#8fe0b0; border:1px solid #62c08a55}
+  .we .wt{font-weight:600; font-size:14px}
+  .we .keys{margin-left:auto; font-size:12px; color:var(--text-3)}
+  .we .body{padding:0 15px 15px; font-size:13.5px; line-height:1.7; color:var(--text-2); white-space:pre-wrap}
+
+  /* footer actions */
+  .foot{display:flex; align-items:center; gap:12px; padding:14px 26px; border-top:1px solid var(--line); background:var(--panel)}
+  .foot .note{font-size:12px; color:var(--text-3)}
+  .btn{border:none; border-radius:10px; padding:10px 22px; font-size:14px; font-weight:600; cursor:pointer}
+  .btn.ghost{background:var(--panel-2); color:var(--text-2)}
+  .btn.go{color:#fff; background:linear-gradient(120deg, var(--p), var(--s))}
+
+  /* character switcher rail */
+  .rail{display:flex; gap:10px; align-items:center; padding:10px 20px; border-top:1px solid var(--line);
+    background:linear-gradient(0deg, rgba(255,255,255,.03), transparent); overflow-x:auto}
+  .rail .lbl{font-size:11px; color:var(--text-3); flex:none; margin-right:4px}
+  .av{width:46px; height:46px; border-radius:12px; background-size:cover; background-position:center top; cursor:pointer;
+    border:2px solid transparent; flex:none; filter:grayscale(.4) brightness(.8); transition:.15s}
+  .av:hover{filter:none}
+  .av.on{border-color:var(--p); filter:none; box-shadow:0 0 0 3px color-mix(in srgb,var(--p) 30%,transparent)}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="wm">Luna<b>Moth</b></div>
+    <span class="tag">R5 · 多页角色卡 · 设计稿 mockup</span>
+    <div class="grow"></div>
+    <span class="hint">字段可直接点按编辑（演示）· 切换底部角色看主题色 retint</span>
+  </div>
+
+  <div class="main">
+    <div class="portrait" id="portrait">
+      <div class="bgart" id="bgart"></div>
+      <div class="sprite" id="sprite"></div>
+      <div class="scrim"></div>
+      <div class="meta">
+        <div class="name" id="pname">—</div>
+        <div class="tagline" id="ptag"></div>
+        <div class="badges" id="pbadges"></div>
+      </div>
+    </div>
+
+    <div class="detail">
+      <div class="tabs" id="tabs">
+        <div class="t on" data-tab="set">设定 <span style="opacity:.5">Profile</span></div>
+        <div class="t" data-tab="vis">视觉 <span style="opacity:.5">Visual</span></div>
+        <div class="t" data-tab="emo">表情 <span style="opacity:.5">Expressions</span></div>
+        <div class="t" data-tab="world">世界 <span style="opacity:.5">World</span></div>
+      </div>
+      <div class="pane" id="pane"></div>
+      <div class="foot">
+        <span class="note">演示稿：字段为 contenteditable，保存/唤醒未接后端</span>
+        <div class="grow"></div>
+        <button class="btn ghost">复制副本</button>
+        <button class="btn go">保存 · 唤醒</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="rail" id="rail"><span class="lbl">内置角色</span></div>
+</div>
+
+<script>
+const C = window.R5_CARDS || [];
+let cur = C.findIndex(c => c.name === "Mars"); if (cur < 0) cur = 0;
+let tab = "set";
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s||"");
+
+function field(zh, en, val, opts={}) {
+  const cls = "field" + (opts.short ? " short" : "");
+  return `<div class="${cls}">
+    <div class="lab"><span class="zh">${zh}</span><span>${en}</span><span class="ai">✦ AI 改写</span></div>
+    <div class="val" contenteditable="true">${esc(val) || '<span style="color:var(--text-3)">（空）</span>'}</div>
+  </div>`;
+}
+
+function renderProfile(c) {
+  const tags = (c.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join("");
+  return field("简介", "description", c.description)
+    + `<div class="row2">${field("性格","personality",c.personality)}${field("场景","scenario",c.scenario)}</div>`
+    + field("开场白", "first_mes", c.first_mes)
+    + `<div class="field"><div class="lab"><span class="zh">标签</span><span>tags</span></div><div class="chips">${tags||'<span class="chip">—</span>'}</div></div>`
+    + `<details class="adv"><summary>高级设定 · Advanced（系统提示 / PHI / 规则 / 操作者人设 / 愿望 / on_attach…）</summary>
+        ${field("中立规则覆盖","ext.rules","（使用引擎默认中立规则层）",{short:1})}
+        ${field("愿望 Wishes","ext.wishes","它为之而活的事 —— 演示位",{short:1})}
+       </details>`;
+}
+
+function renderVisual(c) {
+  const slot = (zh,en,url,tall)=>`<div class="slot ${tall?'tall':''}">
+      <div class="art" style="background-image:url('${esc(url)}')"></div>
+      <div class="cap"><span class="zh">${zh}</span><span class="en">${en}</span><span class="swap">替换</span></div>
+    </div>`;
+  return `<div class="slots">
+      ${slot("立绘","sprite",c.art.sprite,true)}
+      ${slot("主视觉","key visual",c.art.keyvisual,true)}
+      ${slot("背景","background",c.art.background)}
+      ${slot("头像","avatar",c.art.avatar)}
+    </div>
+    <div class="theme-row">
+      <span style="color:var(--text);font-weight:600">主题色</span>
+      <div class="sw"><i style="background:${c.theme.primary}"></i> 主色 ${c.theme.primary}</div>
+      <div class="sw"><i style="background:${c.theme.secondary}"></i> 辅色 ${c.theme.secondary}</div>
+      <span style="margin-left:auto;color:var(--text-3);font-size:12px">驱动整张卡 + 聊天界面的着色</span>
+    </div>`;
+}
+
+function renderEmo(c) {
+  const labels = ["平静","开心","认真","惊讶","得意","无奈","害羞","思考"];
+  const n = Math.max(c.stickers || 0, 6);
+  let cells = "";
+  for (let i=0;i<Math.min(n,8);i++)
+    cells += `<div class="emo"><div class="pic" style="background-image:url('${esc(c.art.avatar)}')"></div>
+      <div class="nm" contenteditable="true">${labels[i]||("表情"+(i+1))}</div></div>`;
+  cells += `<div class="emo add">＋ 添加表情</div>`;
+  return `<div style="color:var(--text-3);font-size:12.5px;margin-bottom:14px">每个表情可命名（自由文本标签）—— 角色按情绪选用；缩略图用头像占位演示</div>
+    <div class="emos">${cells}</div>`;
+}
+
+function renderWorld(c) {
+  if (!c.world || !c.world.length)
+    return `<div style="color:var(--text-3)">这张卡没有世界书条目。</div>`;
+  return c.world.map((e,i)=>`<details class="we" ${i===0?'open':''}>
+      <summary>
+        <span class="st ${e.constant?'const':'kw'}">${e.constant?'常驻 Constant':'关键词 Keyword'}</span>
+        <span class="wt">${esc(e.title)}</span>
+        <span class="keys">${(e.keys||[]).slice(0,4).join(' · ')||'—'}</span>
+      </summary>
+      <div class="body" contenteditable="true">${esc(e.content)||'（空）'}</div>
+    </details>`).join("")
+    + `<div style="text-align:center;margin-top:6px"><button class="btn ghost">＋ 新增条目</button></div>`;
+}
+
+function renderPane(c){
+  if (tab==="set") return renderProfile(c);
+  if (tab==="vis") return renderVisual(c);
+  if (tab==="emo") return renderEmo(c);
+  return renderWorld(c);
+}
+
+function render(){
+  const c = C[cur];
+  document.documentElement.style.setProperty("--p", c.theme.primary);
+  document.documentElement.style.setProperty("--s", c.theme.secondary);
+  $("bgart").style.backgroundImage = `url('${c.art.background}')`;
+  $("sprite").style.backgroundImage = `url('${c.art.sprite}')`;
+  $("pname").textContent = c.name;
+  $("ptag").textContent = c.tagline || "";
+  const emb = c.embodiment ? `<span class="badge emb">具身 · ${c.embodiment}</span>` : "";
+  $("pbadges").innerHTML = emb + (c.tags||[]).slice(0,3).map(t=>`<span class="badge">${esc(t)}</span>`).join("");
+  $("pane").innerHTML = renderPane(c);
+}
+
+// tabs
+$("tabs").addEventListener("click", e=>{
+  const t = e.target.closest(".t"); if(!t) return;
+  tab = t.dataset.tab;
+  [...$("tabs").children].forEach(x=>x.classList.toggle("on", x===t));
+  $("pane").innerHTML = renderPane(C[cur]);
+  $("pane").scrollTop = 0;
+});
+
+// switcher rail
+const rail = $("rail");
+C.forEach((c,i)=>{
+  const a = document.createElement("div");
+  a.className = "av" + (i===cur?" on":"");
+  a.style.backgroundImage = `url('${c.art.avatar}')`;
+  a.title = c.name;
+  a.onclick = ()=>{ cur=i; [...rail.querySelectorAll(".av")].forEach((x,j)=>x.classList.toggle("on",j===i)); render(); $("pane").scrollTop=0; };
+  rail.appendChild(a);
+});
+
+render();
+</script>
+</body>
+</html>

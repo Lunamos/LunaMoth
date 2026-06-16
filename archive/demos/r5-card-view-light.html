@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>R5 · 角色卡（软件内 · 浅色）</title>
+<!-- R5 mockup v2 — matches the REAL LunaMoth frontend: white shell, the card's
+     theme color inserted GENTLY (like the chat interface — soft header tint, tab
+     underline, avatar gradient, primary action), and a SINGLE-character view
+     (character selection lives in the deck 卡册, so no multi-char switcher).
+     Tokens copied from front/web/style.css. Real card data/art via r5-data.js.
+     Standalone, no build; fields are contenteditable to show the editable feel. -->
+<script src="r5-data.js"></script>
+<style>
+  /* ---- product tokens (from front/web/style.css) ---- */
+  :root{
+    --accent:#5B9FD4; --accent-deep:#3E7FB4; --accent-soft:#EAF4FB;
+    --text:#1D2730; --text-2:#5F7280; --text-3:#93A3AE;
+    --bg:#F5F6F8; --panel:#FFFFFF; --hairline:rgba(20,40,60,.10); --hairline-2:rgba(20,40,60,.06);
+    --radius:10px;
+    --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    /* per-card theme (set from JS) — used GENTLY as an accent, never as chrome */
+    --card-theme:#5B9FD4; --card-theme-2:#3E7FB4;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{font-family:var(--sans); color:var(--text); font-size:14px; line-height:1.55; background:var(--bg);
+    -webkit-font-smoothing:antialiased; overflow:hidden}
+
+  /* ---- minimal app frame (to read as "a card opened inside the app") ---- */
+  .shell{display:flex; height:100vh}
+  .nav{width:56px; flex:none; background:#fff; border-right:1px solid var(--hairline);
+    display:flex; flex-direction:column; align-items:center; gap:6px; padding-top:14px}
+  .nav .ic{width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+    color:var(--text-3); font-size:18px; cursor:pointer}
+  .nav .ic.on{background:var(--accent-soft); color:var(--accent-deep)}
+  .nav .ic:hover{background:rgba(20,40,60,.05)}
+  .work{flex:1; min-width:0; display:flex; flex-direction:column}
+
+  /* top bar — breadcrumb back to the deck (selection lives there) */
+  .topbar{height:46px; flex:none; display:flex; align-items:center; gap:8px; padding:0 18px;
+    border-bottom:1px solid var(--hairline); background:#fff}
+  .crumb{color:var(--text-3); font-size:13px}
+  .crumb a{color:var(--text-2); text-decoration:none}
+  .crumb a:hover{color:var(--text)}
+  .crumb b{color:var(--text); font-weight:600}
+
+  .scroll{flex:1; overflow-y:auto; padding:22px}
+  .card{max-width:980px; margin:0 auto; background:var(--panel); border:1px solid var(--hairline);
+    border-radius:16px; overflow:hidden; box-shadow:0 1px 3px rgba(10,30,50,.05)}
+
+  /* ---- card header — soft theme tint (the gentle insertion, like chat) ---- */
+  .head{display:flex; align-items:center; gap:18px; padding:22px 24px;
+    background:linear-gradient(180deg, color-mix(in srgb, var(--card-theme) 12%, #fff), #fff);
+    border-bottom:1px solid var(--hairline-2)}
+  .ava{width:74px; height:74px; border-radius:18px; flex:none; overflow:hidden;
+    background:linear-gradient(160deg, color-mix(in srgb, var(--card-theme) 30%, #fff), var(--card-theme));
+    box-shadow:0 2px 8px color-mix(in srgb, var(--card-theme) 35%, transparent)}
+  .ava img{width:100%; height:100%; object-fit:cover}
+  .hmeta{flex:1; min-width:0}
+  .hmeta .name{font-size:24px; font-weight:750; letter-spacing:.3px}
+  .hmeta .tag{color:var(--text-2); font-size:13.5px; margin-top:3px}
+  .hmeta .badges{margin-top:9px; display:flex; gap:7px; flex-wrap:wrap}
+  .badge{font-size:11.5px; padding:3px 10px; border-radius:99px; background:rgba(20,40,60,.05);
+    color:var(--text-2); border:1px solid var(--hairline-2)}
+  .badge.theme{background:color-mix(in srgb, var(--card-theme) 14%, #fff);
+    color:color-mix(in srgb, var(--card-theme) 72%, var(--text)); border-color:color-mix(in srgb,var(--card-theme) 30%,transparent)}
+  .hacts{display:flex; gap:9px; flex:none}
+  .btn{border:none; border-radius:10px; padding:9px 18px; font-size:13.5px; font-weight:600; cursor:pointer}
+  .btn.soft{background:rgba(20,40,60,.06); color:var(--text)}
+  .btn.soft:hover{background:rgba(20,40,60,.10)}
+  .btn.go{color:#fff; background:var(--card-theme)}
+  .btn.go:hover{filter:brightness(.95)}
+
+  /* ---- tabs — active underline in the theme color (gentle) ---- */
+  .tabs{display:flex; gap:4px; padding:0 18px; border-bottom:1px solid var(--hairline); background:#fff}
+  .tab{padding:13px 16px; font-size:14px; color:var(--text-3); cursor:pointer; position:relative; user-select:none}
+  .tab:hover{color:var(--text-2)}
+  .tab.on{color:var(--text); font-weight:600}
+  .tab.on::after{content:""; position:absolute; left:12px; right:12px; bottom:-1px; height:2.5px; border-radius:3px;
+    background:var(--card-theme)}
+  .tab small{color:var(--text-3); font-weight:400; margin-left:5px}
+
+  .pane{padding:22px 24px 26px}
+
+  /* ---- editable field cards (like .pfield, light) ---- */
+  .field{margin-bottom:15px}
+  .field>.lab{display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:600; color:var(--text);
+    margin-bottom:5px}
+  .field>.lab .en{color:var(--text-3); font-weight:400; font-size:11.5px}
+  .field>.lab .ai{margin-left:auto; font-size:11px; font-weight:600; cursor:pointer; padding:2px 9px; border-radius:99px;
+    color:color-mix(in srgb,var(--card-theme) 70%,var(--text)); border:1px solid color-mix(in srgb,var(--card-theme) 35%,transparent);
+    background:color-mix(in srgb,var(--card-theme) 8%,#fff); opacity:0; transition:opacity .15s}
+  .field:hover .ai{opacity:1}
+  .val{border:1px solid var(--hairline); border-radius:10px; padding:10px 13px; font-size:13.5px; line-height:1.72;
+    color:var(--text); background:#fff; outline:none; white-space:pre-wrap; transition:border-color .15s}
+  .val:hover{border-color:var(--hairline)}
+  .val:focus{border-color:var(--card-theme)}
+  .row2{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  .chips{display:flex; gap:7px; flex-wrap:wrap}
+  .chip{font-size:12px; padding:4px 11px; border-radius:99px; background:rgba(20,40,60,.05); color:var(--text-2);
+    border:1px solid var(--hairline-2)}
+  details.adv{margin-top:8px; border:1px solid var(--hairline); border-radius:11px; padding:2px 14px; background:#fcfdfe}
+  details.adv summary{cursor:pointer; color:var(--text-2); font-size:13px; padding:10px 0; user-select:none}
+  details.adv[open] summary{color:var(--text)}
+
+  /* ---- 视觉 — art slots on white cards + theme swatches ---- */
+  .slots{display:grid; grid-template-columns:repeat(4,1fr); gap:14px}
+  .slot{border:1px solid var(--hairline); border-radius:12px; overflow:hidden; background:#fff}
+  .slot .art{aspect-ratio:3/4; background-size:cover; background-position:center top; background-color:#f0f2f5}
+  .slot.sq .art{aspect-ratio:1/1}
+  .slot .cap{display:flex; align-items:center; gap:6px; padding:9px 11px; font-size:12.5px}
+  .slot .cap b{font-weight:600}
+  .slot .cap .en{color:var(--text-3); font-size:11px}
+  .slot .cap .swap{margin-left:auto; font-size:11px; color:var(--text-2); cursor:pointer;
+    border:1px solid var(--hairline); border-radius:7px; padding:2px 8px}
+  .themebar{display:flex; align-items:center; gap:20px; margin-top:16px; padding:14px 16px;
+    border:1px solid var(--hairline); border-radius:12px; background:#fcfdfe}
+  .themebar .sw{display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-2)}
+  .themebar .sw i{width:26px; height:26px; border-radius:8px; border:1px solid var(--hairline)}
+
+  /* ---- 表情 — labeled expression grid ---- */
+  .emos{display:grid; grid-template-columns:repeat(auto-fill,minmax(104px,1fr)); gap:13px}
+  .emo{border:1px solid var(--hairline); border-radius:11px; overflow:hidden; background:#fff}
+  .emo .pic{aspect-ratio:1/1; background-size:cover; background-position:center top}
+  .emo .nm{padding:7px 9px; font-size:12px; color:var(--text-2); text-align:center; outline:none}
+  .emo .nm:focus{color:var(--text)}
+  .emo.add{display:flex; align-items:center; justify-content:center; color:var(--text-3); font-size:13px;
+    border-style:dashed; cursor:pointer; min-height:132px}
+
+  /* ---- 世界 — character book entries ---- */
+  .we{border:1px solid var(--hairline); border-radius:11px; margin-bottom:11px; overflow:hidden; background:#fff}
+  .we summary{display:flex; align-items:center; gap:10px; padding:12px 14px; cursor:pointer; user-select:none; list-style:none}
+  .we summary::-webkit-details-marker{display:none}
+  .st{font-size:11px; padding:3px 9px; border-radius:99px; font-weight:600}
+  .st.const{background:var(--accent-soft); color:var(--accent-deep); border:1px solid color-mix(in srgb,var(--accent) 30%,transparent)}
+  .st.kw{background:#E9F8EF; color:#1E8E4A; border:1px solid rgba(47,191,90,.3)}
+  .we .wt{font-weight:600; font-size:13.5px}
+  .we .keys{margin-left:auto; font-size:12px; color:var(--text-3)}
+  .we .body{padding:0 14px 14px; font-size:13px; line-height:1.7; color:var(--text-2); white-space:pre-wrap; outline:none}
+  .addrow{text-align:center; margin-top:4px}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="nav">
+    <div class="ic" title="看板">▦</div>
+    <div class="ic on" title="卡册">🂠</div>
+    <div class="ic" title="设置">⚙</div>
+  </div>
+  <div class="work">
+    <div class="topbar">
+      <div class="crumb"><a href="#">卡册</a> &nbsp;›&nbsp; <b id="crumbname">—</b></div>
+    </div>
+    <div class="scroll">
+      <div class="card">
+        <div class="head" id="head">
+          <div class="ava"><img id="ava" alt=""></div>
+          <div class="hmeta">
+            <div class="name" id="name">—</div>
+            <div class="tag" id="tag"></div>
+            <div class="badges" id="badges"></div>
+          </div>
+          <div class="hacts">
+            <button class="btn soft">复制副本</button>
+            <button class="btn go">唤醒</button>
+          </div>
+        </div>
+        <div class="tabs" id="tabs">
+          <div class="tab on" data-tab="set">设定<small>Profile</small></div>
+          <div class="tab" data-tab="vis">视觉<small>Visual</small></div>
+          <div class="tab" data-tab="emo">表情<small>Expressions</small></div>
+          <div class="tab" data-tab="world">世界<small>World</small></div>
+        </div>
+        <div class="pane" id="pane"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const C = window.R5_CARDS || [];
+// SINGLE card view — selection happens in the deck. Pick one to showcase.
+let c = C.find(x => x.name === "Mars") || C[0];
+let tab = "set";
+const $ = id => document.getElementById(id);
+const esc = s => String(s||"");
+
+function field(zh,en,val,opts={}){
+  return `<div class="field">
+    <div class="lab">${zh}<span class="en">${en}</span><span class="ai">✦ AI 改写</span></div>
+    <div class="val" contenteditable="true">${esc(val)||'<span style="color:var(--text-3)">（空）</span>'}</div>
+  </div>`;
+}
+function profile(){
+  const tags=(c.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join("")||'<span class="chip">—</span>';
+  return field("简介","description",c.description)
+    + `<div class="row2">${field("性格","personality",c.personality)}${field("场景","scenario",c.scenario)}</div>`
+    + field("开场白","first_mes",c.first_mes)
+    + `<div class="field"><div class="lab">标签<span class="en">tags</span></div><div class="chips">${tags}</div></div>`
+    + `<details class="adv"><summary>高级 · Advanced（系统提示 / PHI / 规则 / 操作者人设 / 愿望 / on_attach…）</summary>
+        ${field("愿望 Wishes","ext.wishes","它为之而活的事 —— 演示位")}
+        ${field("规则覆盖","ext.rules","（使用引擎默认中立规则层 —— 留空即默认）")}
+       </details>`;
+}
+function visual(){
+  const slot=(zh,en,url,sq)=>`<div class="slot ${sq?'sq':''}">
+    <div class="art" style="background-image:url('${esc(url)}')"></div>
+    <div class="cap"><b>${zh}</b><span class="en">${en}</span><span class="swap">替换</span></div></div>`;
+  return `<div class="slots">
+      ${slot("立绘","sprite",c.art.sprite)}
+      ${slot("主视觉","key visual",c.art.keyvisual)}
+      ${slot("背景","background",c.art.background,1)}
+      ${slot("头像","avatar",c.art.avatar,1)}
+    </div>
+    <div class="themebar"><b style="font-weight:600">主题色</b>
+      <div class="sw"><i style="background:${c.theme.primary}"></i>主色 ${c.theme.primary}</div>
+      <div class="sw"><i style="background:${c.theme.secondary}"></i>辅色 ${c.theme.secondary}</div>
+      <span style="margin-left:auto;color:var(--text-3);font-size:12px">温和地为这张卡 + 聊天界面着色</span>
+    </div>`;
+}
+function emo(){
+  const labels=["平静","开心","认真","惊讶","得意","无奈"];
+  let g=labels.map(l=>`<div class="emo"><div class="pic" style="background-image:url('${esc(c.art.avatar)}')"></div>
+    <div class="nm" contenteditable="true">${l}</div></div>`).join("");
+  g+=`<div class="emo add">＋ 添加表情</div>`;
+  return `<div style="color:var(--text-3);font-size:12.5px;margin-bottom:13px">每个表情可命名（自由文本标签）；缩略图用头像占位演示</div><div class="emos">${g}</div>`;
+}
+function world(){
+  if(!c.world||!c.world.length) return `<div style="color:var(--text-3)">这张卡没有世界书条目。</div>`;
+  return c.world.map((e,i)=>`<details class="we" ${i===0?'open':''}>
+    <summary><span class="st ${e.constant?'const':'kw'}">${e.constant?'常驻':'关键词'}</span>
+      <span class="wt">${esc(e.title)}</span><span class="keys">${(e.keys||[]).slice(0,4).join(' · ')||'—'}</span></summary>
+    <div class="body" contenteditable="true">${esc(e.content)||'（空）'}</div></details>`).join("")
+    + `<div class="addrow"><button class="btn soft">＋ 新增条目</button></div>`;
+}
+function paneHTML(){ return tab==="set"?profile():tab==="vis"?visual():tab==="emo"?emo():world(); }
+
+function render(){
+  document.documentElement.style.setProperty("--card-theme", c.theme.primary);
+  document.documentElement.style.setProperty("--card-theme-2", c.theme.secondary);
+  $("crumbname").textContent = c.name;
+  $("ava").src = c.art.avatar;
+  $("name").textContent = c.name;
+  $("tag").textContent = c.tagline||"";
+  const emb = c.embodiment?`<span class="badge theme">具身 · ${c.embodiment}</span>`:"";
+  $("badges").innerHTML = `<span class="badge">中文</span>` + emb + (c.tags||[]).slice(0,3).map(t=>`<span class="badge">${esc(t)}</span>`).join("");
+  $("pane").innerHTML = paneHTML();
+}
+$("tabs").addEventListener("click",e=>{
+  const t=e.target.closest(".tab"); if(!t)return;
+  tab=t.dataset.tab; [...$("tabs").children].forEach(x=>x.classList.toggle("on",x===t));
+  $("pane").innerHTML=paneHTML();
+});
+render();
+</script>
+</body>
+</html>
