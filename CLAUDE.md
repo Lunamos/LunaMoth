@@ -72,7 +72,7 @@ example) and Quinn 小Q (the default).)
 - **Language is never a setting** — it's a property of the active card.
 - **The model's real context window is never a setting** (providers.py).
 - **Every UI action responds instantly; every API call shows progress.**
-  (front/web, binding.) A click flips its own control's state IMMEDIATELY
+  (apps/web, binding.) A click flips its own control's state IMMEDIATELY
   (optimistic), before any round-trip — no dead clicks, no frozen buttons.
   Anything that calls the model / an API shows a "working / thinking" state
   with a loading animation (spinner, "思考 Ns", pulsing line) until it
@@ -250,15 +250,22 @@ zero internal deps; `obs/` imports only `config`.
     key reads, NOT `sys.stdin.read` (that breaks ESC sequences — every arrow read
     as bare Esc and quit the launcher).
   - `wizard.py` — plain-terminal first-run setup. `art.py` — the blue wordmark.
-  - `web/` — the desktop renderer (no build step: index.html/style.css/i18n.js/
-    rpc.js + `app.js` = board/deck/settings/workshop half and `chat.js` = chat
-    page + tabbed right panel + works/terminal pages + gateway pane), a pure
-    protocol client served by `lunamoth desktop`. NOTE: the gateway deck UI
-    currently exposes only the WeChat (weixin) platform; the WeChatPadPro
-    (weixinpad)/QQ/Telegram adapters exist in `messaging/` but aren't surfaced
-    in the deck yet (~30 platform i18n keys sit unused). UI chrome bilingual zh/en + light/dark; a chara's
-    words stay in the card's language. Idle driving is SERVER-SIDE only
+  - `webui/` — the BUILT desktop renderer (gitignored; emitted by `apps/web`'s
+    Vite build, bundled into the wheel via package-data, served by `lunamoth
+    desktop` and loaded by the Electron shell). The SOURCE is the React+TS SPA at
+    repo-root `apps/web/` (NOT under src/): `src/rpc.ts`+`protocol.ts` (the ported
+    transport + event union), `i18n/` (445 keys), `lib/` (pure helpers), `state/`
+    (hub/overlay context), `hooks/useCharaStream.ts` (the stream accumulator),
+    `views/` (Board/Deck/Gateways/Settings/Chat), `components/{chat,deck,gateways,
+    settings,overlays,ui}`. Dev: `cd apps/web && npm run dev` (proxies /rpc+ws to a
+    running `lunamoth desktop`); build: `npm run build` → `front/webui/`. Hash
+    routing (no server SPA-fallback needed). NOTE: the gateway deck UI currently
+    exposes only WeChat (weixin); QQ/Telegram/WeChatPadPro adapters exist in
+    `messaging/` but aren't surfaced yet. UI chrome bilingual zh/en + light/dark; a
+    chara's words stay in the card's language. Idle driving is SERVER-SIDE only
     (supervisor.py) — web clients render life.state and must never drive idle.
+    (The pre-2026-06-16 vanilla no-build renderer at `front/web/` was replaced by
+    this SPA; the protocol/codec contract it speaks is unchanged.)
 
 Content (gitignore-allowlisted): `cards/` `toolpacks/`. The card is the ONE
 content file (world embedded as `character_book`); standalone ST world books

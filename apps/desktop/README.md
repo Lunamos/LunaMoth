@@ -3,8 +3,10 @@
 A deliberately thin shell, copied from the official Hermes Desktop's shape:
 **no renderer of its own**. The main process spawns the `lunamoth desktop`
 backend (HTTP static renderer + WebSocket hub), parses the one URL line the
-backend prints, and loads that URL into a BrowserWindow. All UI lives in
-`src/lunamoth/front/web/`; all logic lives in the Python backend.
+backend prints, and loads that URL into a BrowserWindow. The UI is the React SPA
+in `apps/web/` (built to `src/lunamoth/front/webui/` and served by the backend);
+all logic lives in the Python backend. The shell stays renderer-agnostic — it just
+loads whatever URL the backend serves, so it's unchanged by the SPA rewrite.
 
 ```
 apps/desktop/
