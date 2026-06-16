@@ -797,6 +797,7 @@ class LLMClient:
         self, user_text, context, stable, volatile, tools, execute,
         record=None, max_steps: int = 8, in_context: bool = True,
         reasoning: "str | None" = None, channel: str = "say",
+        record_volatile=None,
     ):
         """Stream a reply that may call tools (modern OpenAI-style function calling).
 
@@ -930,13 +931,17 @@ class LLMClient:
                     # image, vision models only): inject it as a user message AFTER
                     # every tool result, so the tool replies for this assistant turn
                     # stay contiguous and the image_url rides a user message.
-                    # TURN-LOCAL ONLY — do NOT record() it: an image_url data-URI is
-                    # ~2MB of base64, and the durable transcript/context never prunes
-                    # user messages (compaction only drops role:tool), so recording it
-                    # would persist megabytes per image forever and replay on restore.
-                    # The model sees it for the rest of THIS turn via `messages`; its
-                    # reply is recorded normally. (hermes keeps vision turn-local.)
+                    # The image rides the LIVE context across turns (record_volatile →
+                    # context.messages, so the chara can re-examine the most recent
+                    # image) but is NOT written to the durable transcript — bytes in
+                    # immutable history is exactly what to avoid. A per-turn pass keeps
+                    # only the newest image's pixels and collapses older ones to a text
+                    # handle (compaction.strip_old_images, hermes _strip_historical_media).
+                    # `messages.append` covers THIS turn's request; record_volatile
+                    # carries it into the next turn's context view.
                     for follow in img_followups:
+                        if record_volatile is not None:
+                            record_volatile(follow)
                         messages.append(follow)
                     continue
 

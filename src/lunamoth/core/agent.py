@@ -414,6 +414,7 @@ class LunaMothAgent:
             stream = self._reply_stream(
                 event_text, self._context_view(session), stable, volatile,
                 in_context=True, record=session.context.add_message,
+                record_volatile=session.context.messages.append,
             )
             for ev in stream:
                 if isinstance(ev, TextDelta):
@@ -645,6 +646,12 @@ class LunaMothAgent:
         """The API view of the context — reasoning echoed back only for providers
         that demand it (DeepSeek thinking mode). Compaction runs first so the view
         never overflows the model's real window."""
+        # Keep only the newest read image's pixels; older ones collapse to a text
+        # handle (hermes _strip_historical_media). Runs every turn because our
+        # token_count is image-blind, so compaction can't be trusted to fire on
+        # image bloat — without this, vision images would re-ship every turn.
+        from . import compaction
+        compaction.strip_old_images(session.context)
         self._maybe_compact(session)
         return session.context.render(include_reasoning=self.llm.reasoning_echoback_required())
 
@@ -682,7 +689,7 @@ class LunaMothAgent:
     def _reply_stream(
         self, user_text: str, context: list[dict], stable: list[str], volatile: list[str],
         *, in_context: bool = True, record=None, reasoning: "str | None" = None,
-        channel: str = "say",
+        channel: str = "say", record_volatile=None,
     ):
         """Pick the tool-enabled agent loop or a plain stream depending on pack/backend."""
         if self._agent_loop_active():
@@ -690,6 +697,7 @@ class LunaMothAgent:
                 user_text, context, stable, volatile, self.tools.schemas(), self._execute_tool,
                 record=record, max_steps=max(1, int(getattr(self.settings, "max_tool_steps", 80))),
                 in_context=in_context, reasoning=reasoning, channel=channel,
+                record_volatile=record_volatile,
             )
         return self.llm.stream_complete(
             user_text, context, stable, volatile, in_context=in_context, reasoning=reasoning, channel=channel,
@@ -805,15 +813,15 @@ class LunaMothAgent:
         if not mime or not mime.startswith("image/"):
             return None
         b64 = base64.b64encode(data).decode("ascii")
-        # This note is the DURABLE tool result (it persists in the transcript); the
-        # pixels ride a turn-local follow-up that is NOT recorded (see llm.py). So the
-        # wording must read correctly on later turns too — a text handle that you
-        # looked at the image, not a dangling "see the next message" pointing at bytes
-        # that are already gone. (Same shape as hermes: keep a text stub, drop the
-        # bytes — context_compressor._strip_historical_media.)
-        note = (f"Image {relp} is attached for you to view this turn — describe or use "
-                "what is actually in it, not a guess. (The pixels are shown only this "
-                "turn; they are not re-attached on later turns.)")
+        # This note is the DURABLE tool result (persists in the transcript). The
+        # pixels ride the follow-up below, which lives in the cross-turn context but
+        # NOT the transcript; the newest image stays viewable and older ones collapse
+        # to a text handle (compaction.strip_old_images). So word it tense-neutral —
+        # a handle that you looked at this image, accurate whether the pixels are
+        # still attached or already superseded.
+        note = (f"Image {relp} is attached for you to view — describe or use what is "
+                "actually in it, not a guess. (Kept viewable until a newer image "
+                "supersedes it, then dropped to a text reference.)")
         follow = {"role": "user", "content": [
             {"type": "text", "text": f"[image: {relp}]"},
             {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
@@ -877,6 +885,7 @@ class LunaMothAgent:
             stream = self._reply_stream(
                 text, view, stable, volatile,
                 in_context=True, record=session.context.add_message,
+                record_volatile=session.context.messages.append,
             )
             for ev in stream:
                 if isinstance(ev, TextDelta):
@@ -983,6 +992,7 @@ class LunaMothAgent:
                 stream = self._reply_stream(
                     tick_text, view, stable, volatile,
                     in_context=False, record=self._record_think(session), channel=MUSE,
+                    record_volatile=session.context.messages.append,
                 )
                 try:
                     for ev in stream:

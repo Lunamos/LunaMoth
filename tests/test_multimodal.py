@@ -336,3 +336,58 @@ def test_read_file_image_vision_followup(tmp_path, monkeypatch):
     (ws / "note.txt").write_text("hi", encoding="utf-8")
     monkeypatch.setattr(a.llm, "vision_supported", lambda: True)
     assert a._image_vision_followup("note.txt") is None  # not an image
+
+
+# ---- strip_old_images: keep newest image's pixels, collapse older to text ----
+def test_strip_old_images_keeps_only_the_newest():
+    from lunamoth.core.context import ContextBuffer
+    from lunamoth.core import compaction
+
+    def img(ref):
+        return {"role": "user", "content": [
+            {"type": "text", "text": f"[image: {ref}]"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]}
+
+    ctx = ContextBuffer()
+    ctx.messages = [img("old.png"), {"role": "assistant", "content": "noted"}, img("new.png")]
+    assert compaction.strip_old_images(ctx) is True
+    # newest keeps real pixels
+    assert any(p.get("type") == "image_url" for p in ctx.messages[2]["content"])
+    # older collapsed to a text handle (no image part), still naming the ref
+    old = ctx.messages[0]["content"]
+    assert isinstance(old, str) and "old.png" in old and "no longer attached" in old
+    # idempotent — a second pass changes nothing
+    assert compaction.strip_old_images(ctx) is False
+
+
+def test_strip_old_images_noop_without_images():
+    from lunamoth.core.context import ContextBuffer
+    from lunamoth.core import compaction
+    ctx = ContextBuffer()
+    ctx.messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "yo"}]
+    assert compaction.strip_old_images(ctx) is False
+
+
+def test_summarizer_does_not_leak_image_base64():
+    """A surviving image in the summarized HEAD must collapse to its text handle,
+    never dump ~2MB of base64 into the text summarizer prompt (audit HIGH)."""
+    from lunamoth.core import compaction
+    msgs = [
+        {"role": "user", "content": "hello"},
+        {"role": "user", "content": [
+            {"type": "text", "text": "[image: pic.png]"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64," + "A" * 4000}}]},
+        {"role": "assistant", "content": "nice picture"},
+    ]
+    s = compaction._serialize(msgs)
+    assert "base64" not in s and "data:image" not in s
+    assert "[image: pic.png]" in s and "nice picture" in s
+
+
+def test_msg_text_flattens_image_content_not_base64():
+    from lunamoth.core.context import _msg_text
+    m = {"role": "user", "content": [
+        {"type": "text", "text": "[image: p.png]"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64," + "A" * 5000}}]}
+    txt = _msg_text(m)
+    assert "[image: p.png]" in txt and "base64" not in txt and len(txt) < 80

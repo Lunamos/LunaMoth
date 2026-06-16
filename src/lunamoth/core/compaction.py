@@ -26,9 +26,10 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from ..obs import get_logger
-from .context import ContextBuffer, _msg_text, estimate_tokens
+from .context import ContextBuffer, _flatten_content, _msg_text, estimate_tokens
 
 _log = get_logger("compaction")
 
@@ -260,6 +261,47 @@ def prune_live_tool_outputs(ctx: ContextBuffer) -> bool:
     return changed
 
 
+def _has_image_part(content: Any) -> bool:
+    return isinstance(content, list) and any(
+        isinstance(p, dict) and p.get("type") == "image_url" for p in content)
+
+
+def strip_old_images(ctx: ContextBuffer) -> bool:
+    """Keep the pixels of ONLY the newest image-bearing message; collapse every
+    older one to its text handle. Ported from hermes
+    `context_compressor._strip_historical_media` (kilocode#9434) — "so the
+    outgoing request stops re-shipping the same multi-MB base-64 image blobs on
+    every turn" — but run EVERY turn, not at compaction: our token_count is
+    image-blind (_flatten_content drops image parts), so compaction can't be
+    relied on to fire on image bloat. Mutates ctx.messages; persists NOTHING
+    (the image was never written to the durable transcript). Returns True if it
+    changed anything. Idempotent: an already-collapsed message has no image part.
+
+    The newest read image stays visible so the chara can still re-examine it
+    across a turn or two; older images become a one-line text stub it remembers
+    having looked at — never the bytes."""
+    msgs = ctx.messages
+    newest = -1
+    for i in range(len(msgs) - 1, -1, -1):
+        if _has_image_part(msgs[i].get("content")):
+            newest = i
+            break
+    if newest < 0:
+        return False
+    changed = False
+    for i, msg in enumerate(msgs):
+        if i == newest or not _has_image_part(msg.get("content")):
+            continue
+        texts = [str(p.get("text", "")) for p in msg["content"]
+                 if isinstance(p, dict) and p.get("type") == "text"]
+        handle = " ".join(t for t in texts if t).strip()
+        msgs[i] = {**msg, "content": (
+            f"{handle} (earlier image — pixels no longer attached)" if handle
+            else "[earlier image — pixels no longer attached]")}
+        changed = True
+    return changed
+
+
 def _serialize(messages: list[dict]) -> str:
     """Flatten the head into plain text for the summarizer.
 
@@ -268,7 +310,9 @@ def _serialize(messages: list[dict]) -> str:
     """
     out: list[str] = []
     for m in _prune_tool_outputs_for_summary(messages):
-        content = str(m.get("content") or "")
+        # _flatten_content, not str(): a surviving image (list content) must collapse
+        # to its text handle here, never dump ~2MB of base64 into the summarizer prompt.
+        content = _flatten_content(m.get("content"))
         if m.get("kind") == "summary":
             out.append(f"[earlier summary]\n{content}")
         elif m.get("role") == "tool":

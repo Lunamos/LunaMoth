@@ -48,7 +48,11 @@ def estimate_tokens(text: str) -> int:
 
 
 def _msg_text(msg: dict) -> str:
-    parts = [str(msg.get("content") or "")]
+    # Flatten multimodal list content to its text parts — never str(list), which
+    # would count a ~2MB image_url base64 blob as "text" in token_count / the
+    # compaction tail-walk (image bytes aren't text tokens; they're handled by
+    # strip_old_images).
+    parts = [_flatten_content(msg.get("content"))]
     if msg.get("tool_calls"):
         try:
             parts.append(json.dumps(msg["tool_calls"], ensure_ascii=False))
