@@ -11,6 +11,36 @@
 
 ---
 
+## ✅ STATUS: COMPLETE (2026-06-16, branch `feat/client-and-deploy`)
+
+All tracks delivered, reviewed twice (adversarial), and verified. 11 commits ahead of
+`main`. §10 acceptance gate — all green:
+
+- **Tracks A–F + Track C overlays + `lunamoth connect ssh://`** all landed.
+- **apps/web** React SPA → builds to `front/webui/` (gitignored, bundled into the wheel
+  via package-data); served by the supervisor; the Electron shell loads it unchanged.
+  `npm run typecheck` clean · **128 vitest** · build OK.
+- **Server**: serves the SPA; `--host` + token/cookie auth on GET/`/asset`/`/rpc`/WS +
+  `/auth` cookie-mint handshake; Origin/Host allowlist; WS bind-0; port-in-use attribution.
+  **841 pytest passed, 1 skipped** · ruff clean.
+- **Deploy**: wheel (GitHub Releases) + `deploy/{Dockerfile,compose.yml,entrypoint.sh}`
+  (`docker compose up` token-fixed) + install.sh two-channel + README EN/zh.
+- **E2E verified live**: `GET /`→200, `/assets/*`→200, `/rpc` 403 (no token) / 200 (token),
+  `/auth?token=`→204+SameSite cookie, cookie then authenticates `/asset`.
+- Two adversarial reviews; every finding fixed (CRITICAL docker-token crash-loop; the
+  asset-auth cookie/assetUrl gap closed across chat + deck/picker/editor; Board error
+  surfacing; streamModel restore-ts; cookie header-injection guard). Old vanilla
+  `front/web/` deleted; CLAUDE.md + READMEs updated.
+
+Still owner-decisions (non-blocking, §11): WS-port collapse, public-bind login, the
+blessed reverse proxy, bundle code-splitting (single 796 KB chunk — advisory only).
+Not yet merged to `main` (awaiting owner review of the branch).
+
+The per-task checkboxes below are the original spec; treat the above as the authoritative
+done-state.
+
+---
+
 ## 0. PREREQUISITE — clone the two reference repos and STUDY the exact files below
 
 `reference/` is gitignored runtime-only; a fresh checkout will NOT have these. Before
