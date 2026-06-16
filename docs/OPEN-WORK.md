@@ -407,6 +407,21 @@ parity with `reference/hermes-agent` for commodity surfaces), confirms
 delete), then **removes the item from this list**. Anyone (incl. subagents) may
 add a diagnosed problem here with a priority. Independent items run in parallel.
 
+## SEC-2 (HIGH, owner-raised 2026-06-16) — the provider api_key must be GLOBAL, not copied per session
+Today hub.wake (hub.py:1794) copies `api_key` into EVERY woken session's config.json
+(written + chmod 0600 at :1807-1809). N living charas = N on-disk copies of the key,
+all duplicated from a global default/keyring. Two problems: (1) rotation/staleness —
+change the key and every session config goes stale; (2) exposure — the key sits inside
+the chara's own session dir, and with the macOS sandbox's global file-read* the chara's
+terminal can `cat` its own key (this IS the SEC-low "key-on-disk readability" item).
+Fix: session config stores only NON-secret overrides (provider/base_url/model/isolation/
+embodiment/toolpack…); the secret stays in the GLOBAL keyring (the hub keys.* store
+already exists) and is resolved by provider/label at activation into memory — never
+written into the session. Keep the global keyring OUTSIDE every sandbox-readable tree so
+the jailed terminal can't read it. Needs a one-time migration (strip api_key from existing
+session configs). This supersedes the SEC-low key-readability note. Recommended BEFORE
+SEC-1 (smaller real-secret exposure surface; SEC-1 only guards local workspace files).
+
 ## SEC-1 (HIGH, follow-up from the 2026-06-16 security review) — authenticate /asset GET
 The CRITICAL key-leak is FIXED (the /asset route no longer serves config.json /
 session.json / transcript.db — non-images now come only from sandbox/workspace|assets,
