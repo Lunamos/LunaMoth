@@ -1,5 +1,14 @@
 # Build log — SEC-1 + R10 + R11 + R9 (branch worktree-sec1-r9-r10-r11)
 
+## STATUS: ALL FOUR DONE ✅ (SEC-1, R10, R11, R9 — backend + UI)
+Full suite 834 passed / 1 skipped, ruff clean, node --check clean on all web JS.
+Each feature was implemented → tested → subagent-audited in this worktree → committed
+→ pushed. Commits: SEC-1 b5f48fa · R10 b6aa4c2 · R11 fa5bc6e · R9 backend d323724 ·
+R9 UI 9faa993 · R9 ext-fix f4e380a. NOT merged to main (awaiting owner review).
+LIVE-VERIFY remaining (can't unit-test here): SEC-1 Electron cookie on real /asset
+image loads; R9/R10/R11 end-to-end with a real ARK image key + a downloaded matte model.
+
+
 One branch, one worktree. Order chosen by dependency + risk:
 SEC-1 (bounded, security) → R10 (global key mgmt; keyring mostly exists) →
 R11 (matte download/load) → R9 (in-app visuals pipeline; depends on R10+R11).
