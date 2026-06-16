@@ -1314,6 +1314,7 @@ class Supervisor:
         except (OSError, json.JSONDecodeError):
             cfg = {}
         cfg["mode"] = "live" if mode == "live" else "chat"
+        cfg.pop("api_key", None)  # SEC-2: never persist the secret into a session config
         meta.config_path.parent.mkdir(parents=True, exist_ok=True)
         meta.config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 

@@ -100,40 +100,26 @@ def test_defaults_set_ignores_unknown_fields():
     assert "evil" not in r
 
 
-def test_defaults_set_reports_key_rotation_candidates_and_apply_key_rewrites_only_matching_configs():
+def test_key_rotation_is_obsolete_after_sec2():
+    """SEC-2: the provider key is resolved globally at load, never copied into a
+    session config. So waking embeds no key, defaults.set reports no rotation
+    candidates, and defaults.apply_key is a harmless no-op."""
     H.save_defaults({"provider": "openrouter", "base_url": "https://example.invalid/v1",
                      "api_key": "old-key", "model": "test/model"})
     a = result("session.wake", {"card": luna_card_path(), "name": "same"})
-    b = result("session.wake", {"card": luna_card_path(), "name": "other"})
-    c = result("session.wake", {"card": luna_card_path(), "name": "current"})
     same = S.load_session(a["name"])
-    other = S.load_session(b["name"])
-    current = S.load_session(c["name"])
-    other_cfg = json.loads(other.config_path.read_text(encoding="utf-8"))
-    other_cfg["base_url"] = "https://elsewhere.invalid/v1"
-    other.config_path.write_text(json.dumps(other_cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    current_cfg = json.loads(current.config_path.read_text(encoding="utf-8"))
-    current_cfg["api_key"] = "new-key"
-    current.config_path.write_text(json.dumps(current_cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    cfg = json.loads(same.config_path.read_text(encoding="utf-8"))
+    assert not cfg.get("api_key")  # the secret is NOT in the session config
 
     saved = result("defaults.set", {"api_key": "new-key"})
+    assert saved["key_update_candidates"] == []  # nothing needs per-session rotation
 
-    candidates = saved["key_update_candidates"]
-    assert [x["name"] for x in candidates] == [same.name]
-    assert "api_key" not in json.dumps(candidates)
-
-    applied = result("defaults.apply_key", {"names": [same.name, other.name, current.name, "missing"]})
-    assert applied["updated"] == [same.name]
-    skipped = {x["name"]: x["reason"] for x in applied["skipped"]}
-    assert skipped[other.name] == "provider_base_url_mismatch"
-    assert skipped[current.name] == "already_current"
-    assert skipped["missing"] == "missing"
-
-    assert json.loads(same.config_path.read_text(encoding="utf-8"))["api_key"] == "new-key"
-    assert json.loads(other.config_path.read_text(encoding="utf-8"))["api_key"] == "old-key"
-    assert json.loads(current.config_path.read_text(encoding="utf-8"))["api_key"] == "new-key"
-    # The rewrite preserves unrelated fields from the per-session config.
-    assert json.loads(same.config_path.read_text(encoding="utf-8"))["character_path"].endswith("card.json")
+    applied = result("defaults.apply_key", {"names": [same.name]})
+    assert applied == {"updated": [], "skipped": [], "candidates": []}
+    # still no embedded key after a rotate attempt; unrelated fields intact
+    reread = json.loads(same.config_path.read_text(encoding="utf-8"))
+    assert not reread.get("api_key")
+    assert reread["character_path"].endswith("card.json")
 
 
 def test_apply_key_validates_names_param():
@@ -155,7 +141,7 @@ def test_wake_freezes_card_and_writes_config():
     assert (meta.root / "card_source").read_text(encoding="utf-8") == luna_card_path()
     cfg = json.loads(meta.config_path.read_text(encoding="utf-8"))
     assert cfg["character_path"] == str(frozen)
-    assert cfg["api_key"] == "sk-test"
+    assert not cfg.get("api_key")  # SEC-2: the secret is NOT copied into the session config
     assert cfg["toolpack"] == "sandbox"  # from the card's extensions.lunamoth
     assert cfg["py_backend"] == "sandbox"
 

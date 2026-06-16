@@ -225,29 +225,11 @@ def _config_matches_model_route(cfg: dict[str, Any], defaults: dict[str, str]) -
 
 
 def key_update_candidates(defaults: dict[str, str] | None = None) -> list[dict[str, Any]]:
-    """Charas whose frozen per-session key differs from the current default.
-
-    The returned objects are safe for UI display: chara names/model only, never
-    the old or new key value.
-    """
-    defaults = defaults or load_defaults()
-    new_key = defaults.get("api_key", "")
-    if not new_key or not _provider_id(defaults.get("provider")) or not _base_url_id(defaults.get("base_url")):
-        return []
-    out: list[dict[str, Any]] = []
-    for meta in S.list_sessions():
-        cfg = _read_config(meta)
-        if not cfg or not _config_matches_model_route(cfg, defaults):
-            continue
-        if not isinstance(cfg.get("api_key"), str) or cfg.get("api_key") == new_key:
-            continue
-        entry = session_entry(meta)
-        out.append({
-            "name": entry["name"],
-            "char_name": entry["char_name"],
-            "model": entry.get("model", ""),
-        })
-    return out
+    """Obsolete since SEC-2: the provider key is resolved at load from the global
+    keyring, never copied into per-session configs — so NO session ever needs a
+    per-session key update. Always empty. Kept (with apply_default_key) so the
+    board's "update key in N sessions" RPC contract stays intact for older clients."""
+    return []
 
 
 def _atomic_write_json(path: Path, data: dict[str, Any], *, private: bool = False) -> None:
@@ -269,44 +251,12 @@ def _atomic_write_json(path: Path, data: dict[str, Any], *, private: bool = Fals
 
 
 def apply_default_key(names: list[str], defaults: dict[str, str] | None = None) -> dict[str, Any]:
-    """Copy the current default api_key into selected matching session configs.
-
-    Only sessions on the same provider/base_url route are rewritten. All other
-    config fields are preserved, and writes are atomic because these files hold
-    credentials and are read by independent per-chara processes.
-    """
-    defaults = defaults or load_defaults()
-    new_key = defaults.get("api_key", "")
-    if not new_key:
-        raise RpcError(-32030, "no API key is saved in Settings")
-    unique = []
-    seen = set()
-    for raw in names:
-        name = str(raw or "")
-        if name and name not in seen:
-            unique.append(name)
-            seen.add(name)
-    updated: list[str] = []
-    skipped: list[dict[str, str]] = []
-    for name in unique:
-        meta = S.load_session(name)
-        if meta is None:
-            skipped.append({"name": name, "reason": "missing"})
-            continue
-        cfg = _read_config(meta)
-        if not cfg:
-            skipped.append({"name": name, "reason": "unreadable"})
-            continue
-        if not _config_matches_model_route(cfg, defaults):
-            skipped.append({"name": name, "reason": "provider_base_url_mismatch"})
-            continue
-        if cfg.get("api_key") == new_key:
-            skipped.append({"name": name, "reason": "already_current"})
-            continue
-        cfg["api_key"] = new_key
-        _atomic_write_json(meta.config_path, cfg, private=True)
-        updated.append(name)
-    return {"updated": updated, "skipped": skipped, "candidates": key_update_candidates(defaults)}
+    """No-op since SEC-2: the provider key is no longer copied into per-session
+    configs — every chara resolves it at load from the global keyring, so changing
+    the default key in Settings applies everywhere with no per-session rewrite. We
+    deliberately do NOT write keys into session files anymore. Kept as a stable RPC
+    so older clients calling it get a clean empty result instead of an error."""
+    return {"updated": [], "skipped": [], "candidates": []}
 
 
 # ---- provider HTTP (no core/ import; plain OpenAI-compatible calls) ------------
@@ -1791,11 +1741,14 @@ def wake(card_path: str, name: str = "", isolation: str = "sandbox",
     cfg.update({
         "provider": defaults.get("provider", "openrouter"),
         "base_url": defaults.get("base_url", ""),
-        "api_key": defaults.get("api_key", ""),
+        # SEC-2: do NOT copy the api_key into the session config — it's resolved at
+        # load from the global keyring (settings.global_api_key). Sessions hold only
+        # non-secret overrides, so the key isn't duplicated into every chara's dir.
         "model": model or defaults.get("model", cfg["model"]),
         "character_path": str(frozen),
         "py_backend": _ISOLATION_TO_BACKEND.get(meta.isolation, "sandbox"),
     })
+    cfg.pop("api_key", None)
     if toolpack:
         cfg["toolpack"] = toolpack
     elif isinstance(card_defaults, dict) and card_defaults.get("toolpack"):

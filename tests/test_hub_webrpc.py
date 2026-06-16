@@ -423,7 +423,10 @@ def test_wake_with_named_key_uses_its_credentials():
                          "base_url": "https://alt.example/v1", "api_key": "sk-alt-2", "model": "alt/model"})
     entry = result("session.wake", {"card": str(H.bundled_cards_dir() / "Quinn" / "card.json"), "key": "alt"})
     cfg = json.loads((S.load_session(entry["name"]).root / "config.json").read_text(encoding="utf-8"))
-    assert cfg["api_key"] == "sk-alt-2" and cfg["base_url"] == "https://alt.example/v1"
+    # SEC-2: the named key's ROUTE is written (so load resolves the right key from
+    # the global keyring by route), but the secret itself is never embedded.
+    assert not cfg.get("api_key")
+    assert cfg["base_url"] == "https://alt.example/v1"
     assert cfg["model"] == "alt/model"  # key's model fills in when wake didn't pick one
     err = rpc_error("session.wake", {"card": str(H.bundled_cards_dir() / "Quinn" / "card.json"), "key": "ghost"})
     assert err["code"] == -32035

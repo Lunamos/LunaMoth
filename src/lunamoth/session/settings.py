@@ -26,6 +26,61 @@ def config_path() -> Path:
     return CONFIG_PATH
 
 
+# ---- SEC-2: the provider api_key is GLOBAL, never copied per session ----------
+# A living chara's session config holds only NON-secret overrides (provider/model/
+# isolation/…); the secret is resolved at load from a GLOBAL store. This kills the
+# old per-session duplication (N charas → N on-disk key copies, all needing rotation)
+# and shrinks the leak surface — the key no longer sits inside each chara's own dir.
+def _global_home() -> Path:
+    # Same computation as sessions.lunamoth_home() (incl. .resolve()) so the key
+    # the web keyring WRITES and the one this READS are the identical path.
+    return Path(os.getenv("LUNAMOTH_HOME", Path.home() / ".lunamoth")).expanduser().resolve()
+
+
+def global_api_key(provider: str = "", base_url: str = "") -> str:
+    """Resolve the provider key from a GLOBAL store, never a per-session config.
+
+    Order: the web keyring (~/.lunamoth/desktop.json) — a NAMED `keys` entry whose
+    route (provider+base_url) matches this session's, else the default top-level
+    key — then the CLI global config.json. The route match preserves the
+    multi-key-per-chara feature (a chara woken with a named key still uses it)
+    without storing the secret in the session. "" if none."""
+    want_p = (provider or "").strip().lower()
+    want_b = (base_url or "").strip().rstrip("/").lower()
+    try:
+        raw = json.loads((_global_home() / "desktop.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raw = {}
+    if isinstance(raw, dict):
+        # A named key on the exact same route wins (e.g. a chara on an alt account).
+        if want_b:
+            keys = raw.get("keys") if isinstance(raw.get("keys"), dict) else {}
+            for item in keys.values():
+                if (isinstance(item, dict) and item.get("api_key")
+                        and str(item.get("base_url") or "").strip().rstrip("/").lower() == want_b
+                        and str(item.get("provider") or "").strip().lower() == want_p):
+                    return str(item["api_key"])
+        if str(raw.get("api_key") or ""):
+            return str(raw["api_key"])
+    try:
+        raw2 = json.loads((_default_config_dir() / "config.json").read_text(encoding="utf-8"))
+        if isinstance(raw2, dict) and str(raw2.get("api_key") or ""):
+            return str(raw2["api_key"])
+    except (OSError, json.JSONDecodeError):
+        pass
+    return ""
+
+
+def _is_session_config() -> bool:
+    """True when CONFIG_PATH points at a per-session config (…/sessions/<name>/),
+    not the global config — used to keep the secret out of session files."""
+    try:
+        sessions = (_global_home() / "sessions").resolve()
+        return CONFIG_DIR == sessions or sessions in CONFIG_DIR.parents
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # Real LLM providers that go through the OpenAI-compatible HTTP path.
 LIVE_PROVIDERS = {"openai_compatible", "openai", "ollama", "openrouter"}
 
@@ -306,13 +361,32 @@ def load_settings() -> Settings:
                         pass
         except (json.JSONDecodeError, OSError):
             pass
+    # SEC-2: resolve the provider key from a GLOBAL store (env override > global
+    # keyring), NOT from this (possibly per-session) config. The global wins over
+    # any legacy copy embedded in a session file.
+    env_key = os.environ.get("OPENAI_API_KEY") or ""
+    global_key = global_api_key(str(data.get("provider") or ""), str(data.get("base_url") or ""))
+    resolved = env_key or global_key or str(data.get("api_key") or "")
+    data["api_key"] = resolved
+    # Migration: a session config must not carry the secret. If a legacy one does
+    # (and a global copy exists so we never orphan the only key), strip it on read.
+    if global_key and _is_session_config() and CONFIG_PATH.exists():
+        try:
+            raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            if isinstance(raw, dict) and raw.get("api_key"):
+                raw.pop("api_key", None)
+                CONFIG_PATH.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+        except (OSError, json.JSONDecodeError):
+            pass
     return Settings(**data)
 
 
 def save_settings(settings: Settings) -> Path:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(
-        json.dumps(asdict(settings), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    data = asdict(settings)
+    # SEC-2: never persist the provider key into a per-session config — it lives in
+    # the global keyring and is resolved at load. (The global config keeps it.)
+    if _is_session_config():
+        data.pop("api_key", None)
+    CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return CONFIG_PATH
