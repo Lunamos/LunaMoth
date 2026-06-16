@@ -13,6 +13,7 @@ import { useT, useLang } from "../i18n";
 import { useHub } from "../state/hub";
 import { applyTheme, currentThemePref, type ThemePref } from "../theme";
 import { ModelPane } from "../components/settings/ModelPane";
+import { KeysPane } from "../components/settings/KeysPane";
 import { MattePane } from "../components/settings/MattePane";
 import { deckToast } from "../components/ui/deckToast";
 import { rpcErrText } from "../lib/status";
@@ -90,7 +91,12 @@ export function Settings() {
           ))}
         </nav>
         <div className="settings-body">
-          {pane === "model" && <ModelPane />}
+          {pane === "model" && (
+            <>
+              <ModelPane />
+              <KeysPane />
+            </>
+          )}
 
           {/* 生图 (Images): R11 matte model manager. The R10 image key/model +
               saved-keys store are wired in a follow-up. */}
