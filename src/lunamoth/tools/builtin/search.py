@@ -20,6 +20,7 @@ import threading
 from pathlib import Path
 
 from ..registry import registry, tool_error
+from ._pathsec import map_virtual_assets
 from ._search_shell import (
     escape_shell_arg,
     parse_search_context_line,
@@ -155,14 +156,11 @@ def _confine(ctx, path: str) -> tuple[str | None, str | None]:
     except Exception:  # noqa: BLE001
         assets_dir = None
     raw = (path or ".").strip()
+    # Same virtual-prefix mapping the file tools use (leading `assets/` → the
+    # read-only sibling, else workspace-relative, absolute as-is). One source of
+    # truth for the convention; the read-allowed containment check stays here.
     p = Path(raw).expanduser()
-    if not p.is_absolute() and assets_dir is not None and p.parts and p.parts[0] == "assets":
-        rest = Path(*p.parts[1:]) if len(p.parts) > 1 else Path()
-        resolved = (assets_dir / rest).resolve()
-    elif p.is_absolute():
-        resolved = p.resolve()
-    else:
-        resolved = (workspace / p).resolve()
+    resolved = map_virtual_assets(p, workspace, assets_dir).resolve()
     if resolved == workspace or workspace in resolved.parents:
         return str(resolved), None
     if assets_dir is not None and (resolved == assets_dir or assets_dir in resolved.parents):

@@ -404,7 +404,6 @@ class ChatController {
       this.bigAvatar(), el("b", null, this.charName),
       tagline ? el("div", { class: "tagline" }, tagline) : null), inner.firstChild);
   }
-  clearEmpty() { /* the welcome header is permanent now — pinned at the top, never removed */ }
 
   /* ---- restored history ----
      The restored messages now carry the full forensic shape (reasoning_content,
@@ -543,7 +542,6 @@ class ChatController {
   }
 
   appendCharText(text, opts) {
-    this.clearEmpty();
     const kind = opts && opts.superChat ? "super" : "say";
     const ts = opts && opts.ts ? Number(opts.ts) : Date.now() / 1000;
     if (this.cur.kind !== kind) {
@@ -574,7 +572,6 @@ class ChatController {
      gone; other files render as an .artifact card whose Open button hits the url
      (a moved/deleted file → 404, i.e. "doesn't exist"). muse → muse register. */
   appendCharAttachment(ev) {
-    this.clearEmpty();
     this.closeCurrent();
     this.breakToolGroup();
     const url = String(ev.url || "");
@@ -633,7 +630,6 @@ class ChatController {
   }
 
   appendMuseText(text) {
-    this.clearEmpty();
     if (this.cur.kind !== "muse") {
       this.closeCurrent();
       this.breakToolGroup();
@@ -649,7 +645,6 @@ class ChatController {
   }
 
   appendThinking(text) {
-    this.clearEmpty();
     if (this.cur.kind !== "think") {
       this.closeCurrent();
       this.breakToolGroup();
@@ -751,7 +746,6 @@ class ChatController {
   }
 
   showToolStart(ev) {
-    this.clearEmpty();
     this.closeCurrent();
     const name = ev.name || "?";
     const group = this.ensureToolGroup();
@@ -918,7 +912,6 @@ class ChatController {
   // not an interrupt) and shown as a pending bubble; it's delivered as a normal
   // turn the moment the chara finishes what it's doing.
   queueMessage(text, atts) {
-    this.clearEmpty();
     this._queue = this._queue || [];
     const row = el("div", { class: "user-msg queued" },
       this.attachmentRow(atts),
@@ -938,7 +931,6 @@ class ChatController {
   }
 
   async sendUser(text, atts) {
-    this.clearEmpty();
     atts = atts || [];
     $("stream-inner").appendChild(el("div", { class: "user-msg" },
       this.attachmentRow(atts),
@@ -953,7 +945,6 @@ class ChatController {
   onPeerMessage(p) {
     const text = (p && p.text) || "";
     if (!text) return;
-    this.clearEmpty();
     this.closeCurrent();
     const row = el("div", { class: "user-msg" }, el("div", { class: "bubble" }, text));
     const src = (p && p.source) || "";

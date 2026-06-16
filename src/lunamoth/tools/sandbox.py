@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 from ..obs.log import get_logger
+from .builtin._pathsec import map_virtual_assets
 
 _log = get_logger("sandbox")
 
@@ -74,26 +75,21 @@ class Sandbox:
         """Resolve a model path for READING, honoring the virtual ``assets/`` prefix.
 
         A leading ``assets`` component maps to the read-only sibling assets shelf
-        (``self.assets_dir``); everything else is workspace-relative. The result
-        must live under workspace OR assets — any escape (absolute path, ``..``
-        traversal, or a symlink pointing out) raises :class:`SandboxViolation`.
-        READ-ONLY surfaces only (send_file, image vision): never resolve a write
-        through this — writes must stay workspace-confined.
+        (``self.assets_dir``); everything else is workspace-relative — via the same
+        ``map_virtual_assets`` the file tools use, so the virtual-prefix convention
+        lives in ONE place. The result must live under workspace OR assets — any
+        escape (absolute path, ``..`` traversal, or a symlink pointing out) raises
+        :class:`SandboxViolation`. READ-ONLY surfaces only (send_file, image
+        vision): never resolve a write through this — writes stay workspace-confined.
         """
         rel = Path(relative)
         if rel.is_absolute():
             raise SandboxViolation("absolute paths are not allowed")
-        parts = rel.parts
-        if parts and parts[0] == "assets":
-            base = self.assets_dir
-            sub = Path(*parts[1:]) if len(parts) > 1 else Path()
-        else:
-            base = self.workspace_dir
-            sub = rel
-        target = (base / sub).resolve()
-        if target != base and base not in target.parents:
-            raise SandboxViolation("path escapes sandbox")
-        return target
+        target = map_virtual_assets(rel, self.workspace_dir, self.assets_dir).resolve()
+        for base in (self.workspace_dir, self.assets_dir):
+            if target == base or base in target.parents:
+                return target
+        raise SandboxViolation("path escapes sandbox")
 
     # The chara has ONE working directory: workspace/. The terminal runs there,
     # and write_file/read_file/list_files all operate there too — so a file the
