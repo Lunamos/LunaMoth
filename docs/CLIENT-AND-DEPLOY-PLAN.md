@@ -13,13 +13,15 @@
 
 ## ✅ STATUS: COMPLETE (2026-06-16, branch `feat/client-and-deploy`)
 
-All tracks delivered, reviewed twice (adversarial), and verified. 11 commits ahead of
-`main`. §10 acceptance gate — all green:
+All tracks delivered, reviewed THREE times (adversarial), and verified. 14 commits ahead
+of `main`. §10 acceptance gate — all green; NO placeholders left in the feature inventory:
 
-- **Tracks A–F + Track C overlays + `lunamoth connect ssh://`** all landed.
+- **Tracks A–F + Track C overlays + full chat right-panel (incl. the gateway tab:
+  WeChat QR login + adapter config) + `lunamoth connect ssh://`** all landed.
 - **apps/web** React SPA → builds to `front/webui/` (gitignored, bundled into the wheel
   via package-data); served by the supervisor; the Electron shell loads it unchanged.
-  `npm run typecheck` clean · **128 vitest** · build OK.
+  Vendor chunks split (no >500 kB advisory). `npm run typecheck` clean · **139 vitest** ·
+  build OK.
 - **Server**: serves the SPA; `--host` + token/cookie auth on GET/`/asset`/`/rpc`/WS +
   `/auth` cookie-mint handshake; Origin/Host allowlist; WS bind-0; port-in-use attribution.
   **841 pytest passed, 1 skipped** · ruff clean.
@@ -32,9 +34,9 @@ All tracks delivered, reviewed twice (adversarial), and verified. 11 commits ahe
   surfacing; streamModel restore-ts; cookie header-injection guard). Old vanilla
   `front/web/` deleted; CLAUDE.md + READMEs updated.
 
-Still owner-decisions (non-blocking, §11): WS-port collapse, public-bind login, the
-blessed reverse proxy, bundle code-splitting (single 796 KB chunk — advisory only).
-Not yet merged to `main` (awaiting owner review of the branch).
+Still owner-decisions (non-blocking, §11 — design choices only you can make, not
+implementation gaps): WS-port collapse, public-bind login system, the blessed reverse
+proxy to document. Not yet merged to `main` (awaiting owner review of the branch).
 
 The per-task checkboxes below are the original spec; treat the above as the authoritative
 done-state.
