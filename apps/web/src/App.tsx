@@ -1,35 +1,45 @@
-import { useEffect, useState } from "react";
-import { HubClient } from "./rpc";
+import { I18nProvider } from "./i18n";
+import { HubProvider, useHub } from "./state/hub";
+import { useHashRoute } from "./hooks/useHashRoute";
+import { Sidebar } from "./components/Sidebar";
+import { Board } from "./views/Board";
+import { Deck } from "./views/Deck";
+import { Gateways } from "./views/Gateways";
+import { Settings } from "./views/Settings";
+import { Chat } from "./views/Chat";
 
-/* Minimal shell — Track A scaffold. The real views (Board / Deck / Gateways /
-   Settings / Chat) land in Track C; this proves the toolchain + the live hub
-   connection end-to-end. Hash routing is set up here so deep links survive. */
+/* The shell — providers + sidebar + the routed view. Hash routing (useHashRoute)
+   switches the main pane; the chara page is a full-bleed view without the board
+   chrome. Views land per Track C against this contract (see Board.tsx). */
 
-type HubState = "connecting" | "ready" | "down";
-
-export function App() {
-  const [hub] = useState(() => new HubClient());
-  const [state, setState] = useState<HubState>("connecting");
-
-  useEffect(() => {
-    hub.onReady = () => setState("ready");
-    hub.onDown = () => setState("down");
-    void hub.start();
-    return () => hub.stop();
-  }, [hub]);
+function Shell() {
+  const route = useHashRoute();
+  const { connected } = useHub();
 
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <span className="brand">LunaMoth</span>
-        <span className={`hub-state hub-${state}`} data-state={state}>
-          {state}
-        </span>
-      </header>
-      <main className="app-main">
-        {/* Track C replaces this with the routed views. */}
-        <p>renderer scaffold ready — views land in Track C.</p>
-      </main>
+    <div id="app">
+      <Sidebar view={route.view} />
+      <div className="main">
+        {route.view === "board" && <Board />}
+        {route.view === "deck" && <Deck />}
+        {route.view === "gateways" && <Gateways />}
+        {route.view === "settings" && <Settings />}
+        {route.view === "chat" && route.name && <Chat name={route.name} sub={route.sub} />}
+      </div>
+      <div id="statusbar">
+        <span className="grow" />
+        <i id="conn-dot" className={connected ? "ok" : ""} />
+      </div>
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <I18nProvider>
+      <HubProvider>
+        <Shell />
+      </HubProvider>
+    </I18nProvider>
   );
 }
