@@ -488,17 +488,22 @@ def cmd_desktop(args: argparse.Namespace) -> int:
     if getattr(args, "debug", False):
         os.environ["LUNAMOTH_DEBUG"] = "1"
     host = getattr(args, "host", None) or "127.0.0.1"
-    token = args.token or secrets.token_urlsafe(24)
+    # An explicit token may come from --token OR the LUNAMOTH_TOKEN env (the Docker
+    # entrypoint sets the latter, generating one if unset). Either counts as the
+    # operator vouching for a known token; absent both, a per-run random is used.
+    explicit_token = args.token or os.environ.get("LUNAMOTH_TOKEN") or ""
+    token = explicit_token or secrets.token_urlsafe(24)
     allow = [h.strip() for h in (getattr(args, "allow_host", None) or "").split(",") if h.strip()]
 
     # A non-loopback bind exposes a shell + tools to the network; the token is
     # the gate. A wildcard bind without an explicit token is refused outright —
     # the random per-run token would be unknown to a remote client. (Login is a
     # later iteration; the shared token is the gate today — plan §2, Track D.)
-    if N.is_wildcard_host(host) and not args.token:
+    if N.is_wildcard_host(host) and not explicit_token:
         print(
             "error: refusing to bind 0.0.0.0 without a token. Pass --token <secret> "
-            "so remote clients can authenticate (the token is the access gate).",
+            "(or set LUNAMOTH_TOKEN) so remote clients can authenticate — the token "
+            "is the access gate.",
             file=sys.stderr,
         )
         return 2

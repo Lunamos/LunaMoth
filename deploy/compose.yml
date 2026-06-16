@@ -23,10 +23,11 @@ services:
       - "6180:6180" # LunaMoth desktop UI + WS gateway
     environment:
       - TZ=Asia/Shanghai
-    # The supervisor auto-generates an access token on first boot — read it from
-    # the logs (`docker compose logs lunamoth`) to build your bookmark URL. To pin
-    # a stable token (and a fixed bookmark URL), override the command:
-    # command: ["lunamoth", "desktop", "--host", "0.0.0.0", "--port", "6180", "--no-open", "--token", "your-long-random-token"]
+      # The entrypoint generates an access token if LUNAMOTH_TOKEN is unset and
+      # prints it in the logs (`docker compose logs lunamoth`) — read it to build
+      # your bookmark URL. To PIN a stable token (and a fixed bookmark URL), set it:
+      # - LUNAMOTH_TOKEN=your-long-random-token
+      # - LUNAMOTH_PORT=6180
     volumes:
       # Sessions, cards and config — the one thing that must survive a re-deploy.
       - ./data:/root/.lunamoth

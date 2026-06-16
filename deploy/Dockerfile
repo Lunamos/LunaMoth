@@ -36,10 +36,13 @@ RUN set -eux; \
 ENV LUNAMOTH_HOME=/root/.lunamoth
 VOLUME ["/root/.lunamoth"]
 
-# The supervisor's HTTP renderer + WS gateway. Bound to 0.0.0.0 below; put a
-# TLS reverse proxy in front for anything past loopback (see README).
+# The supervisor's HTTP renderer + WS gateway. Bound to 0.0.0.0 by the entrypoint;
+# put a TLS reverse proxy in front for anything past loopback (see README).
 EXPOSE 6180
 
-# Serve headless: bind all interfaces, never try to open a local browser.
-# (Requires `--host` on the desktop subcommand — added in Track D.)
-CMD ["lunamoth", "desktop", "--host", "0.0.0.0", "--port", "6180", "--no-open"]
+# The entrypoint generates an access token if LUNAMOTH_TOKEN is unset and prints
+# it (the wildcard bind needs a token — the gate), then serves headless. Set
+# LUNAMOTH_TOKEN to pin a known token; LUNAMOTH_PORT to change the port.
+COPY deploy/entrypoint.sh /usr/local/bin/lunamoth-entrypoint
+RUN chmod +x /usr/local/bin/lunamoth-entrypoint
+ENTRYPOINT ["/usr/local/bin/lunamoth-entrypoint"]
