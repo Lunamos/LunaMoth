@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useT } from "../i18n";
 import { useNavigate } from "../hooks/useHashRoute";
 import { useHub, type BoardSession } from "../state/hub";
-import { statusOf } from "../lib/status";
+import { useOverlay } from "../state/overlay";
+import { statusOf, rpcErrText } from "../lib/status";
 import { modeLabel, paletteClass, glyphOf } from "../lib/format";
+import { deckToast } from "../components/ui/deckToast";
 
 /* Board — the roster of living charas. Faithful to index.html #view-board +
    app.js renderBoard: a grid of chara cards, each with a power toggle
@@ -12,13 +14,38 @@ import { modeLabel, paletteClass, glyphOf } from "../lib/format";
    are wired in when the Deck/Chat tracks land; until then the palette+glyph
    fallback (app.js's no-card path) is used. */
 
+const FIRST_RUN_SEEN = "lm-first-run-seen";
+
 export function Board() {
   const t = useT();
   const nav = useNavigate();
+  const overlay = useOverlay();
   const { hub, snapshot, refresh } = useHub();
   const [busy, setBusy] = useState<Set<string>>(new Set());
 
   const sessions: BoardSession[] = snapshot?.sessions ?? [];
+
+  // First-run: once the hub snapshot has loaded and there are no charas, show the
+  // welcome overlay a single time per browser (app.js openFirstRun on empty boot).
+  const shown = useRef(false);
+  useEffect(() => {
+    if (shown.current || !snapshot) return;
+    if (sessions.length > 0) return;
+    let seen = false;
+    try {
+      seen = localStorage.getItem(FIRST_RUN_SEEN) === "1";
+    } catch {
+      /* private mode */
+    }
+    if (seen) return;
+    shown.current = true;
+    try {
+      localStorage.setItem(FIRST_RUN_SEEN, "1");
+    } catch {
+      /* private mode */
+    }
+    overlay.open({ kind: "firstrun" });
+  }, [snapshot, sessions.length, overlay]);
 
   const setBusyName = (name: string, on: boolean) =>
     setBusy((prev) => {
@@ -34,6 +61,10 @@ export function Board() {
     try {
       await hub.call(live ? "session.stop" : "session.start", { name: s.name }, 30000);
       await refresh();
+    } catch (e) {
+      // binding UI rule: surface the failure (the spinner clears in finally and
+      // the card reverts to its real state on the next refresh).
+      deckToast(rpcErrText(t, e as { message?: string }), true);
     } finally {
       setBusyName(s.name, false);
     }
@@ -104,7 +135,7 @@ export function Board() {
             </svg>
             <div>{t("empty-board")}</div>
             <div className="acts">
-              <button className="btn primary" onClick={() => nav("#/deck")}>
+              <button className="btn primary" onClick={() => overlay.open({ kind: "firstrun" })}>
                 {t("meet-luna")}
               </button>
             </div>

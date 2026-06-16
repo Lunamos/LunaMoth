@@ -1,7 +1,9 @@
 import { I18nProvider } from "./i18n";
 import { HubProvider, useHub } from "./state/hub";
+import { OverlayProvider } from "./state/overlay";
 import { useHashRoute } from "./hooks/useHashRoute";
 import { Sidebar } from "./components/Sidebar";
+import { OverlayHost } from "./components/overlays/OverlayHost";
 import { Board } from "./views/Board";
 import { Deck } from "./views/Deck";
 import { Gateways } from "./views/Gateways";
@@ -30,6 +32,7 @@ function Shell() {
         <span className="grow" />
         <i id="conn-dot" className={connected ? "ok" : ""} />
       </div>
+      <OverlayHost />
     </div>
   );
 }
@@ -38,7 +41,9 @@ export function App() {
   return (
     <I18nProvider>
       <HubProvider>
-        <Shell />
+        <OverlayProvider>
+          <Shell />
+        </OverlayProvider>
       </HubProvider>
     </I18nProvider>
   );

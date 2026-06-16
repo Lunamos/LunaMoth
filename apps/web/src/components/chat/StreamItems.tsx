@@ -8,6 +8,7 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useT, type TFn } from "../../i18n";
+import { assetUrl } from "../../rpc";
 import { glyphOf, paletteClass } from "../../lib/format";
 import {
   chipLabel,
@@ -151,7 +152,7 @@ function AttachmentCard({ item, charName }: { item: AttachmentItem; charName: st
       <div className="att-missing">{t("att-img-missing")}</div>
     ) : (
       <div className="wp-img">
-        <img alt={name} loading="lazy" src={item.url} onError={() => setBroken(true)} />
+        <img alt={name} loading="lazy" src={assetUrl(item.url)} onError={() => setBroken(true)} />
       </div>
     )
   ) : (
@@ -162,7 +163,7 @@ function AttachmentCard({ item, charName }: { item: AttachmentItem; charName: st
         <span>{item.mime || t("att-file")}</span>
       </div>
       <div className="acts">
-        <a className="go" href={item.url} target="_blank" rel="noopener" download={name}>
+        <a className="go" href={assetUrl(item.url)} target="_blank" rel="noopener" download={name}>
           {t("att-open")}
         </a>
       </div>

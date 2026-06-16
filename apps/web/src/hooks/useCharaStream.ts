@@ -85,12 +85,6 @@ export interface CharaStream {
   client: CharaClient;
 }
 
-function lifeAttr(life: LifeSnapshot | null): string {
-  if (!life || !life.state) return "";
-  if (life.state === "idle_countdown") return "working";
-  return life.state;
-}
-
 export function useCharaStream(name: string): CharaStream {
   const t = useT();
   const tRef = useRef<TFn>(t);
@@ -492,7 +486,6 @@ async function handleOpening(
   } else if (info.opening === "probe" && text) {
     await runStream(() => client.send(text));
   }
-  void lifeAttr; // referenced for parity documentation; data-life set by the view
 }
 
 function errMsg(e: unknown): string {

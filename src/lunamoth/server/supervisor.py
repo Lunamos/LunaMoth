@@ -1265,6 +1265,15 @@ class WebHandler(http.server.SimpleHTTPRequestHandler):
         if not _is_preauth_path(url.path) and not self._auth_ok(url):
             self.send_error(401, "authentication required")
             return
+        if url.path == "/auth":
+            # Boot handshake: the SPA loads its token from the URL hash (never sent
+            # to the server), so the shell GET mints no cookie. The client calls
+            # GET /auth?token=… once at boot — _auth_ok above validated it and
+            # queued the Set-Cookie, so subsequent tokenless <img>/asset requests
+            # authenticate via the SameSite cookie. 204, no body.
+            self.send_response(204)
+            self.end_headers()
+            return
         if url.path == "/asset":
             self._serve_asset(url)
             return

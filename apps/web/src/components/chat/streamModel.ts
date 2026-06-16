@@ -322,12 +322,14 @@ export class StreamModel {
   }
 
   /* ---- the accumulator internals (chat.js appendCharText/appendMuseText/…) ---- */
-  private appendSay(text: string, isSuper: boolean): void {
+  private appendSay(text: string, isSuper: boolean, tsOverride?: number): void {
     const kind: "say" | "super" = isSuper ? "super" : "say";
     if (this.cur.kind !== kind) {
       this.closeCurrent();
       this.breakToolGroup();
-      const ts = Date.now() / 1000;
+      // Restore uses the message's recorded ts (chat.js `m.ts || now`) so an
+      // already-read historical super-chat doesn't re-render as unread.
+      const ts = tsOverride ?? Date.now() / 1000;
       const item: TextItem =
         kind === "super"
           ? { id: nextId(), kind, raw: "", ts, unread: ts > this.superReadTs }
@@ -443,7 +445,7 @@ export class StreamModel {
         }
         for (const speak of speakTextsFromMessage(m)) {
           this.pendingSuper = true;
-          this.appendSay(speak, true);
+          this.appendSay(speak, true, m.ts);
           this.closeCurrent();
         }
       }

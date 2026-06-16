@@ -12,6 +12,7 @@
 import { useMemo, useState } from "react";
 import { useT } from "../i18n";
 import { useHub } from "../state/hub";
+import { useOverlay } from "../state/overlay";
 import { useNavigate } from "../hooks/useHashRoute";
 import { paletteClass } from "../lib/format";
 import { rpcErrText } from "../lib/status";
@@ -26,6 +27,7 @@ type Filter = "unwoken" | "woken";
 export function Deck() {
   const t = useT();
   const nav = useNavigate();
+  const overlay = useOverlay();
   const { hub, snapshot, refresh } = useHub();
   const [filter, setFilter] = useState<Filter>("unwoken");
   const [query, setQuery] = useState("");
@@ -107,10 +109,15 @@ export function Deck() {
             </span>
           ))}
         </div>
-        {/* TODO(deck): the ✨默认 builtin carousel (BuiltinPicker) + 导入 (importCardFile)
-            + ＋新角色卡 (CreateFlow) are separate overlays owned by other Track-C
-            tracks (§6). New-card routes through ensureModel like wake does. */}
-        <button className="btn primary" onClick={() => ensureModel(() => deckToast(t("nav-deck") + " — TODO: create flow"))}>
+        {/* ✨默认 builtin carousel + 导入 import + ＋新角色卡 create-flow (§6 overlays).
+            New-card + builtin route through ensureModel like wake does; import does not. */}
+        <button className="btn pick-default" onClick={() => overlay.open({ kind: "builtin" })}>
+          {t("deck-pick")}
+        </button>
+        <button className="btn soft" onClick={() => overlay.open({ kind: "import" })}>
+          {t("import")}
+        </button>
+        <button className="btn primary" onClick={() => ensureModel(() => overlay.open({ kind: "create" }))}>
           {t("new-card")}
         </button>
       </div>

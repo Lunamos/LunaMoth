@@ -50,6 +50,30 @@ export function wsUrl(path: string): string {
   return `${proto}//${BOOT.host}:${BOOT.wsPort}${path}?token=${encodeURIComponent(BOOT.token)}`;
 }
 
+/* The SPA's token rides the URL hash (client-only), so the shell GET sets no auth
+   cookie. Call this once at boot: GET /auth?token=… makes the server mint the
+   SameSite auth cookie, so subsequent tokenless <img src="/asset?p=…">/attachment
+   requests authenticate via the cookie (no token sprayed into every asset URL). */
+export async function mintAuthCookie(): Promise<void> {
+  if (!BOOT.token) return;
+  try {
+    await fetch(`/auth?token=${encodeURIComponent(BOOT.token)}`, {
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+  } catch {
+    /* offline / down — the WS reconnect path will retry the session */
+  }
+}
+
+/** Append the token to a same-origin /asset or /upload URL — a belt-and-suspenders
+ *  fallback for asset requests that race the boot cookie mint. */
+export function assetUrl(url: string): string {
+  if (!url || !BOOT.token) return url;
+  if (!url.startsWith("/asset") && !url.startsWith("/upload")) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(BOOT.token)}`;
+}
+
 interface Pending {
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
