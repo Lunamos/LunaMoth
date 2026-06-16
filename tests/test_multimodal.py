@@ -305,3 +305,34 @@ def test_image_vision_followup_none_for_nonimage():
     sb = _sandbox()
     rel = sb.write_bytes("notes.txt", b"hello, not an image")
     assert LunaMothAgent._image_vision_followup(_agent_stub(sb, True), rel) is None
+
+
+def test_read_file_image_vision_followup(tmp_path, monkeypatch):
+    """read_file on an image yields an image_url follow-up USER message when the
+    model has vision; without vision (or for non-images) it returns None so the
+    honest 'can't see it' note stands. (R2 — on-disk image vision.)"""
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    monkeypatch.setenv("LUNAMOTH_SANDBOX", str(tmp_path / "sandbox"))
+    monkeypatch.setenv("LUNAMOTH_CONFIG_DIR", str(tmp_path / "cfg"))
+    from lunamoth.session.settings import Settings
+    from lunamoth.core.agent import LunaMothAgent
+    a = LunaMothAgent(Settings(character_path="", toolpack="sandbox"))
+    ws = a.sandbox.workspace_dir
+    ws.mkdir(parents=True, exist_ok=True)
+    (ws / "pic.png").write_bytes(bytes.fromhex("89504e470d0a1a0a") + b"\x00" * 64)
+
+    monkeypatch.setattr(a.llm, "vision_supported", lambda: True)
+    inj = a._image_vision_followup("pic.png")
+    assert inj is not None
+    note, follow = inj
+    assert follow["role"] == "user"
+    assert any(p.get("type") == "image_url"
+               and p["image_url"]["url"].startswith("data:image/png;base64,")
+               for p in follow["content"])
+
+    monkeypatch.setattr(a.llm, "vision_supported", lambda: False)
+    assert a._image_vision_followup("pic.png") is None  # honest note stands
+
+    (ws / "note.txt").write_text("hi", encoding="utf-8")
+    monkeypatch.setattr(a.llm, "vision_supported", lambda: True)
+    assert a._image_vision_followup("note.txt") is None  # not an image

@@ -407,23 +407,6 @@ parity with `reference/hermes-agent` for commodity surfaces), confirms
 delete), then **removes the item from this list**. Anyone (incl. subagents) may
 add a diagnosed problem here with a priority. Independent items run in parallel.
 
-## R2 (P1) — Multimodal: chara sees on-disk images (the last hermes-parity gap)
-Parity audit (2026-06-16) CONFIRMED full name-parity with hermes' commodity core
-(17 non-browser + 12 browser = 29 tools) + the 5 chara-life tools; nothing stray.
-Inbound USER-ATTACHED images already work (`core/attachments.py` injects an image_url
-content part when the model is vision-capable; oversized/no-vision → saved-to-workspace
-note). THE ONE REAL GAP: a chara cannot see an image already ON DISK (downloaded, in
-`assets/`, browser-captured) — `read_file` on an image returns a "can't read pixels"
-note and there is NO `vision_analyze` tool (hermes has one:
-`reference/hermes-agent/tools/vision_tools.py`).
-Plan: add a vision path — port hermes `vision_analyze`, OR teach `read_file` to inject
-the image as an image_url follow-up user message when the model has vision (reuse
-`core/attachments.py` build path; >limit/non-vision → honest note, no fabrication).
-This unblocks R7 (the chara must SEE its own setting art to illustrate with it).
-Acceptance: a vision-model chara can describe an image in its workspace/`assets/`;
-no-vision degrades to the honest note; full suite green; live-Quinn (vision model)
-describes `assets/keyvisual.webp`; audit subagent confirms parity with hermes vision.
-
 ## R3 (P2) — Compress multi-turn tool calls in the chat UI
 Collapse a run of tool calls into one line ("Read 1 file · ran 2 commands"),
 expandable to the per-call detail. Frontend only (chat.js/style.css).
