@@ -204,6 +204,14 @@ zero internal deps; `obs/` imports only `config`.
   (in-memory ring → `/panel log`), `audit.py` (the SECURITY trail — separate
   from diagnostics; never merge them). transcript/audit/logs = three records,
   three jobs.
+- `visuals/` — the chara-visuals pipeline (merged from the sibling's R9/R11):
+  `pipeline.py` (card → visual brief → Volcano Ark Seedream image-gen → optional
+  local matte → staged preview; the `card.visual_brief`/`card.visual_generate`
+  hub RPCs), `matte.py` (local background-removal models — download/install/select,
+  the `matte.*` hub RPCs; the heavy `rembg`/`onnxruntime` stack is the OPTIONAL
+  `visuals` extra, `uv sync --extra visuals`). The web side is the deck card
+  editor's 视觉 tab + the 生图 Settings pane (apps/web). `tools/builtin/_image_gen.py`
+  is the shared Ark image backend (the chara's `generate_image` tool uses it too).
 - `session/` — `sessions.py` (named charas under ~/.lunamoth/sessions/<name>/;
   `SessionMeta.env()` is the activation interface), `settings.py`, `cleanup.py`,
   `isolation.py` (stdlib-only OS jail builders — shared by tools/runner and the

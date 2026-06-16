@@ -17,7 +17,15 @@ Each feature: design → implement → test (`uv run python -m pytest -q`, ruff,
 `node --check`) → subagent audit → commit. Keep going across /loop wakeups until
 all four are done. Small refactors allowed; keep the repo maintainable.
 
-## SEC-1 — authenticate the /asset GET  [DONE]
+## SEC-1 — authenticate the /asset GET  [DONE → SUPERSEDED on integration]
+> NOTE (integration, 2026-06-17): SEC-1 as described below shipped on origin/main, but
+> when merged into the client+remote-rewrite branch it was SUPERSEDED by that branch's
+> comprehensive auth (Track D): a single `lm_auth` SameSite cookie minted by a `?token=`
+> handshake gates GET / `/asset` / `/rpc` / `/upload` / WS uniformly (401, not 403), plus
+> an Origin/Host allowlist and the optional password login. `lm_asset`/403 below is the
+> earlier, narrower design — kept for history. The "no server token ⇒ open (dev)"
+> convention WAS carried over. The actual auth lives in supervisor.py + netsec.py.
+
 Shipped: SameSite=Strict `lm_asset` cookie (= session token), set by both server
 (HttpOnly, every response) and renderer (rpc.js BOOT); `/asset` GET accepts cookie OR
 `?token=`, else 403; no server token → open (dev). Leak-closure (config.json/transcript
