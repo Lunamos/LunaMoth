@@ -136,6 +136,21 @@ def build_brief(card: dict, llm_call: Callable[[str, str], str]) -> dict:
     return brief
 
 
+def _ext_of(data: bytes) -> str:
+    """The true image extension from the magic bytes (so a JPEG/WebP result isn't
+    saved with a .png ext and rejected by the asset magic-byte check)."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "jpg"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return "png"
+
+
+_EXT_MIME = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}
+
+
 def prompt_for(kind: str, brief: dict) -> str:
     a, pal = brief.get("appearance", ""), brief.get("palette", "")
     if kind == "avatar":
@@ -201,11 +216,12 @@ def generate(
     if want:
         mid = _matte.selected_model()
         if _matte.deps_available() and _matte.is_installed(mid):
-            data = _matte.cut(data, model_id=mid)
+            data = _matte.cut(data, model_id=mid)  # always PNG (RGBA)
             matted = True
         else:
             note = ("matte skipped — the visuals extra / a matte model isn't ready "
                     "(install it in Settings·生图).")
 
-    return {"data": data, "mime": "image/png", "brief": brief,
-            "kind": kind, "matted": matted, "note": note}
+    ext = "png" if matted else _ext_of(data)
+    return {"data": data, "mime": _EXT_MIME.get(ext, "image/png"), "ext": ext,
+            "brief": brief, "kind": kind, "matted": matted, "note": note}

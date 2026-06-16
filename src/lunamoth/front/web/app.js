@@ -2534,13 +2534,16 @@ function buildVisualsControls(cardPath, deckCard, opts) {
       note.textContent = msg || "";
     }
 
-    async function saveBytes(data_b64, mime) {
+    async function saveBytes(data_b64, mime, ext) {
       if (kind === "avatar") {
-        const small = await downscalePngB64(`data:${mime};base64,${data_b64}`, 512);
+        // Avatar is inlined into hub.state — downscale to 512² PNG to stay tiny.
+        const small = await downscalePngB64(`data:${mime || "image/png"};base64,${data_b64}`, 512);
         const r = await hub.call("card.avatar_upload", { path: cardPath, data_b64: small, ext: "png" }, 30000);
         curSrc = r.data_uri || curSrc;
       } else {
-        const r = await hub.call("card.asset_save", { path: cardPath, kind, data_b64, ext: "png" }, 30000);
+        // Save in the image's TRUE format (a Seedream result may be jpg/webp);
+        // asset_save magic-checks the bytes against the declared ext.
+        const r = await hub.call("card.asset_save", { path: cardPath, kind, data_b64, ext: ext || "png" }, 30000);
         curSrc = r.url || curSrc;
       }
       staged = null; paint();
@@ -2556,14 +2559,14 @@ function buildVisualsControls(cardPath, deckCard, opts) {
           { path: cardPath, kind, brief: await getBrief(), refs: refData() }, 240000);
       } catch (e) { setBusy(false); note.className = "av-note err"; note.textContent = rpcErrText(e); return; }
       setBusy(false);
-      staged = { data_b64: out.data_b64, mime: out.mime || "image/png" };
+      staged = { data_b64: out.data_b64, mime: out.mime || "image/png", ext: out.ext || "png" };
       paint();
       const saveBtn = el("button", { class: "btn primary sm" }, t("save"));
       const regenBtn = el("button", { class: "btn soft sm" }, t("vis-regen"));
       const cancelBtn = el("button", { class: "btn text sm" }, t("cancel"));
       saveBtn.addEventListener("click", async () => {
         setBusy(true, t("saving"));
-        try { await saveBytes(staged.data_b64, staged.mime); stage.innerHTML = ""; setBusy(false); toast(t("saved")); await refreshHub(); }
+        try { await saveBytes(staged.data_b64, staged.mime, staged.ext); stage.innerHTML = ""; setBusy(false); toast(t("saved")); await refreshHub(); }
         catch (e) { setBusy(false); note.className = "av-note err"; note.textContent = rpcErrText(e); }
       });
       regenBtn.addEventListener("click", generate);
@@ -2621,7 +2624,7 @@ function buildVisualsControls(cardPath, deckCard, opts) {
       try {
         const out = await hub.call("card.visual_generate",
           { path: cardPath, kind, brief: await getBrief(), refs: refData() }, 240000);
-        await saveBytes(out.data_b64, out.mime || "image/png");
+        await saveBytes(out.data_b64, out.mime || "image/png", out.ext || "png");
         setBusy(false);
       } catch (e) { setBusy(false); note.className = "av-note err"; note.textContent = rpcErrText(e); throw e; }
     }

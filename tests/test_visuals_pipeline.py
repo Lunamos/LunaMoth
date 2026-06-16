@@ -96,8 +96,21 @@ def test_generate_avatar_no_matte_by_default():
     )
     assert out["data"] == _FAKE_PNG
     assert out["mime"] == "image/png"
+    assert out["ext"] == "png"
     assert out["matted"] is False
     assert out["kind"] == "avatar"
+
+
+def test_generate_reports_true_ext_for_jpeg():
+    # an un-matted JPEG result must report ext=jpg (so asset_save's magic check
+    # accepts it) — not a hardcoded png.
+    jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIFblah"
+    out = pipeline.generate(
+        CARD, "background", llm_call=lambda s, u: "{}", brief=_fixed_brief(),
+        ark_generate=lambda prompt, size, refs=None: ["http://x/b.jpg"],
+        download_bytes=lambda url: jpeg,
+    )
+    assert out["ext"] == "jpg" and out["mime"] == "image/jpeg" and out["matted"] is False
 
 
 def test_generate_sprite_matte_skipped_when_no_model(monkeypatch):

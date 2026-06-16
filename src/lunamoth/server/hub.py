@@ -2490,7 +2490,7 @@ class HubDispatcher:
                 raise HubRpcError(-32050, str(exc), {"kind": "visual_generate"}) from exc
             return {
                 "data_b64": base64.b64encode(out["data"]).decode("ascii"),
-                "mime": out["mime"], "kind": out["kind"],
+                "mime": out["mime"], "ext": out["ext"], "kind": out["kind"],
                 "matted": out["matted"], "note": out["note"], "brief": out["brief"],
             }
         if method == "card.asset_save":
