@@ -126,3 +126,8 @@ hermes ui/
 visuals/*
 !visuals/*.py
 !visuals/README.md
+
+# Frontend SPA (apps/web) — see docs/CLIENT-AND-DEPLOY-PLAN.md
+node_modules/
+# Built renderer: gitignored, bundled into the wheel via package-data (Track F).
+src/lunamoth/front/webui/
