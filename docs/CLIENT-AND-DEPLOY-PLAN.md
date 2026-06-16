@@ -53,12 +53,13 @@ git clone https://github.com/NousResearch/hermes-agent.git
   `routes/static_file.py` (8-37, the SPA-route list returning index.html) — the static-serve +
   fallback shape. **We use HASH routing (see §2) so we need NO server-side fallback list.**
 - `scripts/hatch_build.py` (32 the `ASTRBOT_BUILD_DASHBOARD=1` gate, 47-75 npm build + copy) —
-  the build-into-package idea. **We choose commit-the-dist instead (see §2) — simpler for our
-  git-checkout install.** Read it to understand the alternative we're rejecting and why.
+  the build-frontend-into-the-package idea. **We do the same via setuptools `package-data` (see §2.4
+  + Track F) — build the SPA at packaging time, bundle the gitignored `webui/` into the wheel.** This
+  is the hatch-hook's setuptools equivalent; read it for the build-time-build pattern.
 - `Dockerfile` + `compose.yml` — the one-click deploy surface (single-stage python:3.12-slim,
   `EXPOSE 6185`, `CMD ["python","main.py"]`, `./data:/AstrBot/data` volume, `restart: always`,
-  `security_opt: [no-new-privileges:true]`). Our Dockerfile is SIMPLER (dist is committed → no
-  node in the image).
+  `security_opt: [no-new-privileges:true]`). Our Dockerfile is SIMPLER still (just `pip install` the
+  wheel — it carries `webui/`, so no node and no source in the image).
 - `astrbot/dashboard/server.py` (517-554 `check_port_in_use` + `get_process_using_port` via
   **psutil**; 264/334-445 the JWT `auth_middleware`; 447-465 `trust_proxy_headers`) and
   `astrbot/core/utils/auth_password.py` (19-45 the per-install random 24-char password,
@@ -75,7 +76,7 @@ git clone https://github.com/NousResearch/hermes-agent.git
                       └───────────────┬──────────────────────────────┘
                             npm run build  (base: './', HASH router)
                                         ▼
-                      src/lunamoth/front/webui/   ← ONE built dist, committed to repo
+                      src/lunamoth/front/webui/   ← ONE built dist (gitignored; bundled into the wheel)
                                         │
                  ┌──────────────────────┴───────────────────────┐
         served by the SAME Python supervisor static handler      │
@@ -113,33 +114,27 @@ Docker image. Same SPA, same serve path, both faces.
 3. **Styling: port `style.css` (1604 lines) as plain CSS first.** Do NOT also migrate to
    Tailwind in this change — that's scope creep. Keep the visual identity; reorganize into
    per-component CSS or CSS modules only as convenient.
-4. **Build output → `src/lunamoth/front/webui/`, COMMITTED to the repo, with content-hashing OFF.**
-   Reason: LunaMoth ships via **`git clone --depth 1`** (install.sh:48) + `lunamoth update` =
-   `git pull --ff-only` (install.sh:45) — **no wheel, no package-data**. Note what the references
-   actually do: NEITHER hermes nor AstrBot commits its built frontend (`hermes-desktop` gitignores
-   `out/`+`dist/`; `hermes-agent` gitignores `hermes_cli/web_dist/`; AstrBot gitignores `dist/`).
-   They stay node-free by **shipping a wheel that bundles the prebuilt dist via package-data**
-   (hermes-agent `pyproject.toml:303-304` `package-data hermes_cli=["web_dist/**/*"]`) or a
-   runtime ZIP download (AstrBot Docker). We ship neither a wheel nor a release server, so for our
-   shallow-git-checkout model **committing `webui/` IS the equivalent** — and because install is
-   `--depth 1` (no history fetched), the usual "committed-dist bloats history → slow clone" cost
-   **does not touch install speed**; only dev/origin `.git` grows. Mitigations (do both): set Vite
-   `build.rollupOptions.output` to **stable, non-hashed filenames** so rebuilds overwrite the same
-   paths and git stores diffs (not new objects every build); and treat `webui/` as a generated
-   artifact (rebuild-on-merge / `.gitattributes merge=ours` to avoid built-bundle merge conflicts
-   during parallel frontend work). `apps/web/vite.config.ts`: `base: './'`,
-   `build.outDir: '../../src/lunamoth/front/webui'`, `emptyOutDir: true`, non-hashed output names.
-   **Future end-state:** if LunaMoth ever ships a wheel/PyPI, move `webui/` out of git and bundle it
-   via `package-data` exactly like hermes-agent — recorded so we converge on the reference model then.
+4. **Distribution = a WHEEL that bundles the built frontend (hermes-agent's model). `webui/` is
+   GITIGNORED, not committed.** (Owner, 2026-06-16 — supersedes an earlier commit-the-dist call.)
+   We are on `setuptools.build_meta` (pyproject.toml:1-3), the SAME backend as hermes-agent, which
+   stays node-free without committing dist by exactly this: `web/` source → build to `web_dist/`
+   (gitignored) → `[tool.setuptools.package-data] hermes_cli=["web_dist/**/*"]` packs it INTO the
+   wheel (hermes-agent pyproject.toml:303-304). We copy it 1:1:
+   `[tool.setuptools.package-data] lunamoth=["front/webui/**/*"]`. The frontend is built at
+   PACKAGING time (CI), `python -m build` bundles the now-present `webui/`, the wheel is published,
+   users `uv tool install lunamoth` and get the prebuilt UI — no git dist, no node at install.
+   `apps/web/vite.config.ts`: `base: './'`, `build.outDir: '../../src/lunamoth/front/webui'`,
+   `emptyOutDir: true`. See Track F for the full distribution change. (This resolves the
+   "dist-in-git" tension cleanly rather than working around it — see §11.)
 5. **Electron stays a thin local shell, UNCHANGED.** It always points at the local supervisor's
    HTTP URL. No remote/ssh mode in Electron (remote = browser). `apps/desktop/` is not touched
    except possibly a version bump.
 6. **Remote = browser, two ways:** (a) SSH tunnel to the loopback-bound supervisor (zero server
    exposure, encryption free); (b) supervisor bound to a real host behind a TLS reverse proxy.
    Both serve the same SPA. Build BOTH in this delivery.
-7. **One-click server deploy = Docker.** `Dockerfile` (python:3.12-slim + uv sync + committed
-   webui/, no node) + `compose.yml` + a documented `docker compose up -d`. Persist
-   `~/.lunamoth` (sessions/cards/config) via a volume.
+7. **One-click server deploy = Docker.** `Dockerfile` (python:3.12-slim + `pip install` the release
+   wheel — it carries `webui/`, so no node) + `compose.yml` + a documented `docker compose up -d`.
+   Persist `~/.lunamoth` (sessions/cards/config) via a volume.
 
 ---
 
@@ -170,8 +165,9 @@ SPA, built into `src/lunamoth/front/webui/`. The old `web/` dir is DELETED at th
   `cmd_desktop`→`serve_desktop`→`Supervisor`→`start_http`+`websockets.serve`.
 - Auth hardening + Origin/Host allowlist + port-in-use handling (see Track D).
 
-**Packaging:** `pyproject.toml` — no package-data change needed (webui/ ships via git checkout like
-web/ does today). Add a `lunamoth doctor` check that `webui/` exists and is non-empty.
+**Packaging:** `pyproject.toml` — add `[tool.setuptools.package-data] lunamoth=["front/webui/**/*"]`
+so the wheel bundles the built UI (Track F). `.gitignore` `src/lunamoth/front/webui/`. Add a
+`lunamoth doctor` check that the served `webui/` exists and is non-empty.
 
 ---
 
@@ -259,9 +255,10 @@ port) before C (views)**, and **A (scaffold) before B/C**. D and E can proceed a
       a raw traceback (`server.py:517-554`). Allow `--port 0` for throwaway runs.
 
 ### Track E — One-click deploy
-- [ ] **`Dockerfile`** (repo root or `deploy/`): `python:3.12-slim`, `uv sync --extra server`, COPY the
-      repo INCLUDING the committed `front/webui/` (no node needed), `EXPOSE <port>`,
-      `CMD ["uv","run","lunamoth","desktop","--host","0.0.0.0","--no-open", ...]`. Persist `~/.lunamoth`.
+- [ ] **`Dockerfile`** (repo root or `deploy/`): `python:3.12-slim`; install the published wheel
+      (`pip install <release-wheel>` — carries `front/webui/`, so **no node, no source, no dist in the
+      image**), `EXPOSE <port>`, `CMD ["lunamoth","desktop","--host","0.0.0.0","--no-open", ...]`.
+      Persist `~/.lunamoth`. (See Track F — the wheel is what makes this image clean.)
 - [ ] **`compose.yml`**: the published/build image, `ports: ["<port>:<port>"]`, `volumes: ["./data:/root/.lunamoth"]`,
       `restart: always`, `security_opt: [no-new-privileges:true]`, env for the host/token/password.
       Model on `reference/AstrBot/compose.yml`.
@@ -269,9 +266,37 @@ port) before C (views)**, and **A (scaffold) before B/C**. D and E can proceed a
       the reverse-proxy TLS snippet for Caddy/cloudflared with WS upgrade). Document the dev loop
       (`apps/web` `npm run dev` proxying to a local `lunamoth desktop`).
 - [ ] **`rpc.ts` wss fix** must be in (Track B) for the TLS path to work.
-- [ ] **Install/update:** `install.sh` + `lunamoth update` keep `git pull + uv sync`; since `webui/` is
-      committed, nothing else is needed for end users. Add a developer note: rebuild `webui/` via
-      `cd apps/web && npm ci && npm run build` after frontend edits.
+- [ ] **Dev build note:** developers rebuild the served UI via `cd apps/web && npm ci && npm run build`
+      after frontend edits (outputs the gitignored `front/webui/`). The user-facing install/update +
+      packaging move to a wheel — see Track F.
+
+### Track F — Distribution: ship a wheel (hermes-agent's model)
+The clean fix for "no dist in git, no node at install": build the frontend at packaging time and
+bundle it into the wheel; users install the wheel. Source: `reference/hermes-agent` (`web/` →
+`web_dist/` gitignored → `package-data`).
+- [ ] **`pyproject.toml`:** `[tool.setuptools.package-data] lunamoth = ["front/webui/**/*"]` (we are
+      on `setuptools.build_meta`, so this is a direct copy of hermes-agent pyproject.toml:303-304).
+      Confirm `[tool.setuptools.packages.find]` includes the `lunamoth` package so the data attaches.
+- [ ] **`.gitignore`:** add `src/lunamoth/front/webui/` — the built UI is NEVER committed.
+- [ ] **Build pipeline (CI / a `scripts/build-wheel.sh`):** `cd apps/web && npm ci && npm run build`
+      (emits `front/webui/`) → `uv build` / `python -m build` → the wheel now contains `webui/` via
+      package-data. (setuptools has no hatch-style build hook; building the frontend FIRST so the
+      files exist on disk at `python -m build` time is the simplest faithful approach — same effect
+      as hermes-agent's "synced at build time".) Gate any in-`pyproject` build automation behind an
+      env flag so plain `uv sync` editable installs never trigger npm.
+- [ ] **Publish target = GitHub Releases** (owner, 2026-06-16). CI on a tagged release builds the
+      frontend + `python -m build`, then uploads the `.whl` as a release asset. No PyPI name claimed,
+      works with a private repo, reversible — the right pre-1.0 choice. (Future: add PyPI at 1.0 if
+      desired — that only adds a second publish step, no code change.)
+- [ ] **`install.sh` + `lunamoth update`:** flip the USER path to install the wheel from the latest
+      GitHub Release — resolve the latest release's `.whl` asset (via the GitHub API / a pinned URL)
+      and `uv tool install <wheel-url>` / `uv tool upgrade`. KEEP the `git clone --depth 1` path as a
+      documented DEV/edge channel (developers have node + run `npm run build`). Update `front/cli.py:12`
+      help + README (EN+zh). (If the repo is private, the wheel-download needs a token — note it.)
+- [ ] **Docker (Track E) simplifies:** `pip install lunamoth` (or COPY the built wheel) instead of
+      COPY-source — the wheel carries `webui/`, so the image needs **no node and no committed dist**.
+- [ ] **Dev experience unchanged:** `uv sync` + `uv run lunamoth` from the repo still reflects the
+      working tree (CLAUDE.md "editable; reflects the working tree"); only the user install path moved.
 
 ---
 
@@ -345,8 +370,8 @@ Right-panel chat tabs: status / skills / **wishes** (愿望, not "goals") / memo
 uv run lunamoth desktop --no-open            # terminal 1: backend + prints token/ports
 cd apps/web && npm run dev                    # terminal 2: SPA dev server, proxies /rpc + ws → backend
 
-# production build of the SPA (developers, after frontend edits) → commits webui/
-cd apps/web && npm ci && npm run build        # outputs to src/lunamoth/front/webui/
+# production build of the SPA (developers, after frontend edits; CI runs this for the wheel)
+cd apps/web && npm ci && npm run build        # outputs gitignored src/lunamoth/front/webui/
 
 # local app (unchanged): Electron loads the supervisor's printed URL
 cd apps/desktop && npm run dev
@@ -376,8 +401,9 @@ docker compose up -d
       refuses without auth.
 - [ ] **Deploy:** `docker compose up` smoke (container serves the SPA + one RPC round-trip); the
       SSH-tunnel runbook (manual or mocked port-forward).
-- [ ] Full Python suite stays green; ruff clean; `npm run build` succeeds and `webui/` is committed-fresh
-      (a CI/doctor check that the committed dist matches a clean rebuild, or at least is non-empty).
+- [ ] Full Python suite stays green; ruff clean; `npm run build` succeeds and emits a non-empty `webui/`;
+      the release CI builds the frontend before `python -m build` so the wheel actually contains `webui/`
+      (assert the built wheel includes `front/webui/index.html`).
 
 ---
 
@@ -400,8 +426,11 @@ docker compose up -d
 **Settled (owner, 2026-06-16):**
 - **Framework = React** (see §2.1). Vue (AstrBot's stack) was considered and rejected — we align with
   hermes-desktop to crib its streaming-chat client.
-- **Commit `webui/` to git, content-hashing OFF** (see §2.4). Owner accepts built assets in git;
-  shallow-clone install makes history bloat a non-issue for download speed. Future wheel ⇒ package-data.
+- **Ship a WHEEL; `webui/` gitignored + bundled via package-data** (see §2.4 + Track F). Supersedes the
+  earlier commit-the-dist call. Mirrors hermes-agent exactly (same setuptools backend). User install
+  becomes wheel-based; git-checkout stays as the dev/edge channel.
+- **Wheel publish target = GitHub Releases** (see Track F). CI uploads the `.whl` as a release asset;
+  install.sh installs it from the latest release. PyPI deferred to 1.0 (additive, no code change).
 
 **Still open (owner input when reached):**
 - **One WS+HTTP port or keep two?** Collapsing WS under the HTTP port (path-routed upgrade) makes the
