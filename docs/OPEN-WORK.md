@@ -452,6 +452,34 @@ cards (read-only cards already show per-entry cards; editable still uses the tex
 ## R6 (P3) — Blank card → auto-generate a visual set via the image key (opt-in)
 Well-designed interaction; now UNBLOCKED (R4 generate_image landed). Reuse the Seedream
 pipeline + the visuals/ brief approach to fill a blank card's 立绘/主视觉/头像/背景 set.
+NOTE: depends on R9 (the in-app visuals pipeline) — R6 is essentially the "auto-fill a
+blank card" entry point into R9.
+
+## R9 (owner request 2026-06-16) — bring the visuals pipeline INTO the app
+Today the full visual-set pipeline is a manual dev script (visuals/: cardbrief LLM brief →
+Seedream gen → BiRefNet matte → grid/assemble → avatar/sprite/keyvisual/stickers/background).
+Integrate it as an in-app feature so a user can generate a card's visual set from the UI.
+UX DETAILS: ASK THE DEVELOPER (owner) before building — where it lives (card editor 视觉 tab?
+wake flow? a dedicated studio?), how much is one-click vs step-by-step, regenerate/cost
+guards, progress/streaming. Wiring this also fixes the two current gaps: (a) the brief model
+is hard-coded to gemini (visuals/cardbrief.py:18 OPENROUTER_BRIEF_MODEL default
+"google/gemini-3.1-pro-preview") and reads a separate ~/.lunamoth/openrouter_key — the in-app
+version must use the GLOBAL text key + default model (no hard-coded gemini); (b) the image key
++ generation model are read from bare files/env — must come from the global settings (R10).
+Spends real money (multiple images per card) — cost/opt-in UX is part of the design ask.
+
+## R10 (owner request 2026-06-16) — global key management in Settings (multi-key, text + image)
+A proper Settings UI for keys, all GLOBAL (SEC-2 already made the runtime resolve the text
+key globally + the keyring store exists). Needs: manage MULTIPLE keys (add/label/delete/pick
+active), set the TEXT key + default model, AND set the IMAGE key + generation model (today the
+image key is a bare ~/.lunamoth/ark_api_key file with no UI; _image_gen must read it from the
+global settings instead). One place to see/rotate every credential. Builds on the existing
+hub keys.* store + defaults.
+
+## R11 (owner request 2026-06-16) — matte (抠像) model: download + load from Settings
+The transparent-sprite cutout uses BiRefNet locally (visuals/localmatte.py, ~928MB model,
+~5.4GB RAM). Let the user, from Settings, CHOOSE a matte model, DOWNLOAD it (with progress),
+and LOAD it — instead of it being a manual dev dependency. Part of bringing visuals in-app (R9).
 
 
 DONE this loop: R1 tool-access single-source (4435d77), R2 on-disk image vision
