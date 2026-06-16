@@ -865,7 +865,21 @@ body.dark .btn.pick-default{box-shadow:0 1px 2px rgba(0,0,0,.3), 0 0 0 1px rgba(
   position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
   font-size:44px; font-weight:200; color:rgba(255,255,255,.85);
 }
-.avatar-svg{position:absolute; inset:18%; width:64%; height:64%; object-fit:contain; filter:drop-shadow(0 10px 22px rgba(0,0,0,.16))}
+/* 立绘 sprite under the chibi avatar — fades in on hover, theme scrim for legibility */
+.spine .face .face-sprite{
+  position:absolute; inset:0; z-index:0; background-size:cover; background-position:center top;
+  background-repeat:no-repeat; opacity:0; transition:opacity .3s ease;
+}
+.spine .face .face-sprite-scrim{
+  position:absolute; inset:0; z-index:1; pointer-events:none; opacity:0; transition:opacity .3s ease;
+  background:linear-gradient(to top, color-mix(in srgb, var(--card-theme,#5B9FD4) 82%, #000 8%) 0%,
+    color-mix(in srgb, var(--card-theme,#5B9FD4) 30%, transparent) 42%, transparent 70%);
+}
+.spine:hover .face .face-sprite,.spine:hover .face .face-sprite-scrim{opacity:1}
+/* The Q-version avatar stays on TOP (above the sprite), and lifts slightly on hover */
+.avatar-svg{position:absolute; inset:18%; width:64%; height:64%; object-fit:contain; z-index:2;
+  filter:drop-shadow(0 10px 22px rgba(0,0,0,.16)); transition:transform .3s ease}
+.spine:hover .face .avatar-svg{transform:translateY(-6%) scale(.96)}
 .lock-badge{
   position:absolute; top:9px; left:9px; font-size:10.5px; color:#fff;
   background:rgba(15,25,35,.45); backdrop-filter:blur(6px); border-radius:99px; padding:2px 9px;

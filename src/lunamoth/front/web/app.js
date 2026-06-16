@@ -260,6 +260,15 @@ function cardVisual(c, cls) {
   const attrs = { class: cls || "face" };
   if (style) attrs.style = style;
   const children = [];
+  // The 立绘 (full-body sprite) sits UNDER the chibi avatar and fades in on hover
+  // (a theme-color scrim keeps it legible). Default state = the Q-version avatar
+  // on top; hover reveals the sprite. Degrades to nothing when no sprite.
+  const spriteUrl = c && (c.sprite_url || c.keyvisual_url);
+  if (spriteUrl) {
+    const sp = el("div", { class: "face-sprite" });
+    sp.style.backgroundImage = `url("${String(spriteUrl).replace(/"/g, "%22")}")`;
+    children.push(sp, el("div", { class: "face-sprite-scrim" }));
+  }
   if (src) children.push(el("img", { class: "avatar-svg", src, alt: "" }));
   else children.push(el("div", { class: "glyph" }, glyphOf(c && c.name)));
   return el("div", attrs, ...children);
