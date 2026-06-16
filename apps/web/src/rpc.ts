@@ -72,6 +72,44 @@ export async function mintAuthCookie(): Promise<void> {
   }
 }
 
+/* OPTIONAL password login (plan §4b) — the ALTERNATIVE auth path for a public
+   bind reached without a #token= (the proxied bookmark). authInfo() asks the
+   server whether login is offered (true only for a public bind with a configured
+   password); login() POSTs the password and, on 204, the server has minted the
+   SAME SameSite auth cookie the ?token= handshake sets — so the rest of the app
+   proceeds unchanged. Both are no-ops for the local/loopback app (BOOT.token is
+   present there, and authInfo() returns false). */
+export async function authInfo(): Promise<{ login: boolean }> {
+  try {
+    const r = await fetch("/authinfo", { credentials: "same-origin", cache: "no-store" });
+    if (!r.ok) return { login: false };
+    const data = (await r.json()) as { login?: boolean };
+    return { login: Boolean(data && data.login) };
+  } catch {
+    return { login: false };
+  }
+}
+
+export type LoginResult = "ok" | "bad" | "throttled" | "error";
+
+export async function login(password: string): Promise<LoginResult> {
+  try {
+    const r = await fetch("/login", {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    if (r.status === 204) return "ok";
+    if (r.status === 429) return "throttled";
+    if (r.status === 401) return "bad";
+    return "error";
+  } catch {
+    return "error";
+  }
+}
+
 /** Append the token to a same-origin /asset or /upload URL — a belt-and-suspenders
  *  fallback for asset requests that race the boot cookie mint. */
 export function assetUrl(url: string): string {

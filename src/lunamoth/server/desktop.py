@@ -16,9 +16,11 @@ def free_port(host: str = "127.0.0.1") -> int:
 
 
 def serve_desktop(host: str, http_port: int, ws_port: int, token: str,
-                  open_browser: bool = True, allow_hosts: list[str] | None = None) -> int:
+                  open_browser: bool = True, allow_hosts: list[str] | None = None,
+                  pw_record: dict[str, Any] | None = None) -> int:
     """Run the supervisor in the foreground; Ctrl-C/SIGTERM tears down children."""
-    sup = SUP.Supervisor(host, http_port, ws_port, token, allow_hosts=allow_hosts)
+    sup = SUP.Supervisor(host, http_port, ws_port, token, allow_hosts=allow_hosts,
+                         pw_record=pw_record)
 
     def _term(signum: int, frame: Any) -> None:  # noqa: ARG001 - signal handler signature
         sup.request_shutdown()

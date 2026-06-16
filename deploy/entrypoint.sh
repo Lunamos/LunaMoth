@@ -30,6 +30,12 @@ else
   echo " behind a TLS reverse proxy: set LUNAMOTH_ALLOW_HOST=<your-domain> so the"
   echo "   Host/Origin allowlist accepts it, then open https://<your-domain>/#token=…"
 fi
+if [ -n "${LUNAMOTH_PASSWORD:-}" ]; then
+  echo " password login: enabled (LUNAMOTH_PASSWORD) — bookmark the bare URL and sign in"
+else
+  echo " password login: a strong one is generated on first start and printed ONCE below"
+  echo "   (set LUNAMOTH_PASSWORD to choose your own; only its hash is stored in auth.json)"
+fi
 echo " (never expose ${PORT}/${WS_PORT} directly past loopback — see README)"
 echo "============================================================"
 

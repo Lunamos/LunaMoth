@@ -453,6 +453,14 @@ export const I18N = {
   "imported": ["已导入 {name}", "Imported {name}"],
   "copied": ["副本已放进卡册", "Duplicate added to the deck"],
   "conn-lost": ["连接断开，正在重连…", "Connection lost — reconnecting…"],
+  "login-title": ["登录 LunaMoth", "Sign in to LunaMoth"],
+  "login-blurb": ["这是一个公开访问的实例，请输入密码继续。", "This instance is publicly reachable. Enter the password to continue."],
+  "login-password": ["密码", "Password"],
+  "login-submit": ["登录", "Sign in"],
+  "login-working": ["正在登录…", "Signing in…"],
+  "login-bad": ["密码错误，请重试。", "Wrong password — try again."],
+  "login-throttled": ["尝试过于频繁，请稍后再试。", "Too many attempts — please wait a moment."],
+  "login-error": ["登录失败，请稍后再试。", "Sign-in failed — please try again."],
 } as const satisfies Record<string, LangPair>;
 
 export type I18nKey = keyof typeof I18N;

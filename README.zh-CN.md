@@ -110,6 +110,8 @@ your-host.example.com {
 
 **放行公网域名** —— Host/Origin 白名单只含回环 + 绑定的 host,反代转发的 `your-host.example.com` 会被拒(403 / WS 4403),除非显式放行:设 `LUNAMOTH_ALLOW_HOST=your-host.example.com`(compose)或传 `--allow-host your-host.example.com`。然后书签用 `https://your-host/#token=<TOKEN>`(**不要带 `&ws=`** —— 单源,客户端讲 `wss://your-host/…`,由 Caddy 按路径路由)。token 从 `docker compose logs lunamoth` 读。或用 [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) 实现零开放入站端口 —— 把同样两个路径转给 `:6181`、其余转给 `:6180`(同样要设 `LUNAMOTH_ALLOW_HOST`)。（SSH 隧道用户无需这些:`lunamoth connect ssh://host` 自动转发两个端口。）
 
+**密码登录（可选，适合书签 URL）。** 在手机上带着长长的 `#token=…` URL 很别扭。非回环绑定时，LunaMoth 还接受**密码**作为替代:书签直接用 `https://your-host/`,输密码登录即可。可用 `LUNAMOTH_PASSWORD=<你的密码>`(compose 环境变量)自定义;若不设,LunaMoth 会在首次启动时生成一个 24 位强密码并**只打印一次**到日志(`docker compose logs lunamoth`)——磁盘上只存它的 PBKDF2-HMAC-SHA256 哈希(`~/.lunamoth/auth.json`),绝不存明文。token 路径完全照旧;密码纯属附加,本地应用(回环 / Electron / SSH 隧道)永远不会出现登录界面。
+
 **完全不暴露 —— SSH 隧道。** 最省事是 `lunamoth connect ssh://user@server`（自动读取远端端口、建隧道、开浏览器）。手动等价：
 
 ```bash

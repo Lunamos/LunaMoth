@@ -1267,6 +1267,27 @@ details.cv-raw pre{
   overflow:auto;
 }
 .overlay.open{display:flex}
+#overlay-login .login-card{
+  width:400px; max-width:92%; display:flex; flex-direction:column; align-items:stretch;
+  gap:14px; background:var(--bg); border-radius:16px; padding:30px 30px 28px;
+  box-shadow:0 0 0 1px var(--hairline-2),0 24px 70px rgba(10,20,30,.28);
+}
+#overlay-login .login-title{font-size:18px; font-weight:650; color:var(--text); text-align:center}
+#overlay-login .login-blurb{font-size:12.5px; line-height:1.6; color:var(--text-2); text-align:center; margin-bottom:4px}
+#overlay-login .login-input{
+  width:100%; padding:11px 13px; font:inherit; font-size:14px; color:var(--text);
+  background:var(--panel); border:1px solid var(--hairline-2); border-radius:10px; outline:none;
+}
+#overlay-login .login-input:focus{border-color:var(--accent)}
+#overlay-login .login-error{
+  font-size:12px; line-height:1.5; color:var(--red);
+  background:rgba(229,72,77,.08); border-radius:9px; padding:9px 11px;
+}
+#overlay-login .login-submit{justify-content:center; margin-top:2px}
+#overlay-login .login-lang{
+  position:fixed; top:18px; right:20px; background:none; border:1px solid var(--hairline);
+  border-radius:8px; padding:5px 11px; font:inherit; font-size:12px; color:var(--text-2); cursor:pointer;
+}
 .overlay.flow-overlay{
   background:rgba(18,28,38,.30); backdrop-filter:blur(9px); justify-content:center;
 }

@@ -110,6 +110,8 @@ your-host.example.com {
 
 **Allow-list the public domain** — the Host/Origin allowlist is loopback + the bound host only, so a reverse proxy forwarding `your-host.example.com` is rejected (403 / WS 4403) unless you name it: set `LUNAMOTH_ALLOW_HOST=your-host.example.com` (compose) or pass `--allow-host your-host.example.com`. Then bookmark `https://your-host/#token=<TOKEN>` (NO `&ws=` — single-origin, so the client speaks `wss://your-host/…` and Caddy path-routes it). Read the token from `docker compose logs lunamoth`. Or [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) for no open inbound port — route the same two paths to `:6181` and the rest to `:6180` (still set `LUNAMOTH_ALLOW_HOST`). (SSH-tunnel users need none of this: `lunamoth connect ssh://host` forwards both ports automatically.)
 
+**Password login (optional, for a bookmarked URL).** Carrying the long `#token=…` URL is awkward on a phone. On a non-loopback bind LunaMoth also accepts a **password** as an alternative: bookmark the bare `https://your-host/` and log in. Set your own with `LUNAMOTH_PASSWORD=<your password>` (compose env); if you leave it unset, LunaMoth generates a strong 24-char password on first start and **prints it once** to the log (`docker compose logs lunamoth`) — only its PBKDF2-HMAC-SHA256 hash is stored (`~/.lunamoth/auth.json`), never the plaintext. The token still works exactly as before; the password is purely additive, and the local app (loopback / Electron / SSH tunnel) never shows a login screen.
+
 **No exposure at all — SSH tunnel.** Easiest is `lunamoth connect ssh://user@server` (it reads the remote ports, builds the tunnel, opens the browser). Manual equivalent:
 
 ```bash

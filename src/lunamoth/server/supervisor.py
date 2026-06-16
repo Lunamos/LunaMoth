@@ -32,6 +32,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from ..obs.audit import AuditLog
 from ..session import isolation as I
 from ..session import sessions as S
+from . import authpw as AUTHPW
 from . import hub as H
 from . import netsec as N
 from .pty import PtyBridge
@@ -49,7 +50,7 @@ UPLOAD_MAX = 8 * 1024 * 1024
 # bundle. They carry no secrets (the token arrives in the URL hash, never baked
 # into the bundle) and must load so the page can run the `?token=` handshake.
 # Everything else (/asset, /rpc, /upload, the data the app fetches) is gated.
-_PREAUTH_EXACT = frozenset({"/", "/index.html", "/favicon.ico"})
+_PREAUTH_EXACT = frozenset({"/", "/index.html", "/favicon.ico", "/authinfo", "/login"})
 _PREAUTH_PREFIXES = ("/assets/",)
 
 
@@ -1106,6 +1107,14 @@ class WebHandler(http.server.SimpleHTTPRequestHandler):
     allow_hosts: frozenset[str] = frozenset({"localhost", "127.0.0.1", "::1"})
     wildcard_bind: bool = False
     secure_cookie: bool = False  # add Secure to the auth cookie (https / proxy)
+    # OPTIONAL password login for a public bind (alternative to the token URL).
+    # `pw_record` is the stored PBKDF2 record (hash+salt, never plaintext) — set
+    # ONLY for a non-loopback bind with a configured/generated password; None
+    # keeps login inert (the local app never sees a login screen). `pw_limiter`
+    # throttles failed POST /login per client IP.
+    pw_record: dict | None = None
+    pw_limiter: Any | None = None
+    login_fail_delay: float = 1.0  # fixed delay on a wrong password (anti-brute-force)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(WEB_DIR), **kwargs)
@@ -1159,6 +1168,62 @@ class WebHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Set-Cookie", pending)
             self._pending_set_cookie = ""
         super().end_headers()
+
+    def _send_json(self, status: int, payload: dict) -> None:
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def _client_ip(self) -> str:
+        """Best-effort per-client key for the login rate limit. Honors a single
+        proxy hop's ``X-Forwarded-For`` (the public deploy sits behind a TLS
+        reverse proxy), else the socket peer."""
+        fwd = self.headers.get("X-Forwarded-For", "")
+        if fwd:
+            return fwd.split(",")[0].strip()
+        try:
+            return self.client_address[0]
+        except (AttributeError, IndexError):
+            return "?"
+
+    def _handle_login(self) -> None:
+        """POST /login {password} → mint the SAME auth cookie on success.
+
+        Pre-auth (the login form must reach it without a token). Defends with a
+        per-IP token-bucket throttle + a fixed delay on every failure. Mints the
+        token cookie via netsec.auth_cookie_header — the SAME cookie the
+        ?token= handshake sets — so the rest of the app is unchanged after login.
+        """
+        if self.pw_record is None:
+            # Login not enabled (loopback / no password). Behave as if absent.
+            self.send_error(404)
+            return
+        ip = self._client_ip()
+        limiter = self.pw_limiter
+        if limiter is not None and not limiter.allow(ip):
+            self._send_json(429, {"error": "too many attempts"})
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(max(0, length)) if length > 0 else b""
+        try:
+            req = json.loads(body.decode("utf-8", errors="replace") or "{}")
+        except json.JSONDecodeError:
+            req = {}
+        password = str(req.get("password") or "")
+        if AUTHPW.verify_password(self.pw_record, password):
+            cookie = N.auth_cookie_header(self.token, secure=self._is_secure_request())
+            if not cookie:  # an unsafe --token can't ride a cookie; refuse cleanly
+                self._send_json(500, {"error": "token not cookie-safe"})
+                return
+            self._pending_set_cookie = cookie
+            self.send_response(204)
+            self.end_headers()
+            return
+        time.sleep(self.login_fail_delay)  # fixed delay slows brute-force
+        self._send_json(401, {"error": "invalid password"})
 
     def _card_roots(self) -> list[Path]:
         return [H.bundled_cards_dir().resolve(), H.user_cards_dir().resolve()]
@@ -1265,6 +1330,13 @@ class WebHandler(http.server.SimpleHTTPRequestHandler):
         if not _is_preauth_path(url.path) and not self._auth_ok(url):
             self.send_error(401, "authentication required")
             return
+        if url.path == "/authinfo":
+            # Pre-auth probe: does this bind offer the password-login path? No
+            # secrets — just whether the client should show a login form. True
+            # only when a password is configured (always a public bind). The
+            # local app's loopback bind has pw_record=None ⇒ {"login": false}.
+            self._send_json(200, {"login": self.pw_record is not None})
+            return
         if url.path == "/auth":
             # Boot handshake: the SPA loads its token from the URL hash (never sent
             # to the server), so the shell GET mints no cookie. The client calls
@@ -1286,6 +1358,11 @@ class WebHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(403, "host not allowed")
             return
         url = urlsplit(self.path)
+        if url.path == "/login":
+            # Pre-auth: the login form is exactly how an un-tokened client gets
+            # authed. Inert (404) unless a password is configured (public bind).
+            self._handle_login()
+            return
         if not self._auth_ok(url):
             self.send_error(403)
             return
@@ -1333,6 +1410,8 @@ def start_http(
     *,
     allow_hosts: frozenset[str] | None = None,
     secure_cookie: bool = False,
+    pw_record: dict | None = None,
+    pw_limiter: Any | None = None,
 ) -> http.server.ThreadingHTTPServer:
     attrs = {
         "token": token,
@@ -1340,6 +1419,11 @@ def start_http(
         "allow_hosts": allow_hosts if allow_hosts is not None else N.allowed_hosts(host),
         "wildcard_bind": N.is_wildcard_host(host),
         "secure_cookie": bool(secure_cookie),
+        "pw_record": pw_record,
+        # One limiter per server (shared across the handler threads); only made
+        # when login is enabled (a public bind with a password).
+        "pw_limiter": pw_limiter if pw_limiter is not None
+        else (AUTHPW.LoginRateLimiter() if pw_record is not None else None),
     }
     handler = type("Handler", (WebHandler,), attrs)
     server = http.server.ThreadingHTTPServer((host, port), handler)
@@ -1382,11 +1466,14 @@ class Supervisor:
         *,
         allow_hosts: list[str] | None = None,
         secure_cookie: bool = False,
+        pw_record: dict | None = None,
     ) -> None:
         self.host = host
         self.http_port = int(http_port)
         self.ws_port = int(ws_port)  # 0 ⇒ OS-assigned; resolved in serve()
         self.token = token
+        # OPTIONAL password-login record (public bind only); None ⇒ login inert.
+        self.pw_record = pw_record
         # Host/Origin allow set (anti DNS-rebinding / CSWSH). Loopback + bound
         # host always; `allow_hosts` names extra reachable hosts for a proxy.
         self.allow_hosts = N.allowed_hosts(host, allow_hosts)
@@ -1555,6 +1642,7 @@ class Supervisor:
             self._httpd = start_http(
                 self.host, self.http_port, self.token, self,
                 allow_hosts=self.allow_hosts, secure_cookie=self.secure_cookie,
+                pw_record=self.pw_record,
             )
             self.http_port = self._httpd.server_address[1]
         except OSError:
@@ -1611,6 +1699,12 @@ class Supervisor:
             print(line, file=sys.stderr, flush=True)
         for ip in _reachable_ips(self.host):
             print(f"  reachable: http://{ip}:{self.http_port}/", file=sys.stderr, flush=True)
+        if self.pw_record is not None:
+            print(
+                "  password login is ALSO enabled: bookmark the host and log in "
+                "with the password (no token URL needed).",
+                file=sys.stderr, flush=True,
+            )
 
     def _open_later(self, url: str) -> None:
         def work() -> None:

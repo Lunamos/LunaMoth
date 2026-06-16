@@ -33,6 +33,11 @@ services:
       # loopback + the bound host only, so the public domain must be allow-listed
       # or the proxied GET/WS get 403/4403. Set it to your domain:
       # - LUNAMOTH_ALLOW_HOST=your-host.example.com
+      # OPTIONAL password login — bookmark the bare https://host/ and sign in with
+      # a password instead of the long #token= URL (the token still works). Set
+      # your own, or leave it unset and LunaMoth generates one and prints it ONCE
+      # in the logs; only its PBKDF2 hash is stored in /root/.lunamoth/auth.json.
+      # - LUNAMOTH_PASSWORD=your-strong-password
     volumes:
       # Sessions, cards and config — the one thing that must survive a re-deploy.
       - ./data:/root/.lunamoth

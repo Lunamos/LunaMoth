@@ -508,6 +508,40 @@ def cmd_desktop(args: argparse.Namespace) -> int:
         )
         return 2
 
+    # OPTIONAL password login (plan §4b) — an ALTERNATIVE to the token URL for a
+    # public bind: the operator bookmarks https://host/ and types a password. It
+    # is ADDITIVE (the token gate is unchanged) and INERT for a loopback bind —
+    # the local Electron/SSH app never sees a login screen. For a non-loopback
+    # bind we resolve a password (LUNAMOTH_PASSWORD env, else an existing
+    # auth.json, else generate one and print it ONCE) and store only its hash.
+    pw_record = None
+    if not N.is_loopback_host(host):
+        from ..server import authpw as AUTHPW
+
+        try:
+            _enabled, generated = AUTHPW.ensure_password(
+                env_password=os.environ.get("LUNAMOTH_PASSWORD")
+            )
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        pw_record = AUTHPW.load_record()
+        if generated:
+            print(
+                "password login enabled — bookmark the host and log in with:\n"
+                f"  password: {generated}\n"
+                "  (shown once; stored hashed in ~/.lunamoth/auth.json — "
+                "set LUNAMOTH_PASSWORD to choose your own)",
+                file=sys.stderr,
+                flush=True,
+            )
+        elif pw_record is not None:
+            print(
+                "password login enabled (using LUNAMOTH_PASSWORD / stored auth.json).",
+                file=sys.stderr,
+                flush=True,
+            )
+
     # A non-loopback bind targets a reverse proxy, which needs STABLE, pinnable
     # ports — a random bind-0 pair is unproxiable. So for a non-loopback bind
     # default the HTTP port to 6180 even when --port is unset, so a bare
@@ -552,6 +586,7 @@ def cmd_desktop(args: argparse.Namespace) -> int:
         print(f"lunamothd pid {info['pid']} · http:{info['http_port']} ws:{info['ws_port']} · {info.get('path', '')}")
         return 0
     return serve_desktop(host, http_port, ws_port, token, allow_hosts=allow,
+                         pw_record=pw_record,
                          open_browser=(not args.no_open and not os.getenv("LUNAMOTH_DAEMON_CHILD")))
 
 

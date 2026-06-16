@@ -3,9 +3,10 @@ import { I18N } from "./strings";
 import { translate, normalizeLang, detectInitialLang, type Lang } from "./index";
 
 describe("I18N strings map", () => {
-  // Pin the count to the source dict (front/web/i18n.js had exactly 445 keys).
-  it("preserves the full key set from the source dict (445 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(445);
+  // Pin the count: the source dict (front/web/i18n.js) had exactly 445 keys; the
+  // optional password-login overlay (plan §4b) added 8 (login-*) → 453.
+  it("preserves the full key set from the source dict (453 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(453);
   });
 
   it("every value is a [zh, en] string tuple", () => {
