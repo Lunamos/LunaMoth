@@ -3,10 +3,11 @@ import { I18N } from "./strings";
 import { translate, normalizeLang, detectInitialLang, type Lang } from "./index";
 
 describe("I18N strings map", () => {
-  // Pin the count: the source dict (front/web/i18n.js) had exactly 445 keys; the
-  // optional password-login overlay (plan §4b) added 8 (login-*) → 453.
-  it("preserves the full key set from the source dict (453 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(453);
+  // Pin the count: the source dict (front/web/i18n.js) had 445 keys; the password-
+  // login overlay (§4b) added 8 (login-*) → 453; the merged R9/R10/R11 features
+  // (visuals/keys+image/matte, from origin/main) added 44 → 497.
+  it("preserves the full key set from the source dict (497 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(497);
   });
 
   it("every value is a [zh, en] string tuple", () => {
