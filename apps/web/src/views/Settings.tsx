@@ -14,6 +14,7 @@ import { useHub } from "../state/hub";
 import { applyTheme, currentThemePref, type ThemePref } from "../theme";
 import { ModelPane } from "../components/settings/ModelPane";
 import { KeysPane } from "../components/settings/KeysPane";
+import { ImageKeyPane } from "../components/settings/ImageKeyPane";
 import { MattePane } from "../components/settings/MattePane";
 import { deckToast } from "../components/ui/deckToast";
 import { rpcErrText } from "../lib/status";
@@ -98,9 +99,14 @@ export function Settings() {
             </>
           )}
 
-          {/* 生图 (Images): R11 matte model manager. The R10 image key/model +
-              saved-keys store are wired in a follow-up. */}
-          {pane === "image" && <MattePane />}
+          {/* 生图 (Images): the global image-gen key/model (R10) + the local
+              matte-model manager (R11). */}
+          {pane === "image" && (
+            <>
+              <ImageKeyPane />
+              <MattePane />
+            </>
+          )}
 
           {pane === "general" && (
             <div className="settings-pane on">
