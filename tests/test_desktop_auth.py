@@ -58,6 +58,33 @@ def test_request_authed_dual_read():
     assert not N.request_authed("token=abc", "", "")  # no expected ⇒ never authed
 
 
+def test_ws_handshake_authenticates_via_cookie():
+    """Regression: a password-login user reaches the WS with NO ?token= but the
+    lm_auth cookie on the handshake — the WS gate must accept it (else the live,
+    WS-driven UI never connects). _ws_cookie extracts the header; the gate then
+    dual-reads via request_authed exactly as the HTTP gate does."""
+    from lunamoth.server.supervisor import Supervisor
+
+    class _Req:
+        def __init__(self, headers):
+            self.headers = headers
+
+    class _WS:
+        def __init__(self, headers):
+            self.request = _Req(headers)
+
+    # _ws_cookie doesn't touch self → call unbound with None.
+    cookie = Supervisor._ws_cookie(None, _WS({"Cookie": "a=1; lm_auth=tok9; b=2"}))
+    assert cookie == "a=1; lm_auth=tok9; b=2"
+    # the WS gate's actual decision (query empty, cookie present):
+    assert N.request_authed("", cookie, "tok9")          # cookie authenticates
+    assert not N.request_authed("", cookie, "other")     # wrong expected ⇒ no
+    # missing/empty headers degrade to "" (then request_authed fails closed):
+    assert Supervisor._ws_cookie(None, _WS({})) == ""
+    assert Supervisor._ws_cookie(None, object()) == ""
+    assert not N.request_authed("", "", "tok9")
+
+
 # ---- live HTTP server: auth gate + cookie path ------------------------------
 
 @pytest.fixture()
