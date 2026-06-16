@@ -13,15 +13,17 @@ import { useT, useLang } from "../i18n";
 import { useHub } from "../state/hub";
 import { applyTheme, currentThemePref, type ThemePref } from "../theme";
 import { ModelPane } from "../components/settings/ModelPane";
+import { MattePane } from "../components/settings/MattePane";
 import { deckToast } from "../components/ui/deckToast";
 import { rpcErrText } from "../lib/status";
 
-type Pane = "model" | "general" | "gateway" | "advanced" | "about";
+type Pane = "model" | "general" | "image" | "gateway" | "advanced" | "about";
 type Display = "product" | "technical";
 
 const PANES: ReadonlyArray<readonly [Pane, string]> = [
   ["model", "set-model"],
   ["general", "set-general"],
+  ["image", "set-image"],
   ["gateway", "set-gateway"],
   ["advanced", "set-advanced"],
   ["about", "set-about"],
@@ -89,6 +91,10 @@ export function Settings() {
         </nav>
         <div className="settings-body">
           {pane === "model" && <ModelPane />}
+
+          {/* 生图 (Images): R11 matte model manager. The R10 image key/model +
+              saved-keys store are wired in a follow-up. */}
+          {pane === "image" && <MattePane />}
 
           {pane === "general" && (
             <div className="settings-pane on">
