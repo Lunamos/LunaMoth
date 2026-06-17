@@ -46,11 +46,16 @@ def deliver_attachment(adapter: Adapter, att: Any, send_text: Callable[[str], No
     and on :class:`DeliveryDeferred` fall back to an honest text note via
     *send_text*. Never silently drops; never claims a delivery that didn't happen."""
     source = asset_local_path(att.url) or att.url
+    name = att.name or (source.rsplit("/", 1)[-1] if source else "file")
+    head = (att.caption + " ") if att.caption else ""
     try:
         adapter.send_media(source, att.mime, att.caption or "")
         return
     except DeliveryDeferred:
-        name = att.name or (source.rsplit("/", 1)[-1] if source else "file")
+        # the platform can't upload files (the default seam) — honest note
         send_text(unsupported_media_note(name, att.caption or "", zh))
     except Exception:  # noqa: BLE001 — a media failure must not crash the relay
+        # a real upload failed (timeout/5xx): still tell the user, never drop silently
         _log.exception("send_media via %s failed", adapter.name)
+        send_text(head + (f"（文件「{name}」这次没发出去）" if zh
+                          else f"(couldn't send the file {name} just now)"))
