@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useT } from "../../i18n";
 import { useHubApi } from "../../state/hub";
 import { fmtSize } from "../../lib/format";
+import { deckToast } from "../ui/deckToast";
 
 interface Work {
   name: string;
@@ -66,7 +67,7 @@ export function ChatWorks({ name, sandboxRoot }: { name: string; sandboxRoot?: s
       const r = await hub.call<PreviewRead>("works.read", { name, rel: w.rel }, 30000);
       setPreview({ work: w, body: toBody(r, t) });
     } catch {
-      /* toast skipped in MVP */
+      deckToast(t("open-failed"), true);
     }
   };
 
@@ -99,7 +100,7 @@ export function ChatWorks({ name, sandboxRoot }: { name: string; sandboxRoot?: s
         <button
           className="drawer-foot-link"
           onClick={() => {
-            if (sandboxRoot) hub.call("open.path", { path: sandboxRoot }).catch(() => {});
+            if (sandboxRoot) hub.call("open.path", { path: sandboxRoot }).catch(() => deckToast(t("open-failed"), true));
           }}
         >
           {t("open-sandbox")}
@@ -151,7 +152,7 @@ function WorksList({
           title="Finder"
           onClick={(e) => {
             e.stopPropagation();
-            hub.call("works.open", { path: w.path, reveal: true }).catch(() => {});
+            hub.call("works.open", { path: w.path, reveal: true }).catch(() => deckToast(t("open-failed"), true));
           }}
         >
           ⌖
@@ -217,7 +218,7 @@ function WorkPreview({
             {t("cancel")}
           </button>
           <div className="grow" />
-          <button className="btn soft" onClick={() => hub.call("works.open", { path: work.path }).catch(() => {})}>
+          <button className="btn soft" onClick={() => hub.call("works.open", { path: work.path }).catch(() => deckToast(t("open-failed"), true))}>
             {t("wp-open-system")}
           </button>
         </div>

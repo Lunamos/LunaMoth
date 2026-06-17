@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import { useT } from "../../i18n";
 import { useHubApi } from "../../state/hub";
+import { deckToast } from "../ui/deckToast";
 import { GatewayPane } from "./GatewayPane";
 import type { CharaStream, Snapshot } from "../../hooks/useCharaStream";
 
@@ -107,7 +108,16 @@ function Prow({
 
 function StatusPane({ stream, onTab }: { stream: CharaStream; onTab: (t: PanelTab) => void }) {
   const t = useT();
+  // Optimistic net toggle: the switch must flip on click, not after the round-trip
+  // (the binding "no dead clicks" rule). netPending overrides the snapshot until the
+  // snapshot agrees; a failure reverts and surfaces (runCommand is NOT quiet here, so
+  // the error lands as a visible system line).
   const snap = stream.snapshot as Snapshot | null;
+  const snapNet = !!snap?.net_on;
+  const [netPending, setNetPending] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (netPending !== null && snapNet === netPending) setNetPending(null);
+  }, [snapNet, netPending]);
   if (!snap) return <div className="placeholder-pane">{t("st-connecting")}</div>;
   const num = (v: unknown) => Number(v) || 0;
   const ctxMax = num(snap.context_max);
@@ -116,7 +126,14 @@ function StatusPane({ stream, onTab }: { stream: CharaStream; onTab: (t: PanelTa
   const memMax = num(snap.memory_max);
   const memCh = num(snap.memory_chars);
   const pctMem = memMax ? Math.round((100 * memCh) / memMax) : 0;
-  const netOn = !!snap.net_on;
+  const netOn = netPending ?? snapNet;
+  const toggleNet = () => {
+    const next = !netOn;
+    setNetPending(next); // optimistic flip
+    void stream.runCommand(next ? "/net on" : "/net off").then((r) => {
+      if (r === null) setNetPending(null); // failed → revert (error already surfaced)
+    });
+  };
 
   return (
     <div className="pgroup">
@@ -149,7 +166,7 @@ function StatusPane({ stream, onTab }: { stream: CharaStream; onTab: (t: PanelTa
         label={t("p-net")}
         sub={t("p-net-sub")}
         switchOn={netOn}
-        onSwitch={() => void stream.runCommand(netOn ? "/net off" : "/net on", true)}
+        onSwitch={toggleNet}
       />
       <Prow
         label={t("p-gateway")}
@@ -295,6 +312,14 @@ function SettingsPane({ stream }: { stream: CharaStream }) {
   const quiet = Number(snap.quiet) || 300;
   const patience = Number(snap.patience) || 600;
   const emb = snap.embodiment === "actor" ? "actor" : "literal";
+  const [resetting, setResetting] = useState(false);
+  const doReset = async () => {
+    if (resetting || !confirm(t("reset-confirm"))) return;
+    setResetting(true); // visible working state, blocks a double-reset
+    await stream.runCommand("/reset");
+    setResetting(false);
+    deckToast(t("reset-done"));
+  };
   return (
     <div>
       <NumField labelKey="p-quiet" whyKey="p-quiet-sub" value={quiet} onSave={(v) => stream.runCommand(`/quiet ${v}`)} />
@@ -314,14 +339,13 @@ function SettingsPane({ stream }: { stream: CharaStream }) {
       </div>
       <div className="pgroup" style={{ marginTop: 22 }}>
         <div
-          className="prow danger click"
-          onClick={() => {
-            if (confirm(t("reset-confirm"))) void stream.runCommand("/reset");
-          }}
+          className={"prow danger click" + (resetting ? " busy" : "")}
+          onClick={() => void doReset()}
         >
           <div className="pmain">
-            <span className="plbl">{t("p-reset")}</span>
+            <span className="plbl">{resetting ? t("resetting") : t("p-reset")}</span>
           </div>
+          {resetting && <span className="spin" />}
         </div>
       </div>
     </div>
@@ -353,9 +377,23 @@ function NumField({
           className="btn soft"
           disabled={busy}
           onClick={async () => {
+            // Validate client-side (it's a number field) so the only remaining
+            // failure is a thrown call → runCommand returns null. Then: confirm at
+            // the control on success, revert + surface on failure (no silent save).
+            const n = Number(v.trim());
+            if (!Number.isFinite(n) || n < 0) {
+              deckToast(t("save-failed"), true);
+              return;
+            }
             setBusy(true);
-            await onSave(v.trim());
+            const r = await onSave(String(Math.round(n)));
             setBusy(false);
+            if (r === null) {
+              setV(String(Math.round(value)));
+              deckToast(t("save-failed"), true);
+            } else {
+              deckToast(t("saved"));
+            }
           }}
         >
           {t("save")}
