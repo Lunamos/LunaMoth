@@ -26,11 +26,15 @@ export default defineConfig({
         assetFileNames: "assets/[name][extname]",
         // Split the heavy, rarely-changing vendor libs into their own (stable,
         // non-hashed) chunks so the app chunk stays small + cacheable across
-        // rebuilds — closes the >500 kB single-chunk advisory.
-        manualChunks: {
-          react: ["react", "react-dom"],
-          markdown: ["react-markdown", "remark-gfm"],
-          xterm: ["@xterm/xterm", "@xterm/addon-fit"],
+        // rebuilds — closes the >500 kB single-chunk advisory. Vite 8 bundles
+        // with rolldown, so this uses its native codeSplitting.groups API (the
+        // old rollup `manualChunks` object form is rejected — "not a function").
+        codeSplitting: {
+          groups: [
+            { name: "react", test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+            { name: "xterm", test: /[\\/]node_modules[\\/]@xterm[\\/]/ },
+            { name: "markdown", test: /[\\/]node_modules[\\/](react-markdown|remark-gfm|micromark|mdast-|hast-|unist-|vfile)/ },
+          ],
         },
       },
     },
