@@ -1,19 +1,22 @@
 # LunaMoth — open work
 
-This is the ONE surviving doc after the 2026-06-13 docs cleanup. The settled
-design specs (prompt machine, desktop, supervisor) and the historical research
-(hermes UI/code study, WeChat research, the webui task book) were deleted — their
-conclusions live in `CLAUDE.md`, the code, and git history. What's kept here is
-only what's still *open*: the engineering hardening backlog (Part 1) and the
-deferred product ideas worth remembering (Part 2).
+This is the ONE doc under `docs/` (owner rule, re-affirmed 2026-06-17: everything
+condenses here; settled plans/specs/build-logs get deleted once their conclusions
+live in `CLAUDE.md`, the code, and git history). What's kept is only what's still
+*open* or worth remembering:
 
-> **Verify before starting — several items have LANDED since this audit was
-> written (2026-06-13):** #27 (chara child 3-strike auto-restart — `CharaChild`
-> now has `RestartBackoff`), #30 (inbound dedup — `MessageDeduplicator` in both
-> the gateway and the in-child host), #31 (outbound send containment — bounded
-> retry + `DeliveryDeferred`, tested). The gateway also moved in-process
-> (`server/messaging_host.py` shares the chara's one agent), so GatewayChild's
-> backoff concern in #27 is moot. Re-check each item against current code.
+- **Part 1** — engineering hardening backlog (hermes-parity).
+- **Part 2** — deferred product ideas.
+- **Part 3** — active `/loop` backlog (owner requests).
+- **Part 4** — 2026-06-17 test-feedback triage (what's open from it).
+- **Appendix A** — client + deploy architecture reference (the only durable bits
+  of the now-deleted CLIENT-AND-DEPLOY-PLAN; the runbook proper is README + `deploy/`).
+
+> **Verify before starting:** this is a 2026-06-13 read-only audit; some rows have
+> since LANDED and been deleted (e.g. #27 chara auto-restart `RestartBackoff`, #30
+> inbound `MessageDeduplicator`, #31 outbound containment `DeliveryDeferred`). The
+> gateway also moved in-process (`server/messaging_host.py` shares the chara's one
+> agent). Re-check each remaining row against current code before picking it up.
 
 ---
 
@@ -167,7 +170,6 @@ already stricter than hermes' rotating last-3 scheme.
 
 | # | Item | Hermes | LunaMoth today | Effort | Pri |
 |---|------|--------|----------------|--------|-----|
-| 27 | **Chara child auto-restart with stuck-loop cap** — a crashed resident stays dead: `state="crashed"`, `ensure_started()` raises, and an unattended chara dies silently until a human notices the board. Gateways already restart (60 s→1800 s) but charas don't | gateway/session.py:920-943 + `_STUCK_LOOP_THRESHOLD = 3` (#7536): restart with backoff, suspend after 3 consecutive crash-restarts instead of looping forever | port the GatewayChild `_run_supervised` pattern to CharaChild with the 3-strike suspension; also fix GatewayChild's `_backoff` never resetting after a healthy run (one crash a week eventually means 30-min restart delays) | M | P2 |
 | 28 | **Shutdown forensics + resource canary** — record what triggered shutdown and a process snapshot; periodic RSS/GC/thread log line for leak detection | `gateway/shutdown_forensics.py:197-406` (incl. the systemd `TimeoutStopSec >= drain_timeout` scar); `gateway/memory_monitor.py:119-126` (5-min `[MEMORY] rss/gc/threads` line, daemon thread) | lunamothd logs nothing on unexpected exit; a leak in a week-long daemon is invisible until the OS kills it | S | P3 |
 | 29 | **Slow-client backpressure on the event path** — `_WSSink.write` from the agent thread blocks up to 10 s per frame on a stalled browser; a wedged client can slow a streaming turn to a crawl | gateway/stream_consumer.py buffers via queue + drains async at 50 ms intervals; flood-control strikes degrade to single final send | drop-or-buffer instead of blocking the stream worker (FrameRing already exists on the supervisor side; the direct `serve --stdio`+ws path lacks it) | M | P3 |
 
@@ -181,9 +183,7 @@ file is *ahead* of hermes' pty handling in care); zombie-aware
 
 | # | Item | Hermes | LunaMoth today | Effort | Pri |
 |---|------|--------|----------------|--------|-----|
-| 30 | **Inbound dedup (TTL cache keyed on platform message id)** — WeCom retries callbacks that aren't answered (restart mid-callback ⇒ redelivery), OneBot/NapCat redelivers after reconnect; the same operator message then runs two full LLM turns | `gateway/platforms/helpers.py` MessageDeduplicator (300 s TTL, 2000 entries); scar in slack.py: "Socket Mode can redeliver events after reconnects (#4777)" | `parse_message_xml` keeps `MsgId` in `raw` but nobody checks it; qq.py has no echo/event dedup either | S | P2 |
-| 31 | **Outbound send error containment + one bounded retry** — any non-`DeliveryDeferred` exception from `adapter.send()` propagates through `tick()`/`run()` and **crashes the whole gateway process** (then a 60 s supervisor backoff drops everything in between). A transient socket error on *send* should not kill the inbox | `gateway/stream_consumer.py:788-926` — failed sends retried once after 3 s, then degrade; 429 backoff doubling to 10 s cap, 3 strikes → stop streaming edits | wrap `_send` in a catch-all + single retry + log; only configuration errors should crash | S | **P1** |
-| 32 | **QQ send-while-disconnected handling** — `_send_frame` raises if the socket is down (reconnect loop owns the socket); an unattended `speak` during a reconnect window crashes the gateway via item 31's path | platform adapters queue or fail-soft and report | buffer one outbound or convert to logged DeliveryDeferred until reconnect completes | S | P2 |
+| 32 | **QQ send-while-disconnected handling** — `_send_frame` raises if the socket is down (reconnect loop owns the socket); an unattended `speak` during a reconnect window can crash the gateway (the generic outbound containment from the now-landed #31 may already cover it — verify against `qq.py`) | platform adapters queue or fail-soft and report | buffer one outbound or convert to logged DeliveryDeferred until reconnect completes | S | P2 |
 | 33 | **Anti-loop output filter** for bot-reachable channels — drop "silence narration" tokens (`*(silent)*`, bare `.`, 🔇) before delivery | scar `gateway/delivery.py:329-337`: "In bot-to-bot channels these tokens mirror back and forth until a model crashes" | nothing; low exposure today (private-chat-only adapters) but cheap and the failure mode is ugly | S | P3 |
 
 ---
@@ -225,16 +225,15 @@ file is *ahead* of hermes' pty handling in care); zombie-aware
 
 ## Suggested order of attack
 
-1. The five P1s that are silent hangs or data loss: **#19 (MCP unbounded
+1. The P1s that are silent hangs or data loss: **#19 (MCP unbounded
    block)**, **#14 (terminal timeout doesn't kill the group / can hang
    forever)**, **#23 (tool exception kills the turn)**, **#12 (trim eats the
-   summary)**, **#31 (one bad send kills the messaging gateway)**.
+   summary)**.
 2. The two P1s that are invisible bad turns: **#4 (silent empty
    completion)**, **#10 (compaction thrash = nightly budget burn)**, then
    **#1 (stall watchdog)** which completes the known-roadmap set.
 3. P2 batch by file: llm.py (#2, #5, #7, #8, #9), runner.py (#15–17),
-   compaction (#11, #13), gateway/guardrails (#24, #25), supervisor (#27),
-   messaging (#30, #32).
+   compaction (#11, #13), gateway/guardrails (#24, #25), messaging (#32).
 4. P3s opportunistically (#3 parallel exec last among the roadmap four — it
    is a throughput feature, not a correctness fix, and serial execution is
    currently load-bearing for the audit trail's ordering).
@@ -407,35 +406,7 @@ parity with `reference/hermes-agent` for commodity surfaces), confirms
 delete), then **removes the item from this list**. Anyone (incl. subagents) may
 add a diagnosed problem here with a priority. Independent items run in parallel.
 
-## SEC-2 — DONE 2026-06-16 — provider api_key is GLOBAL, not copied per session
-Shipped: session configs no longer carry the api_key. It's resolved at agent load from
-the global keyring (~/.lunamoth/desktop.json) by route (a named `keys` entry matching the
-session's provider+base_url, else the default), env OPENAI_API_KEY overrides; legacy
-embedded keys are stripped from session configs on read (orphan-safe). hub.wake /
-save_settings(session) / set_mode_on_disk no longer write the key; the per-session
-key-rotation RPC (apply_default_key / key_update_candidates) is neutered (obsolete).
-Audited (no writer leaks the key; resolution works in the unjailed serve child; migration
-never orphans the only copy; multi-key-by-route preserved). Full suite 798 green.
-REMAINING (macOS only, see SEC-low): with the sandbox's global file-read*, a chara's
-terminal can still `cat ~/.lunamoth/desktop.json`. SEC-2 shrank this to ONE global file
-outside the chara's own dir (and on Linux/docker the jail can't reach it at all); the full
-macOS fix is tightening sandbox reads (SEC-low). Behavior note: a chara woken with a named
-key now stores that key's ROUTE (not the secret); if the operator later deletes/re-routes
-that named key, the chara falls back to the default-route key.
-
-## SEC-1 (HIGH, follow-up from the 2026-06-16 security review) — authenticate /asset GET
-The CRITICAL key-leak is FIXED (the /asset route no longer serves config.json /
-session.json / transcript.db — non-images now come only from sandbox/workspace|assets,
-plus a name denylist; commit below). REMAINING defense-in-depth: the /asset GET is still
-UNauthenticated, so a local process that knows the random port + an absolute path can read
-card-art images and the chara's workspace files (no secrets after the fix, but still the
-chara's private work). Add a token/cookie check like /rpc. Tricky bit: /asset URLs are
-built server-side (hub._asset_url) AND in the serve CHILD (agent send_file), and the child
-doesn't know the desktop token — so a query-token requires the renderer to tokenize every
-<img src>/background-image, OR (cleaner) a SameSite=Strict cookie set on the page load and
-checked alongside ?token=. Design it so image loading can't silently break.
-
-## SEC-low (from the same review) — image-gen blocking + key-on-disk readability
+## SEC-low (from the 2026-06-16 security review) — image-gen blocking + key-on-disk readability
 - generate_image is synchronous: ark_generate 240s×5 + download 120s×5 can freeze the chara
   for minutes on a flapping endpoint. Tune retries/timeouts down for image-gen.
 - macOS sandbox profile allows file-read* globally (documented: confine writes, not reads),
@@ -450,51 +421,102 @@ bare strings) so 表情 becomes a named set; and the per-entry world editor for 
 cards (read-only cards already show per-entry cards; editable still uses the text editor).
 
 ## R6 (P3) — Blank card → auto-generate a visual set via the image key (opt-in)
-Well-designed interaction; now UNBLOCKED (R4 generate_image landed). Reuse the Seedream
-pipeline + the visuals/ brief approach to fill a blank card's 立绘/主视觉/头像/背景 set.
-NOTE: depends on R9 (the in-app visuals pipeline) — R6 is essentially the "auto-fill a
-blank card" entry point into R9.
+Well-designed interaction, now fully UNBLOCKED (R9 in-app visuals pipeline + R4
+generate_image both landed). Reuse `visuals/pipeline.py` + the brief approach to
+fill a blank card's 立绘/主视觉/头像/背景 set — essentially the "auto-fill a blank
+card" entry point into the existing visuals pipeline. Spends real money; opt-in/cost UX.
 
-## R9 (owner request 2026-06-16) — bring the visuals pipeline INTO the app
-Today the full visual-set pipeline is a manual dev script (visuals/: cardbrief LLM brief →
-Seedream gen → BiRefNet matte → grid/assemble → avatar/sprite/keyvisual/stickers/background).
-Integrate it as an in-app feature so a user can generate a card's visual set from the UI.
-UX DETAILS: ASK THE DEVELOPER (owner) before building — where it lives (card editor 视觉 tab?
-wake flow? a dedicated studio?), how much is one-click vs step-by-step, regenerate/cost
-guards, progress/streaming. Wiring this also fixes the two current gaps: (a) the brief model
-is hard-coded to gemini (visuals/cardbrief.py:18 OPENROUTER_BRIEF_MODEL default
-"google/gemini-3.1-pro-preview") and reads a separate ~/.lunamoth/openrouter_key — the in-app
-version must use the GLOBAL text key + default model (no hard-coded gemini); (b) the image key
-+ generation model are read from bare files/env — must come from the global settings (R10).
-Spends real money (multiple images per card) — cost/opt-in UX is part of the design ask.
+---
 
-## R10 (owner request 2026-06-16) — global key management in Settings (multi-key, text + image)
-A proper Settings UI for keys, all GLOBAL (SEC-2 already made the runtime resolve the text
-key globally + the keyring store exists). Needs: manage MULTIPLE keys (add/label/delete/pick
-active), set the TEXT key + default model, AND set the IMAGE key + generation model (today the
-image key is a bare ~/.lunamoth/ark_api_key file with no UI; _image_gen must read it from the
-global settings instead). One place to see/rotate every credential. Builds on the existing
-hub keys.* store + defaults.
+# Part 4 — 2026-06-17 test-feedback triage (open items only)
 
-## R11 (owner request 2026-06-16) — matte (抠像) model: download + load from Settings
-The transparent-sprite cutout uses BiRefNet locally (visuals/localmatte.py, ~928MB model,
-~5.4GB RAM). Let the user, from Settings, CHOOSE a matte model, DOWNLOAD it (with progress),
-and LOAD it — instead of it being a manual dev dependency. Part of bringing visuals in-app (R9).
+Owner tested the 2026-06-16 build. Open items from that triage (the small settled
+fixes are on main and not retained here):
 
+## Live verification (visuals + messaging) — needs real credentials/a host
+The visuals pipeline + global keys + matte all shipped but were never exercised
+end-to-end: needs a real ARK image key (full card visual-set generation) and a
+downloaded matte model (the cutout path). Same shape as the WeChat/QQ messaging
+live-test (roadmap C.3). Budget one verification round with real keys.
 
-DONE this loop: R1 tool-access single-source (4435d77), R2 on-disk image vision
-(f34a55e), R3 tool-call fold i18n (e4dcce4), R7 sandbox geography (assets read-only
-sibling / workspace / works/ — full suite green, security-audited, live-Quinn verified),
-R8 new-user character-select carousel + R8b deck filter (未唤醒/已唤醒 toggle + colorful
-✨默认 carousel entry; 8 built-ins, 2 swipeable pages, authored bilingual copy/tags in
-front/web/builtins.js; selecting routes to the existing wake flow; deck splits editable
-OCs from read-only living charas),
-R4 agent self-image-generation (generate_image → Seedream, key-gated, R7-confined,
-image-validated; live-Quinn verified), V4A Move guard coverage (R7-followup),
-R5 multi-page card view (设定/视觉/表情/世界 tabbed, white shell + gentle per-card theme,
-fixed-height scroll, no-art fallback, reuses the field/save/AI-rewrite machinery;
-audited; design mockups in archive/demos/),
-R4 agent self-image-generation (generate_image tool → Volcano Ark Seedream, gated on
-an image key via check_fn so no key = no tool = no spend; saves to workspace/works via
-the R7 write path; image-signature-validated, size-capped, no-fallback; security-audited;
-live-Quinn generated + sent one real 2048² image).
+## (1) write_file ~12KB truncation — RESEARCH DONE, decision pending
+Not a tool cap: `write_file` has no size limit. The truncation is the model's
+COMPLETION token cap — `core/llm.py:_max_tokens_param()` feeds `cfg.max_tokens`
+(`config.py` default `LLM_MAX_TOKENS=4096`), and tool-call ARGUMENTS count in that
+budget; ~4096 tok ≈ 12KB, so the model's `write_file` content gets cut mid-arg and
+it splits the file. Industry pattern (hermes #26425, openclaw #63210): this is a
+silent `stop_reason=="length"` truncation in `tool_use`. Proposed fix (S/P1-ish):
+① raise the `LLM_MAX_TOKENS` default; ② check `finish_reason`/`stop_reason` each
+response, surface `length` as a visible error (matches "no failure fallbacks")
+instead of feeding a truncated arg to the tool; ③ steer large writes to chunked
+append/patch. DECISION NEEDED: default value + whether to add truncation detection.
+
+## (8) both web tools return empty — RESEARCH DONE, decision pending
+NOT a missing User-Agent (`web.py:_http_get` sets one). `_search_duckduckgo()`
+scrapes `html.duckduckgo.com/html/`, which 403s / empties on bot detection. Two
+paths: LIGHT (switch to `lite.duckduckgo.com/lite` + retry/backoff — fast, still
+fragile) or a real SEARCH API backend (Brave/SerpAPI; `_resolve_search_backend()`
+is already pluggable — robust, needs a key). Pairs with the messaging live-test
+round (roadmap C.3). DECISION NEEDED: light fix vs API backend.
+
+## (2)(5)(6)(7) — deferred to the UI/feel refactor
+- **(2) send_file UX**: file cards don't re-render on chat reopen; unclear where a
+  download lands; html should open in the browser; other files should open in the
+  sandbox Finder. (React file-card render + open-with.)
+- **(5) interrupt / insert-message feel**: jank when interrupting or injecting a
+  message mid-stream. (Streaming preemption semantics.)
+- **(6) tool-call compression**: fold consecutive tool calls with no assistant text
+  into one group + one reasoning. NOTE: the React `streamModel.ts` already folds
+  tool-groups — owner tested the OLD client; RE-TEST on the new SPA before doing work.
+- **(7) silent after tool calls**: chara sometimes ends a turn without speaking.
+  (Curriculum / prompt steering toward a closing `speak`.)
+
+## Retired-clarify follow-up (from item 9)
+The clarify TOOL is gone, but its generic interactive-question plumbing remains
+dormant (codec `clarify_ask`/`clarify_reply`, dispatch round-trip, terminal stdin
+hook, ~7 React files; mirrors `permission_hook`). Fully excising it is a
+protocol-first change (constitution codec + React client) that wants owner sign-off.
+
+## Shelved — presence enter/leave markers
+Owner shelved (2026-06-17) the idea of deleting the injected `[operator entered]`/
+`[operator left]` markers. Finding for when it's revisited: the marker TEXT +
+`presence.marker_text` + `on_attach`/`on_detach` hooks are removable (presence
+already rides the volatile tail as `user_present`; the injected lines are redundant
+and permanently pollute the transcript), but the attach/detach STATE driving
+conversation↔self-work is load-bearing and stays. Meaningful simplification, not a
+full module collapse. Lone cost: losing the "just changed this turn" signal in
+history (the timestamp/gap approximates it).
+
+---
+
+# Appendix A — client + deploy architecture reference
+
+The full build plan (CLIENT-AND-DEPLOY-PLAN) shipped 2026-06-16 and was deleted;
+the operational runbook proper lives in **README (EN/zh)** + **`deploy/`**
+(Dockerfile, compose.yml, entrypoint.sh) + `install.sh`. The durable
+architecture/rationale worth keeping (change only with owner sign-off):
+
+- **Stack**: React 19 + Vite + TypeScript SPA; **Context + hooks**, no Redux/MobX;
+  **hash routing** (so the supervisor's static handler needs no SPA-fallback list,
+  and `file://` would work). Source at repo-root `apps/web/`.
+- **Distribution = a wheel that bundles the built frontend** (hermes model). `apps/web`
+  builds to `src/lunamoth/front/webui/` (GITIGNORED, not committed); setuptools
+  package-data (`lunamoth=["front/webui/**/*"]`) packs it into the wheel at CI
+  packaging time → users `uv tool install` and get the prebuilt UI, no node at install.
+  `vite.config.ts`: `base:'./'`, `outDir:'../../src/lunamoth/front/webui'`, `emptyOutDir`.
+- **Electron stays a thin local shell**, unchanged, always pointing at the local
+  supervisor's HTTP URL. Remote = browser, never Electron.
+- **Remote, two ways**: (a) SSH tunnel to the loopback-bound supervisor (`lunamoth
+  connect ssh://user@host` opens `ssh -L` after reading the remote daemon token/ports);
+  (b) supervisor bound to a real host behind a TLS reverse proxy (Caddy / cloudflared).
+- **Auth**: ONE `lm_auth` SameSite cookie minted by a `?token=` handshake gates GET /
+  `/asset` / `/rpc` / `/upload` / WS uniformly (401); Origin/Host allowlist; optional
+  PBKDF2 password login layered on top; "no server token ⇒ open (dev/loopback)".
+  Lives in `supervisor.py` + `netsec.py`.
+- **One-click deploy = Docker**: `python:3.12-slim` + `pip install` the release wheel
+  (carries `webui/`, so no node); `compose.yml` with `restart: always`,
+  `no-new-privileges`, a `~/.lunamoth` volume for sessions/cards/config.
+- **Two known non-ideal-but-shipped choices** (future upgrade path): the supervisor
+  runs TWO server stacks on TWO ports (stdlib http.server + websockets, WS = http+1
+  for non-loopback) — single-port ASGI (Starlette/uvicorn) is the eventual cleanup;
+  it's the backbone of the deferred UI/feel refactor loop.
