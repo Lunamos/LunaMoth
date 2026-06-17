@@ -604,11 +604,19 @@ WEB_EXTRACT_SCHEMA = {
     },
 }
 
-registry.register(
-    "web_search", "web", WEB_SEARCH_SCHEMA, web_search,
-    check_fn=check_web_api_key, emoji="🔍", max_result_size_chars=100_000,
-)
-registry.register(
-    "web_extract", "web", WEB_EXTRACT_SCHEMA, web_extract,
-    check_fn=check_web_api_key, emoji="📄", max_result_size_chars=100_000,
-)
+# SHELVED 2026-06-17 (owner): the web tools are intentionally NOT registered, so
+# no toolpack can surface them and the agent never sees them. They want a proper
+# search backend/key set up first, which we're deferring. The implementations
+# above (web_search / web_extract / the backends) stay intact — flip this flag to
+# True to bring them back (and re-add them to a toolpack).
+_WEB_TOOLS_ENABLED = False
+
+if _WEB_TOOLS_ENABLED:
+    registry.register(
+        "web_search", "web", WEB_SEARCH_SCHEMA, web_search,
+        check_fn=check_web_api_key, emoji="🔍", max_result_size_chars=100_000,
+    )
+    registry.register(
+        "web_extract", "web", WEB_EXTRACT_SCHEMA, web_extract,
+        check_fn=check_web_api_key, emoji="📄", max_result_size_chars=100_000,
+    )

@@ -45,11 +45,17 @@ def parse(s: str) -> dict:
 # registration / discovery
 # --------------------------------------------------------------------------- #
 
-def test_registers_both_tools():
+def test_web_tools_are_shelved_unregistered():
+    """Shelved 2026-06-17 (owner): the web tools are intentionally NOT registered
+    (no search backend/key configured yet), so the agent never sees them. The
+    implementations still exist and are exercised directly by the tests below;
+    flip web._WEB_TOOLS_ENABLED to True to bring them back."""
     discover_builtin_tools()
     names = registry.get_all_tool_names()
-    assert "web_search" in names
-    assert "web_extract" in names
+    assert "web_search" not in names
+    assert "web_extract" not in names
+    # the code is still present (callable directly), just not registered
+    assert callable(web.web_search) and callable(web.web_extract)
 
 
 def test_schemas_match_hermes_shape():
