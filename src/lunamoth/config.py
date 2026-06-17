@@ -9,6 +9,22 @@ ROOT = Path(__file__).resolve().parents[2]
 SANDBOX_ROOT = Path(os.getenv("LUNAMOTH_SANDBOX", os.getenv("LUNAMOSS_SANDBOX", ROOT / "sandbox"))).resolve()
 
 
+def content_dir(name: str) -> Path:
+    """Resolve a bundled-content dir (``cards`` / ``toolpacks``).
+
+    In a dev checkout these live at the repo root (``ROOT/<name>``). A WHEEL
+    install has no repo root — ``ROOT`` points into site-packages — so the build
+    (`scripts/build-wheel.sh`) copies them into ``lunamoth/_bundled/<name>``,
+    shipped via package-data. Prefer the repo-root copy when present (dev / git
+    install), else fall back to the packaged copy (wheel). Without this, a wheel
+    deploy finds no toolpacks → every chara loses its tools, and no cards → no
+    bundled personas (the 2026-06-17 deploy P0)."""
+    root_copy = ROOT / name
+    if root_copy.exists():
+        return root_copy
+    return Path(__file__).resolve().parent / "_bundled" / name
+
+
 @dataclass(frozen=True)
 class LLMConfig:
     provider: str = os.getenv("LLM_PROVIDER", "mock").strip().lower()

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ..config import ROOT
+from ..config import content_dir
 
 # Name shown only when no character card can be loaded at all.
 DEFAULT_NAME = "Character"
@@ -81,7 +81,7 @@ def default_character_path(lang: str | None = None) -> Path | None:
     Among localized candidates the card tagged "default" wins; without the tag
     the sorted-order first card is the default (legacy behavior)."""
     lang = lang or system_language()
-    return _localized_json(ROOT / "cards", lang)
+    return _localized_json(content_dir("cards"), lang)
 
 
 def fallback_persona() -> str:

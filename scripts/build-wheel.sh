@@ -48,7 +48,23 @@ npm run build
 [ -f "$WEBUI_DIR/index.html" ] || fail "frontend build produced no $WEBUI_DIR/index.html"
 say "frontend built: $WEBUI_DIR"
 
-# --- 2. build the wheel (carries webui/ via package-data) --------------------
+# --- 1b. bundle the repo-root content dirs into the package ------------------
+# cards/ + toolpacks/ live at the repo ROOT (not under src/lunamoth/), so a wheel
+# wouldn't otherwise carry them — and a wheel install has no repo root, so the
+# runtime (config.content_dir) would find no toolpacks → every chara loses its
+# tools, and no cards → no bundled personas. Copy them into the package as
+# _bundled/, shipped via [tool.setuptools.package-data]. (2026-06-17 deploy fix.)
+BUNDLED_DIR="$ROOT/src/lunamoth/_bundled"
+say "bundling cards/ + toolpacks/ into $BUNDLED_DIR ..."
+rm -rf "$BUNDLED_DIR"
+mkdir -p "$BUNDLED_DIR"
+for d in cards toolpacks; do
+  [ -d "$ROOT/$d" ] || fail "repo content dir $ROOT/$d is missing"
+  cp -R "$ROOT/$d" "$BUNDLED_DIR/$d"
+done
+[ -n "$(ls -A "$BUNDLED_DIR/toolpacks"/*.json 2>/dev/null)" ] || fail "no toolpacks/*.json bundled"
+
+# --- 2. build the wheel (carries webui/ + _bundled/ via package-data) --------
 cd "$ROOT"
 # Start clean so the assertion below picks the wheel we just built.
 rm -rf "$DIST_DIR"
@@ -61,8 +77,8 @@ else
   run_python -m build --wheel
 fi
 
-# --- 3. assert the wheel actually bundled the UI -----------------------------
-say "verifying the wheel bundles front/webui/ ..."
+# --- 3. assert the wheel actually bundled the UI + content -------------------
+say "verifying the wheel bundles front/webui/ + cards/ + toolpacks/ ..."
 run_python - <<'PY'
 import glob, sys, zipfile
 wheels = sorted(glob.glob("dist/*.whl"))
@@ -70,9 +86,13 @@ if not wheels:
     sys.exit("no wheel produced in dist/")
 whl = wheels[-1]
 names = zipfile.ZipFile(whl).namelist()
-if not any(n.endswith("front/webui/index.html") or "front/webui/index.html" in n for n in names):
-    sys.exit(f"FAIL: {whl} does not contain front/webui/index.html\n  sample: {names[:20]}")
-print(f"WHEEL OK: webui bundled in {whl}")
+def need(pred, what):
+    if not any(pred(n) for n in names):
+        sys.exit(f"FAIL: {whl} missing {what}\n  sample: {names[:20]}")
+need(lambda n: "front/webui/index.html" in n, "front/webui/index.html")
+need(lambda n: "_bundled/toolpacks/" in n and n.endswith(".json"), "_bundled/toolpacks/*.json")
+need(lambda n: "_bundled/cards/" in n, "_bundled/cards/")
+print(f"WHEEL OK: webui + cards + toolpacks bundled in {whl}")
 PY
 
 say "done. wheel(s):"

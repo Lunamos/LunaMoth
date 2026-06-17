@@ -46,7 +46,12 @@ where = ["src"]
 # package-data so `python -m build` packs it into the wheel. No node and no
 # committed dist required at install — the wheel carries the prebuilt UI.
 [tool.setuptools.package-data]
-lunamoth = ["front/webui/**/*"]
+# front/webui/  — the built SPA (copied in by build-wheel.sh).
+# _bundled/      — repo-root cards/ + toolpacks/ copied in by build-wheel.sh so a
+#                  WHEEL install ships the default personas + tool packs (config.content_dir
+#                  falls back here when there is no repo root). Without this a wheel
+#                  deploy has no toolpacks → charas lose all tools (2026-06-17 P0).
+lunamoth = ["front/webui/**/*", "_bundled/**/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

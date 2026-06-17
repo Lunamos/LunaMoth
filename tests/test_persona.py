@@ -27,7 +27,10 @@ def test_default_tag_wins_over_sorted_order_and_falls_back_without_it(tmp_path, 
     cards.mkdir()
     _write_card(cards / "Aardvark.en.json", "Aardvark", "en", [])
     _write_card(cards / "Zebra.en.json", "Zebra", "en", ["default"])
-    monkeypatch.setattr(persona, "ROOT", tmp_path)
+    # The cards dir now resolves through config.content_dir (which reads
+    # config.ROOT), so inject there — tmp_path/cards exists, so content_dir
+    # returns it rather than falling back to the packaged _bundled copy.
+    monkeypatch.setattr("lunamoth.config.ROOT", tmp_path)
 
     assert persona.default_character_path("en").name == "Zebra.en.json"
 
@@ -42,6 +45,9 @@ def test_default_tag_reading_tolerates_broken_tags(tmp_path, monkeypatch):
     (cards / "Broken.en.json").write_text("{not json", encoding="utf-8")
     payload = {"data": {"name": "Odd", "tags": "default"}}  # non-list tags
     (cards / "Odd.en.json").write_text(json.dumps(payload), encoding="utf-8")
-    monkeypatch.setattr(persona, "ROOT", tmp_path)
+    # The cards dir now resolves through config.content_dir (which reads
+    # config.ROOT), so inject there — tmp_path/cards exists, so content_dir
+    # returns it rather than falling back to the packaged _bundled copy.
+    monkeypatch.setattr("lunamoth.config.ROOT", tmp_path)
 
     assert persona.default_character_path("en").name == "Broken.en.json"  # sorted fallback

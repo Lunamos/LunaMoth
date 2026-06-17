@@ -134,3 +134,6 @@ src/lunamoth/front/webui/
 
 # Python lib/ rule must not catch the frontend source
 !/apps/web/src/lib/
+
+# Build-time copy of repo-root cards/ + toolpacks/ into the package (build-wheel.sh)
+src/lunamoth/_bundled/

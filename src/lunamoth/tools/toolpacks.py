@@ -4,13 +4,14 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..config import ROOT
+from ..config import content_dir
 
 
 # Tool packs are an LunaMoth concept (SillyTavern cards stay pure persona).
 # A pack is a named, composable bundle of tool names that you bind to ANY persona
 # at launch — so "what it is" (card) and "what it can do" (pack) are independent.
-TOOLPACKS_DIR = ROOT / "toolpacks"
+# content_dir: repo-root toolpacks/ in a dev checkout, the wheel-bundled copy in an install.
+TOOLPACKS_DIR = content_dir("toolpacks")
 
 
 @dataclass

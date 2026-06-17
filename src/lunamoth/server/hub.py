@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .. import __version__
-from ..config import ROOT
+from ..config import ROOT, content_dir
 from ..content.cards import CharacterCard, detect_language, looks_like_world_book, merge_world_into_card
 from ..content.knobs import normalize_embodiment
 from ..session import sessions as S
@@ -71,7 +71,7 @@ def user_cards_dir() -> Path:
 
 
 def bundled_cards_dir() -> Path:
-    return ROOT / "cards"
+    return content_dir("cards")
 
 
 def user_worlds_dir() -> Path:
@@ -2013,7 +2013,7 @@ def list_toolpacks() -> list[dict[str, Any]]:
     """Bundled tool packs for the wake sheet's picker (webui-needs #8/#12).
 
     Pure data read of toolpacks/*.json — the server never imports tools/."""
-    base = ROOT / "toolpacks"
+    base = content_dir("toolpacks")
     out: list[dict[str, Any]] = []
     if not base.is_dir():
         return out
