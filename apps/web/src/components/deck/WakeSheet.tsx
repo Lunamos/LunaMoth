@@ -12,7 +12,7 @@ import { useT } from "../../i18n";
 import { useHub } from "../../state/hub";
 import { useNavigate } from "../../hooks/useHashRoute";
 import { rpcErrText } from "../../lib/status";
-import { sectionText, putSection, type NormalizedDraft } from "../../lib/cards";
+import { sectionText, serializeCardFields, type NormalizedDraft, type CardData } from "../../lib/cards";
 import { CardField, CardBlock, cardCtxString, type FieldHandle } from "./CardField";
 import { Caps } from "./Caps";
 import { deckToast } from "../ui/deckToast";
@@ -133,49 +133,29 @@ export function WakeSheet({ card, onClose }: { card: DeckCard; onClose: () => vo
   function collectCardData(): { name?: string; data?: Record<string, unknown> } {
     const raw = rawRef.current;
     const data = (raw.data = raw.data || {});
-    const charName = charNameRef.current;
-    data.name = (fName.current?.value() ?? "").trim() || charName;
+    // The wake step-1 editor DOES render user_name/user_persona/toolpack, so it
+    // passes them as strings. serializeCardFields is the ONE shared, tested
+    // serializer (also used by the card editor) — no hand-rolled assembly here.
+    serializeCardFields(
+      data as CardData,
+      {
+        name: fName.current?.value() ?? "",
+        description: fDesc.current?.value() ?? "",
+        personality: fPers.current?.value() ?? "",
+        scenario: fScen.current?.value() ?? "",
+        first_mes: fFirst.current?.value() ?? "",
+        user_name: fUserName.current?.value() ?? "",
+        user_persona: fUserPersona.current?.value() ?? "",
+        tagline: fTagline.current?.value() ?? "",
+        on_attach: fOnAttach.current?.value() ?? "",
+        on_detach: fOnDetach.current?.value() ?? "",
+        goals: fGoals.current?.value() ?? "",
+        world: fWorld.current?.value() ?? "",
+        toolpack: pack,
+      },
+      charNameRef.current,
+    );
     raw.name = data.name as string;
-    data.description = fDesc.current?.value() ?? "";
-    data.personality = fPers.current?.value() ?? "";
-    data.scenario = fScen.current?.value() ?? "";
-    data.first_mes = fFirst.current?.value() ?? "";
-    const extensions = (data.extensions = (data.extensions as Record<string, unknown>) || {});
-    const lm = ((extensions as { lunamoth?: Record<string, unknown> }).lunamoth =
-      ((extensions as { lunamoth?: Record<string, unknown> }).lunamoth || {}) as Record<string, unknown>);
-    const setOrDel = (k: string, ref: React.RefObject<FieldHandle | null>) => {
-      const v = (ref.current?.value() ?? "").trim();
-      if (v) lm[k] = v;
-      else delete lm[k];
-    };
-    setOrDel("user_name", fUserName);
-    setOrDel("user_persona", fUserPersona);
-    setOrDel("tagline", fTagline);
-    setOrDel("on_attach", fOnAttach);
-    setOrDel("on_detach", fOnDetach);
-    const wishes = (fGoals.current?.value() ?? "")
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (wishes.length) lm.wishes = wishes;
-    else delete lm.wishes;
-    delete lm.goals; // migrate the legacy key on save
-    if (pack.trim()) lm.toolpack = pack.trim();
-    const tmp: Partial<NormalizedDraft> = {};
-    putSection(tmp, "world_entries", fWorld.current?.value() ?? "");
-    const entries = (tmp.world_entries || []).map((w, i) => ({
-      keys: w.keys,
-      content: w.content,
-      constant: w.constant,
-      enabled: true,
-      insertion_order: i,
-    }));
-    const book = data.character_book as { name?: string } | undefined;
-    if (entries.length || (book && book.name)) {
-      data.character_book = { name: (book && book.name) || data.name, entries };
-    } else {
-      delete data.character_book;
-    }
     return raw;
   }
 

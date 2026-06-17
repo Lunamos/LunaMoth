@@ -144,4 +144,40 @@ describe("serializeCardFields", () => {
     serializeCardFields(data, fields, "fallback");
     expect(data.character_book).toEqual({ name: "Lore", entries: [] });
   });
+
+  it("undefined surface-specific fields PRESERVE existing card values (card-editor path)", () => {
+    // The card editor doesn't render user_name/user_persona/toolpack — it passes
+    // them undefined, and the serializer must leave whatever the card already has.
+    const fields = baseFields();
+    fields.user_name = undefined;
+    fields.user_persona = undefined;
+    fields.toolpack = undefined;
+    const data: CardData = {
+      extensions: { lunamoth: { user_name: "Keep", user_persona: "keep too", toolpack: "browser" } },
+    };
+    serializeCardFields(data, fields, "fallback");
+    const lm = data.extensions!.lunamoth!;
+    expect(lm.user_name).toBe("Keep");
+    expect(lm.user_persona).toBe("keep too");
+    expect(lm.toolpack).toBe("browser");
+  });
+
+  it("an empty-string surface-specific field DELETES it (the surface edited it to blank)", () => {
+    const fields = baseFields();
+    fields.user_name = ""; // the wake sheet rendered it and the user cleared it
+    const data: CardData = { extensions: { lunamoth: { user_name: "Old" } } };
+    serializeCardFields(data, fields, "fallback");
+    expect("user_name" in data.extensions!.lunamoth!).toBe(false);
+  });
+
+  it("writes data.creator_notes when provided, preserves it when undefined", () => {
+    const withNotes = { ...baseFields(), creator_notes: "a note" };
+    const d1: CardData = {};
+    serializeCardFields(d1, withNotes, "fallback");
+    expect(d1.creator_notes).toBe("a note");
+
+    const d2: CardData = { creator_notes: "kept" };
+    serializeCardFields(d2, baseFields(), "fallback"); // creator_notes undefined
+    expect(d2.creator_notes).toBe("kept");
+  });
 });

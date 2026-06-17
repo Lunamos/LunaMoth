@@ -152,15 +152,20 @@ export function putSection(draft: Partial<NormalizedDraft>, key: string, text: s
 }
 
 /** The plain field values that the wake/edit content step collects (the strings
- *  the contenteditable nodes hold), used to build the saved card payload. */
+ *  the contenteditable nodes hold), used to build the saved card payload.
+ *
+ *  Fields a surface ALWAYS edits are required strings ("" deletes the lunamoth
+ *  key). Fields a surface may NOT edit are optional: `undefined` means "leave the
+ *  card's existing value alone" — the card editor preserves user_name/user_persona/
+ *  toolpack it never shows, while the wake sheet (which does show them) passes
+ *  strings. This is the data-safety contract that lets BOTH save paths share this
+ *  one serializer without clobbering fields they don't render. */
 export interface CardFields {
   name: string;
   description: string;
   personality: string;
   scenario: string;
   first_mes: string;
-  user_name: string;
-  user_persona: string;
   tagline: string;
   on_attach: string;
   on_detach: string;
@@ -168,8 +173,13 @@ export interface CardFields {
   goals: string;
   /** World book, in the "keys — content [constant]" line form. */
   world: string;
-  /** Toolpack name (packInput.value). */
-  toolpack: string;
+  /** undefined = not edited by this surface (preserve); "" = delete; value = set. */
+  user_name?: string;
+  user_persona?: string;
+  /** Toolpack name (packInput.value); set-only — undefined/"" never deletes. */
+  toolpack?: string;
+  /** data.creator_notes (NOT under lunamoth); undefined = not edited (preserve). */
+  creator_notes?: string;
 }
 
 /** A SillyTavern-ish card we serialize fields back into (the `data` block). */
@@ -199,9 +209,12 @@ export function serializeCardFields(
   data.personality = fields.personality;
   data.scenario = fields.scenario;
   data.first_mes = fields.first_mes;
+  if (fields.creator_notes !== undefined) data.creator_notes = fields.creator_notes;
   data.extensions = data.extensions || {};
   const lm = (data.extensions.lunamoth = data.extensions.lunamoth || {});
-  const setOrDel = (k: string, raw: string): void => {
+  // undefined → leave the card's value alone (surface doesn't edit it); "" → delete.
+  const setOrDel = (k: string, raw: string | undefined): void => {
+    if (raw === undefined) return;
     const v = raw.trim();
     if (v) lm[k] = v;
     else delete lm[k];
@@ -218,7 +231,8 @@ export function serializeCardFields(
   if (wishes.length) lm.wishes = wishes;
   else delete lm.wishes;
   delete lm.goals; // migrate the legacy key on save
-  if (fields.toolpack.trim()) lm.toolpack = fields.toolpack.trim();
+  // toolpack is set-only (never deleted here); preserve on undefined.
+  if (fields.toolpack !== undefined && fields.toolpack.trim()) lm.toolpack = fields.toolpack.trim();
   const tmp: Partial<NormalizedDraft> = {};
   putSection(tmp, "world_entries", fields.world);
   const entries = (tmp.world_entries || []).map((w, i) => ({
