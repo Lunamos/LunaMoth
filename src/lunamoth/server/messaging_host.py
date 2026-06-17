@@ -70,6 +70,12 @@ class MessagingHost:
         self._state = "stopped"
         self._detail = ""
         self._ack: str | None = None  # cached "got it" receipt (char name + lang)
+        # Proactive superchat buffer: a chara's idle/self-work `speak` (an idle
+        # turn the SUPERVISOR drives, never this host) is observed via the
+        # dispatcher's stream tap and pushed to the gateway at turn end — so a
+        # superchat reaches the user on WeChat too, not just the desktop window.
+        self._proactive_say: list[str] = []
+        self._proactive_atts: list[Attachment] = []
 
     def _ack_text(self) -> str:
         """A one-line receipt sent the moment an inbound message arrives, so the
@@ -138,6 +144,10 @@ class MessagingHost:
                     target=self._relay_loop, name="lunamoth-messaging-relay", daemon=True,
                 )
                 self._relay.start()
+                # Observe the chara's PROACTIVE turns (supervisor idle/self-work)
+                # so a superchat reaches the gateway, not just the desktop window.
+                with contextlib.suppress(Exception):
+                    self._dispatcher.set_stream_observer(self._on_stream_event)
             if ready:
                 self._state = "running"
                 self._detail = (
@@ -157,6 +167,10 @@ class MessagingHost:
     def stop(self) -> dict[str, Any]:
         with self._lock:
             self._stop.set()
+            with contextlib.suppress(Exception):
+                self._dispatcher.set_stream_observer(None)
+            self._proactive_say.clear()
+            self._proactive_atts.clear()
             for adapter in self._adapters:
                 try:
                     adapter.close()
@@ -286,6 +300,47 @@ class MessagingHost:
         if the adapter supports it, else an honest 'file generated' note)."""
         zh = self._ack is not None and "收到" in (self._ack or "")
         deliver_attachment(adapter, att, lambda t: self._send(adapter, t), zh=zh)
+
+    def _on_stream_event(self, kind: str, ev: Any, turn_end: bool, interrupted: bool) -> None:
+        """Dispatcher stream tap. Only PROACTIVE self-work turns (kind=='idle',
+        driven by the supervisor — never this host's own 'wechat' turns) are
+        forwarded: buffer their say-channel output and, at turn end, push it to
+        the gateway as a superchat. The host's inbound replies are handled in
+        _process; desktop 'send' turns are operator-local and never pushed."""
+        if kind != "idle" or not self._adapters:
+            return
+        if turn_end:
+            if interrupted:
+                with self._lock:
+                    self._proactive_say.clear()
+                    self._proactive_atts.clear()
+                return
+            self._flush_proactive()
+            return
+        if isinstance(ev, TextDelta) and ev.channel == SAY:
+            with self._lock:
+                self._proactive_say.append(ev.text)
+        elif isinstance(ev, Attachment) and ev.channel == SAY:
+            with self._lock:
+                self._proactive_atts.append(ev)
+
+    def _flush_proactive(self) -> None:
+        """Push a completed idle turn's buffered superchat to every adapter (no
+        reply target → the adapter's default/last peer). Honest: an adapter with
+        no destination yet raises DeliveryDeferred, caught in _send."""
+        with self._lock:
+            text = "".join(self._proactive_say).strip()
+            atts = list(self._proactive_atts)
+            adapters = list(self._adapters)
+            self._proactive_say.clear()
+            self._proactive_atts.clear()
+        if not text and not atts:
+            return
+        for adapter in adapters:
+            if text:
+                self._send(adapter, text)
+            for att in atts:
+                self._send_attachment(adapter, att)
 
     def _send(self, adapter: Adapter, text: str) -> None:
         """Deliver one outbound message; a transient send error never crashes

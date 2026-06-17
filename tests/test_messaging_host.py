@@ -257,3 +257,51 @@ def test_send_file_uses_send_media_when_the_adapter_supports_it():
     host._process(adapter, InboundMessage("u1", "Alice", "show me"))
     # resolved the /asset?p= URL to the real local path and uploaded it
     assert adapter.media == [("/tmp/foo.png", "image/png", "a pic")]
+
+
+# ---- superchat → gateway: PROACTIVE idle-turn say is pushed to the platform ----
+
+def test_proactive_idle_superchat_pushed_to_gateway():
+    adapter = _Adapter()
+    host = MessagingHost(None, "/tmp/x.json")
+    host._adapters = [adapter]
+    host._on_stream_event("idle", TextDelta("hey — I made progress", SAY), False, False)
+    host._on_stream_event("idle", TextDelta(" still going", MUSE), False, False)  # muse skipped
+    host._on_stream_event("idle", None, True, False)  # turn end → flush
+    assert any("made progress" in s for s in adapter.sent)
+    assert not any("still going" in s for s in adapter.sent)  # panoramic muse never leaves
+
+
+def test_idle_superchat_not_pushed_when_interrupted():
+    adapter = _Adapter()
+    host = MessagingHost(None, "/tmp/x.json")
+    host._adapters = [adapter]
+    host._on_stream_event("idle", TextDelta("half a thought", SAY), False, False)
+    host._on_stream_event("idle", None, True, True)  # interrupted → discard
+    assert adapter.sent == []
+
+
+def test_non_idle_turns_are_not_pushed_proactively():
+    adapter = _Adapter()
+    host = MessagingHost(None, "/tmp/x.json")
+    host._adapters = [adapter]
+    # a desktop 'send' turn is operator-local — its reply must NOT go to WeChat
+    host._on_stream_event("send", TextDelta("desktop-only reply", SAY), False, False)
+    host._on_stream_event("send", None, True, False)
+    assert adapter.sent == []
+
+
+def test_dispatcher_observer_wires_idle_say_to_the_host():
+    # integration: the real dispatcher's stream tap drives the host push.
+    handle = _Handle()
+    adapter = _Adapter()
+    dispatch, host = _host_with_adapter(handle, adapter, [])
+    host._adapters = [adapter]
+    dispatch.set_stream_observer(host._on_stream_event)
+    dispatch.run_stream_sync(
+        "idle",
+        lambda: iter([TextDelta("a real superchat", SAY), TextDelta(" inner", MUSE)]),
+        None,
+    )
+    assert any("a real superchat" in s for s in adapter.sent)
+    assert not any("inner" in s for s in adapter.sent)
