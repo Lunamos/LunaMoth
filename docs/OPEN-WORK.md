@@ -671,8 +671,11 @@ Owner blessed free refactoring; no back-compat with old cards/tavern/contexts.
   compresses uploads. Frontend imgs get loading=lazy/decoding=async. pillow moved to core
   deps. New content/imaging.py. (LOW: imaging.py's one-off file helpers are unused in src;
   animated-webp upload flattens to 1 frame — both non-blocking.)
-- **[TODO] #4 Matte models: let the user install BiRefNet's two models from web/electron;
-  delete the other two; shareable across instances; default to the stronger one.**
+- **[DONE] #4 Matte models = the two BiRefNet only.** Deleted isnet-general-use + u2net;
+  DEFAULT_MODEL = birefnet-general (the stronger flagship); install/select/delete from the
+  web/Electron MattePane via matte.* RPCs; download works without the rembg runtime; the
+  model cache (matte_home = U2NET_HOME/~/.u2net) is global → shared across all instances
+  on the host (MattePane notes this). (visuals/matte.py, hub.py, MattePane, tests)
 - **[DONE] #5 Unified key management.** One "Keys/密钥" pane (KeysPane) hosts BOTH the
   multiple named text/provider keys AND the global image key/model via one shared
   KeyField/KeyRow component (consistent controls); ImageKeyPane deleted; RPC contract

@@ -43,22 +43,14 @@ MODELS: dict[str, MatteModel] = {
     "birefnet-general": MatteModel(
         "birefnet-general", "BiRefNet General",
         f"{_REL}/BiRefNet-general-epoch_244.onnx", 972666916,
-        "Flagship: SOTA hair / fine-edge matting. ~0.93 GB — heaviest, sharpest."),
+        "Flagship: SOTA hair / fine-edge matting. ~0.97 GB — heaviest, sharpest. The default."),
     "birefnet-general-lite": MatteModel(
         "birefnet-general-lite", "BiRefNet General Lite",
         f"{_REL}/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx", 224005088,
-        "Near-flagship quality at ~0.21 GB — the practical default on a laptop."),
-    "isnet-general-use": MatteModel(
-        "isnet-general-use", "ISNet General",
-        f"{_REL}/isnet-general-use.onnx", 178648008,
-        "Fast, reliable general matte. ~0.17 GB."),
-    "u2net": MatteModel(
-        "u2net", "U²-Net",
-        f"{_REL}/u2net.onnx", 175997641,
-        "Classic lightweight matte. ~0.17 GB."),
+        "Near-flagship quality at ~0.21 GB — the lighter option for a laptop."),
 }
 
-DEFAULT_MODEL = "birefnet-general-lite"
+DEFAULT_MODEL = "birefnet-general"
 
 
 # --- paths --------------------------------------------------------------------

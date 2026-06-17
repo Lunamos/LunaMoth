@@ -515,6 +515,10 @@ export const I18N = {
   "matte-downloading": ["下载中…", "Downloading…"],
   "matte-installed": ["已下载", "Downloaded"],
   "matte-dl-failed": ["下载失败", "Download failed"],
+  "matte-shared-note": [
+    "已安装的模型保存在本机的全局缓存目录，本机上所有角色共享。",
+    "Installed models live in a global cache on this machine — shared across all charas here.",
+  ],
 } as const satisfies Record<string, LangPair>;
 
 export type I18nKey = keyof typeof I18N;

@@ -61,6 +61,14 @@ def test_registry_is_well_formed():
         assert m.size > 0 and m.label and m.note
 
 
+def test_registry_holds_only_the_two_birefnet_models():
+    # #4: keep only the two BiRefNet models; the stronger one is the default.
+    assert set(matte.MODELS) == {"birefnet-general", "birefnet-general-lite"}
+    assert matte.DEFAULT_MODEL == "birefnet-general"
+    # the lite model stays available as a lighter pick
+    assert "birefnet-general-lite" in matte.MODELS
+
+
 def test_matte_home_honors_u2net_home(tmp_path):
     assert matte.matte_home() == tmp_path / "u2net"
     assert matte.model_path("birefnet-general").name == "birefnet-general.onnx"
@@ -70,15 +78,16 @@ def test_matte_home_honors_u2net_home(tmp_path):
 
 def test_selected_model_default_then_desktop_then_env(tmp_path, monkeypatch):
     assert matte.selected_model() == matte.DEFAULT_MODEL
+    assert matte.DEFAULT_MODEL == "birefnet-general"  # the stronger flagship, not lite
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
-    (home / "desktop.json").write_text(json.dumps({"matte_model": "isnet-general-use"}), encoding="utf-8")
-    assert matte.selected_model() == "isnet-general-use"
-    monkeypatch.setenv("LUNAMOTH_MATTE_MODEL", "u2net")
-    assert matte.selected_model() == "u2net"
-    # an unknown id never wins — falls through to the default
+    (home / "desktop.json").write_text(json.dumps({"matte_model": "birefnet-general-lite"}), encoding="utf-8")
+    assert matte.selected_model() == "birefnet-general-lite"
+    monkeypatch.setenv("LUNAMOTH_MATTE_MODEL", "birefnet-general")
+    assert matte.selected_model() == "birefnet-general"
+    # an unknown id never wins — falls through to the desktop.json choice
     monkeypatch.setenv("LUNAMOTH_MATTE_MODEL", "nope")
-    assert matte.selected_model() == "isnet-general-use"
+    assert matte.selected_model() == "birefnet-general-lite"
 
 
 # --- install state ------------------------------------------------------------

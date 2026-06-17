@@ -96,6 +96,8 @@ export function MattePane() {
       <h2>{t("matte-title")}</h2>
       <div className="sub">{t("matte-sub")}</div>
 
+      <div className="muted small">{t("matte-shared-note")}</div>
+
       {st && !st.deps && (
         <div className="matte-deps">
           <span>{t("matte-no-deps")} </span>

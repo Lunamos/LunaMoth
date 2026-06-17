@@ -15,9 +15,10 @@ describe("I18N strings map", () => {
   // model gate (gate-title/sub/key-ph/openrouter-note/advanced/continue) added 6 → 496;
   // onboarding delight (vis-need-key, vis-need-key-cta, chat-say-hi) added 3 → 499;
   // unifying the Keys settings surface (#5) added 5 (model-label, keys-edit,
-  // keys-set, keys-saved, set-keys) → 504.
-  it("preserves the full key set from the source dict (504 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(504);
+  // keys-set, keys-saved, set-keys) → 504; the matte models cleanup (#4) added 1
+  // (matte-shared-note) → 505.
+  it("preserves the full key set from the source dict (505 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(505);
   });
 
   it("every value is a [zh, en] string tuple", () => {
