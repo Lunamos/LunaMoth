@@ -127,11 +127,11 @@ export function Deck() {
       </div>
 
       <div className="deck">
-        <div className="deck-grid">
-          {!total ? (
-            <div className="deck-empty">{t(filter === "woken" ? "deck-empty-woken" : "deck-empty-unwoken")}</div>
-          ) : (
-            cards.map((c) => {
+        {!total ? (
+          <div className="empty-state deck-empty">{t(filter === "woken" ? "deck-empty-woken" : "deck-empty-unwoken")}</div>
+        ) : (
+          <div className="deck-grid">
+            {cards.map((c) => {
               const sub =
                 c.locked && c.owner
                   ? t("deck-owned", { name: c.owner })
@@ -192,9 +192,9 @@ export function Deck() {
                   </div>
                 </div>
               );
-            })
-          )}
-        </div>
+            })}
+          </div>
+        )}
       </div>
 
       {editing && (

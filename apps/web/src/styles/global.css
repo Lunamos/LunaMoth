@@ -90,7 +90,7 @@ body.col-resizing *{cursor:col-resize !important}
 .btn.stacked small{font-size:11px; font-weight:400; opacity:.85}
 
 /* ---------- 角色看板 ---------- */
-.board{flex:1; overflow:auto; padding:8px 28px 28px}
+.board{flex:1; min-height:0; overflow:auto; padding:8px 28px 28px; display:flex; flex-direction:column}
 .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:18px}
 .chara-card{
   background:var(--panel); border-radius:14px; overflow:hidden; position:relative;
@@ -840,7 +840,7 @@ body.dark .att-missing{background:rgba(255,255,255,.05)}
 .term-closed[hidden]{display:none}
 
 /* ---------- 卡册 ---------- */
-.deck{flex:1; overflow:auto; padding:8px 28px 28px}
+.deck{flex:1; min-height:0; overflow:auto; padding:8px 28px 28px; display:flex; flex-direction:column}
 .deck-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(184px,1fr)); gap:18px}
 /* R8b: the colorful ✨默认 button (front door to the recommended-character carousel) */
 .btn.pick-default{
