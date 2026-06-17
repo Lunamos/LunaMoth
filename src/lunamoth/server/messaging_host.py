@@ -24,6 +24,7 @@ from typing import Any
 
 from ..messaging.access import RefusalThrottle, sender_allowed
 from ..messaging.base import Adapter, DeliveryDeferred, InboundMessage
+from ..messaging.media import deliver_attachment
 from ..messaging.gateway import (
     DEFAULT_REFUSAL,
     MessageDeduplicator,
@@ -34,7 +35,7 @@ from ..messaging.gateway import (
 )
 from ..messaging.filters import is_silence_narration
 from ..messaging.text import split_text
-from ..protocol import SAY, TextDelta
+from ..protocol import SAY, Attachment, TextDelta
 from .dispatch import RpcError
 
 _log = logging.getLogger("lunamoth.server.messaging_host")
@@ -220,10 +221,13 @@ class MessagingHost:
                     self._send(adapter, reply.text)
                 return
             chunks: list[str] = []
+            atts: list[Attachment] = []
 
             def collect(ev: Any) -> None:
                 if isinstance(ev, TextDelta) and ev.channel == SAY:
                     chunks.append(ev.text)
+                elif isinstance(ev, Attachment) and ev.channel == SAY:
+                    atts.append(ev)  # a send_file — deliver it (or an honest note)
 
             # Show the incoming message in the app window first (an incoming
             # bubble), THEN stream the chara's reply — so the conversation reads
@@ -272,8 +276,16 @@ class MessagingHost:
             say = "".join(chunks).strip()
             if say:
                 self._send(adapter, say)
+            for att in atts:
+                self._send_attachment(adapter, att)
         finally:
             adapter.clear_reply_target()
+
+    def _send_attachment(self, adapter: Adapter, att: Attachment) -> None:
+        """Deliver a send_file attachment via the shared media helper (real upload
+        if the adapter supports it, else an honest 'file generated' note)."""
+        zh = self._ack is not None and "收到" in (self._ack or "")
+        deliver_attachment(adapter, att, lambda t: self._send(adapter, t), zh=zh)
 
     def _send(self, adapter: Adapter, text: str) -> None:
         """Deliver one outbound message; a transient send error never crashes

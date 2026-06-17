@@ -218,3 +218,42 @@ def test_inbound_busy_note_when_agent_never_frees(monkeypatch):
     host._process(adapter, InboundMessage("u1", "Alice", "hi"))
     # ack + an honest "still busy" note — never silent ack-then-nothing
     assert any("busy" in s.lower() or "还在忙" in s for s in adapter.sent)
+
+
+# ---- ① send_file over the gateway: real media OR an honest note (never silent) ----
+
+from lunamoth.protocol import Attachment  # noqa: E402
+
+
+class _AttachHandle(_Handle):
+    def stream_user(self, text):
+        self.user_calls.append(text)
+        yield TextDelta("here it is", SAY)
+        yield Attachment(url="/asset?p=/tmp/foo.png", mime="image/png", name="foo.png", caption="a pic")
+
+
+class _MediaAdapter(_Adapter):
+    def __init__(self):
+        super().__init__()
+        self.media: list = []
+
+    def send_media(self, source, mime="", caption=""):
+        self.media.append((source, mime, caption))
+
+
+def test_send_file_falls_back_to_honest_note_when_channel_has_no_media():
+    handle = _AttachHandle()
+    adapter = _Adapter()  # default send_media raises DeliveryDeferred
+    dispatch, host = _host_with_adapter(handle, adapter, [])
+    host._process(adapter, InboundMessage("u1", "Alice", "show me"))
+    assert any("here it is" in s for s in adapter.sent)        # the say text
+    assert any("foo.png" in s for s in adapter.sent)            # honest 'file generated' note, NOT a silent drop
+
+
+def test_send_file_uses_send_media_when_the_adapter_supports_it():
+    handle = _AttachHandle()
+    adapter = _MediaAdapter()
+    dispatch, host = _host_with_adapter(handle, adapter, [])
+    host._process(adapter, InboundMessage("u1", "Alice", "show me"))
+    # resolved the /asset?p= URL to the real local path and uploaded it
+    assert adapter.media == [("/tmp/foo.png", "image/png", "a pic")]
