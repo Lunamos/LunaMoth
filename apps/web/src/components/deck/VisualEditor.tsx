@@ -17,7 +17,8 @@
 import { useRef, useState } from "react";
 import { assetUrl } from "../../rpc";
 import { useT, type TFn } from "../../i18n";
-import { useHubApi } from "../../state/hub";
+import { useHubApi, useHubState } from "../../state/hub";
+import { useNavigate } from "../../hooks/useHashRoute";
 import { rpcErrText } from "../../lib/status";
 import { deckToast } from "../ui/deckToast";
 import { AVATAR_EXTS, AVATAR_UPLOAD_MAX } from "../overlays/avatar";
@@ -108,6 +109,12 @@ export function VisualEditor({
 }) {
   const t = useT();
   const { hub, refresh } = useHubApi();
+  const { snapshot } = useHubState();
+  const nav = useNavigate();
+  // Generation needs an image key (the optional 生图 pipeline). When it's not set,
+  // INVITE the user to set it up rather than letting a generate click fail with a
+  // raw provider error — the "give them a face?" moment. Upload still works keyless.
+  const hasImageKey = !!(snapshot?.defaults as { has_image_key?: boolean } | undefined)?.has_image_key;
   const [refs, setRefs] = useState<Ref[]>([]);
   // The brief is built once via card.visual_brief and reused across the set so
   // "generate all" pays for ONE brief, not one per asset.
@@ -167,6 +174,14 @@ export function VisualEditor({
 
   return (
     <div className="vis-editor">
+      {!hasImageKey && !disabled && (
+        <div className="vis-invite">
+          <div className="vis-invite-text">{t("vis-need-key")}</div>
+          <button className="btn soft sm" onClick={() => nav("#/settings")}>
+            {t("vis-need-key-cta")}
+          </button>
+        </div>
+      )}
       <div className="vis-ref-sec">
         <h4>{t("vis-ref-title")}</h4>
         <div className="av-note">{t("vis-ref-sub")}</div>
@@ -206,6 +221,7 @@ export function VisualEditor({
             cardPath={cardPath}
             initUrl={initUrlFor(kind, card)}
             disabled={disabled}
+            canGenerate={hasImageKey}
             getBrief={getBrief}
             refData={refData}
             hubCall={hub.call.bind(hub)}
@@ -220,7 +236,7 @@ export function VisualEditor({
       </div>
 
       <div className="vis-all">
-        <button className="btn primary" disabled={disabled || genAllBusy} onClick={() => void generateAll()}>
+        <button className="btn primary" disabled={disabled || genAllBusy || !hasImageKey} onClick={() => void generateAll()}>
           {genAllBusy ? <span className="spin" /> : t("vis-gen-all", { n: VIS_KINDS.length })}
         </button>
         <div className="av-note" style={{ marginTop: 6 }}>
@@ -238,6 +254,7 @@ function VisualSlot({
   cardPath,
   initUrl,
   disabled,
+  canGenerate,
   getBrief,
   refData,
   hubCall,
@@ -250,6 +267,7 @@ function VisualSlot({
   cardPath: string;
   initUrl: string;
   disabled: boolean;
+  canGenerate: boolean;
   getBrief: () => Promise<Brief>;
   refData: () => string[];
   hubCall: HubCall;
@@ -405,7 +423,12 @@ function VisualSlot({
         {previewSrc ? <img src={previewSrc} alt="" /> : <span className="vis-slot-empty">{t("vis-empty")}</span>}
       </div>
       <div className="vis-slot-acts">
-        <button className="btn soft sm" disabled={disabled || busy} onClick={() => void generate()}>
+        <button
+          className="btn soft sm"
+          disabled={disabled || busy || !canGenerate}
+          title={canGenerate ? undefined : t("vis-need-key")}
+          onClick={() => void generate()}
+        >
           {t("vis-generate")}
         </button>
         <button className="btn soft sm" disabled={disabled || busy} onClick={() => fileInput.current?.click()}>
@@ -436,7 +459,7 @@ function VisualSlot({
             <button className="btn primary sm" disabled={busy} onClick={() => void saveStaged()}>
               {t("save")}
             </button>
-            <button className="btn soft sm" disabled={busy} onClick={() => void generate()}>
+            <button className="btn soft sm" disabled={busy || !canGenerate} onClick={() => void generate()}>
               {t("vis-regen")}
             </button>
             <button className="btn text sm" disabled={busy} onClick={() => setStaged(null)}>

@@ -186,6 +186,11 @@ function ChatStreamPage({ stream }: { stream: ReturnType<typeof useCharaStream> 
               <span className="glyph-txt">{glyphOf(stream.charName)}</span>
             </div>
             <b>{stream.charName}</b>
+            {/* The "it's alive" moment: after waking a chara with no opening +
+                no history, don't leave a blank stream — invite the first word. */}
+            {stream.ready && stream.items.length === 0 && (
+              <div className="chat-empty-hint">{t("chat-say-hi", { name: stream.charName })}</div>
+            )}
           </div>
           {stream.items.map((item) => (
             <StreamItemView
