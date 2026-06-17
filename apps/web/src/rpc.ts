@@ -7,6 +7,7 @@
  * seq dedup, the callback set — is 1:1 with rpc.js. */
 
 import { decodeEvent, type ProtocolEvent } from "./protocol";
+import type { LifeSnapshot } from "./lib/status";
 
 /* The CLI prints …/#token=X&ws=Y. Claim it once into sessionStorage and hand
    the hash to the router (#/chara/<name>…) so refresh/back work. */
@@ -282,17 +283,67 @@ export class HubClient {
   }
 }
 
+/* The CharaClient notification payloads, decoded ONCE at the wire boundary (the
+   same discipline as decodeEvent) so handlers receive typed values instead of
+   re-validating a Record<string, unknown> with ad-hoc String()/casts. */
+export interface PermissionAsk {
+  id: string;
+  kind: string;
+  reason: string;
+}
+export interface ClarifyAsk {
+  id: string;
+  question: string;
+  choices: string[];
+}
+export interface PeerMessage {
+  text: string;
+  source: string;
+}
+
+const str = (v: unknown): string => (v == null ? "" : String(v));
+const optNum = (v: unknown): number | undefined => {
+  if (v == null) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+};
+
+export function decodePermissionAsk(p: Record<string, unknown>): PermissionAsk {
+  return { id: str(p.id), kind: str(p.kind), reason: str(p.reason ?? p.detail) };
+}
+export function decodeClarifyAsk(p: Record<string, unknown>): ClarifyAsk {
+  return {
+    id: str(p.id),
+    question: str(p.question),
+    choices: Array.isArray(p.choices) ? p.choices.map(str) : [],
+  };
+}
+export function decodePeerMessage(p: Record<string, unknown>): PeerMessage {
+  return { text: str(p.text), source: str(p.source) };
+}
+export function decodeLifeState(p: Record<string, unknown>): LifeSnapshot {
+  // All fields optional; coerce so a malformed wire value can't masquerade as the
+  // wrong type (the `p as LifeSnapshot` this replaces did no checking).
+  return {
+    state: p.state == null ? undefined : str(p.state),
+    next_cycle_at: optNum(p.next_cycle_at),
+    rest_until: optNum(p.rest_until),
+    engaged_until: optNum(p.engaged_until),
+    detail: p.detail == null ? undefined : str(p.detail),
+  };
+}
+
 /* One living chat. attach -> AttachInfo; send streams `event` notifications
    until the turn's response lands; command/snapshot are plain calls. */
 export class CharaClient {
   name: string;
   sock: RpcSocket;
   onProtocolEvent: ((ev: ProtocolEvent) => void) | null = null;
-  onPermissionAsk: ((p: Record<string, unknown>) => void) | null = null;
-  onClarifyAsk: ((p: Record<string, unknown>) => void) | null = null;
-  onPeerMessage: ((p: Record<string, unknown>) => void) | null = null;
-  onTurnEnd: ((p: Record<string, unknown>) => void) | null = null;
-  onLifeState: ((p: Record<string, unknown>) => void) | null = null;
+  onPermissionAsk: ((p: PermissionAsk) => void) | null = null;
+  onClarifyAsk: ((p: ClarifyAsk) => void) | null = null;
+  onPeerMessage: ((p: PeerMessage) => void) | null = null;
+  onTurnEnd: (() => void) | null = null;
+  onLifeState: ((p: LifeSnapshot) => void) | null = null;
   onRejoinGap: (() => void) | null = null;
   onClose: ((ev: CloseEvent) => void) | null = null;
   streaming = false;
@@ -315,11 +366,11 @@ export class CharaClient {
       if (method === "event" && this.onProtocolEvent) {
         const ev = decodeEvent(params);
         if (ev) this.onProtocolEvent(ev);
-      } else if (method === "permission_ask" && this.onPermissionAsk) this.onPermissionAsk(params);
-      else if (method === "clarify_ask" && this.onClarifyAsk) this.onClarifyAsk(params);
-      else if (method === "peer_message" && this.onPeerMessage) this.onPeerMessage(params);
-      else if (method === "turn_end" && this.onTurnEnd) this.onTurnEnd(params);
-      else if (method === "life.state" && this.onLifeState) this.onLifeState(params);
+      } else if (method === "permission_ask" && this.onPermissionAsk) this.onPermissionAsk(decodePermissionAsk(params));
+      else if (method === "clarify_ask" && this.onClarifyAsk) this.onClarifyAsk(decodeClarifyAsk(params));
+      else if (method === "peer_message" && this.onPeerMessage) this.onPeerMessage(decodePeerMessage(params));
+      else if (method === "turn_end" && this.onTurnEnd) this.onTurnEnd();
+      else if (method === "life.state" && this.onLifeState) this.onLifeState(decodeLifeState(params));
       else if (method === "rejoin.gap") {
         this.rejoinGap = true;
         if (this.onRejoinGap) this.onRejoinGap();

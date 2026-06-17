@@ -360,18 +360,16 @@ export function useCharaStream(name: string): CharaStream {
         setConnected(true);
         client.onProtocolEvent = (ev) => onEvent(ev);
         client.onPermissionAsk = (p) => {
-          model.pushPermission(String(p.id ?? ""), String(p.kind ?? ""), String(p.reason ?? p.detail ?? ""));
+          model.pushPermission(p.id, p.kind, p.reason);
           bump();
         };
         client.onClarifyAsk = (p) => {
-          const choices = Array.isArray(p.choices) ? p.choices.map(String) : [];
-          model.pushClarify(String(p.id ?? ""), String(p.question ?? ""), choices);
+          model.pushClarify(p.id, p.question, p.choices);
           bump();
         };
         client.onPeerMessage = (p) => {
-          const text = String(p.text ?? "");
-          if (!text) return;
-          model.pushUser(text, [], { via: String(p.source ?? "") || undefined });
+          if (!p.text) return;
+          model.pushUser(p.text, [], { via: p.source || undefined });
           bump();
         };
         client.onTurnEnd = () => {
@@ -381,7 +379,7 @@ export function useCharaStream(name: string): CharaStream {
           flushQueueRef.current();
         };
         client.onLifeState = (p) => {
-          lifeRef.current = p as LifeSnapshot;
+          lifeRef.current = p; // already a decoded, coerced LifeSnapshot
           renderLifeState();
           if (!lifeTimer) lifeTimer = setInterval(renderLifeState, 1000);
         };
