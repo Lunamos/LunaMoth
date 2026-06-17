@@ -1,6 +1,12 @@
-"""Presence awareness: the neutral enter/leave conversation markers (card-
-overridable wording), the cross-process handoff file, and the presence-gated
-request_permission tool."""
+"""Mode normalization + the first-message (card first_mes) mechanism.
+
+Presence (operator enter/leave awareness) was retired: the chara is INDEPENDENT
+of whether a human is attached. There is no presence fact, no enter/leave marker,
+no per-page greeting gate. The card's first_mes is shown exactly once — at the
+chara's very first opening, recognized by an EMPTY transcript epoch — and is
+persisted to the transcript FIRST, so it survives a process death or a dropped
+frontend socket. `/reset` bumps the epoch to empty, so first_mes re-shows.
+"""
 import pytest
 
 from lunamoth.session.settings import Settings
@@ -20,41 +26,7 @@ def agent(tmp_path, monkeypatch):
     return make
 
 
-def test_default_card_overrides_the_presence_markers(agent):
-    """The bundled default card declares on_attach/on_detach, so its enter/leave
-    markers use that card wording (macros applied) instead of the neutral default."""
-    from lunamoth import presence
-
-    a = agent()
-    entered = presence.marker_text(a.character, "entered", a.char_name(), a.settings.user_name)
-    left = presence.marker_text(a.character, "left", a.char_name(), a.settings.user_name)
-    assert a.settings.user_name in entered  # the card's on_attach names {{user}}
-    assert left.strip()
-
-
-def test_card_without_overrides_uses_the_neutral_default():
-    from lunamoth.content.cards import CharacterCard
-    from lunamoth import presence
-
-    bare = CharacterCard(name="Visitor")
-    # The bundled default marker is English; a card carries any other language
-    # through its on_attach/on_detach override, not through this default.
-    assert presence.marker_text(bare, "entered", "Visitor", "op") == "[op joined the conversation.]"
-    assert presence.marker_text(bare, "left", "Visitor", "op") == "[op left the conversation.]"
-
-
-def test_presence_state_roundtrip(tmp_path):
-    from lunamoth.presence import PresenceState
-
-    p = PresenceState(tmp_path)
-    assert p.first_meeting()
-    p.mark_met()
-    assert not p.first_meeting()
-    assert p.pop_event() == ""
-    p.queue_event("the operator left")
-    assert p.pop_event() == "the operator left"
-    assert p.pop_event() == ""  # consumed
-
+# ---- modes ---------------------------------------------------------------------
 
 def test_mode_normalization():
     from lunamoth.presence import normalize_mode
@@ -69,167 +41,78 @@ def test_mode_normalization():
     assert normalize_mode("") == "live"
 
 
-def test_attach_never_wakes_a_resting_chara(agent):
-    """Entering the room is presence bookkeeping only while the chara rests:
-    no greeting, no arrival turn — a user MESSAGE is what wakes it."""
-    import time as _time
+def test_presence_state_module_is_gone():
+    """The PresenceState file/exports are deleted — only normalize_mode remains."""
+    import lunamoth.presence as presence
 
-    from lunamoth.protocol.api import CharaHandle
-
-    a = agent()
-    a.state.set_rest_until(_time.time() + 600)
-    handle = CharaHandle(agent=a)
-    info = handle.attach(present=True)
-    assert info.opening == "none" and info.opening_text == ""
-    assert a.state.load()["user_present"] is True
+    assert hasattr(presence, "normalize_mode")
+    assert not hasattr(presence, "PresenceState")
+    assert not hasattr(presence, "marker_text")
 
 
-def test_resting_defers_first_meeting_does_not_burn_it(agent):
-    """Regression: a never-met chara that happens to be resting when the human
-    first attaches must NOT have its first_mes burned. The resting attach stays
-    silent BUT defers the meeting (no mark_met); once awake, the next attach still
-    greets. (The old `if resting or self._greeted:` marked-met the sleeper and lost
-    the introduction forever.)"""
-    import time as _time
+# ---- the first-message mechanism (transcript is the single authority) ----------
 
-    from lunamoth.protocol.api import CharaHandle
-
-    a = agent()
-    a.transcript.reset()
-    a.presence.path.unlink(missing_ok=True)  # shared SANDBOX_ROOT: ensure first meeting
-    a.state.set_rest_until(_time.time() + 600)
-    handle = CharaHandle(agent=a)
-    first = handle.attach(present=True)
-    assert first.opening == "none"                  # resting → silent
-    assert a.presence.first_meeting() is True        # but the meeting is NOT consumed
-    a.state.set_rest_until(0)                         # now awake
-    second = handle.attach(present=True)
-    assert second.opening == "greeting" and second.opening_text  # first_mes still shows
-
-
-# ---- entering never forces a turn; speak inserts entered; leave only if spoke ----
-
-def test_entering_a_return_visit_forces_nothing(agent):
-    """Entering a chara you've met before opens silently — no arrival turn,
-    you just watch it do its own thing (owner decision 2026-06-13)."""
+def test_first_open_shows_the_card_greeting_on_an_empty_epoch(agent):
+    """A brand-new chara introduces itself once (first_mes) the first time it is
+    opened — recognized by an empty transcript epoch."""
     from lunamoth.protocol.api import CharaHandle
 
     a = agent()
     a.state.set_rest_until(0)
-    a.transcript.reset()           # isolate from the shared repo sandbox transcript
-    a.presence.mark_met()  # already met -> not the first_mes path
+    a.transcript.reset()  # fresh epoch → empty
     handle = CharaHandle(agent=a)
-    info = handle.attach(present=True)
-    assert info.opening == "none" and not info.opening_text
-
-
-def test_first_meeting_still_shows_the_card_greeting(agent):
-    """A brand-new chara introduces itself once (first_mes)."""
-    from lunamoth.protocol.api import CharaHandle
-
-    a = agent()
-    a.state.set_rest_until(0)
-    a.transcript.reset()                     # isolate from the shared repo sandbox transcript
-    a.presence.path.unlink(missing_ok=True)  # shared SANDBOX_ROOT: ensure first meeting
-    handle = CharaHandle(agent=a)
-    info = handle.attach(present=True)
+    info = handle.attach()
     assert info.opening == "greeting" and info.opening_text
 
 
-def test_greeting_is_persisted_server_side_without_a_frontend_greet(agent):
+def test_greeting_is_persisted_server_side_before_attach_returns(agent):
     """The opener reaches the transcript the moment attach() decides to greet —
-    NOT on a frontend `greet` round-trip. So it survives on the board and across
-    a reconnect even if that round-trip never lands; first-meeting is consumed,
-    so a lost opener would otherwise be gone forever. The later greet RPC is
-    idempotent (no double-record)."""
+    BEFORE attach returns, NOT on a frontend `greet` round-trip. So it survives a
+    process death / dropped socket. A later greet RPC is idempotent."""
     from lunamoth.protocol.api import CharaHandle
 
     a = agent()
     a.state.set_rest_until(0)
     a.transcript.reset()
-    a.presence.path.unlink(missing_ok=True)
     handle = CharaHandle(agent=a)
-    info = handle.attach(present=True)
+    info = handle.attach()
     assert info.opening == "greeting" and info.opening_text
 
     def greet_rows():
         return [r for r in a.transcript.load(max_messages=0)
                 if r.get("role") == "assistant" and info.opening_text[:30] in str(r.get("content", ""))]
 
-    # persisted by attach() ALONE — no record_greeting/greet call yet
+    # persisted by attach() ALONE — no extra record_greeting/greet call yet
     assert len(greet_rows()) == 1, a.transcript.load(max_messages=0)
     # the frontend's later greet round-trip is a harmless no-op
     handle.record_greeting(info.opening_text)
     assert len(greet_rows()) == 1, "frontend greet must not double-record"
 
 
-def test_wordless_visit_leaves_no_trace(agent):
-    """Enter, watch, leave without a word: nothing was added on entry and no
-    departure marker is written — entering and leaving are not conversation."""
+def test_opening_text_is_not_also_in_the_restored_tail(agent):
+    """On the greeting attach, the opener is sent ONCE as opening_text; `restored`
+    is captured before the commit, so the frontend never shows it twice."""
     from lunamoth.protocol.api import CharaHandle
 
     a = agent()
     a.state.set_rest_until(0)
     a.transcript.reset()
-    a.presence.mark_met()
     handle = CharaHandle(agent=a)
-    handle.attach(present=True)
-    before = len(handle._session.context.messages)
-    handle.detach()
-    assert len(handle._session.context.messages) == before
-    assert a.presence.pop_event() == ""  # no departure handoff
+    info = handle.attach()
+    assert info.opening == "greeting"
+    joined = " ".join(str(m.get("content") or "") for m in info.restored)
+    assert info.opening_text not in joined
 
 
-def test_speaking_inserts_an_entered_marker_once_then_leaving_marks_departure(agent):
-    from lunamoth.protocol.api import CharaHandle
-
-    a = agent()
-    a.state.set_rest_until(0)
-    a.transcript.reset()
-    a.presence.mark_met()
-    handle = CharaHandle(agent=a)
-    handle.attach(present=True)
-    # Count system lines (the markers) rather than match text — the marker wording
-    # is card-overridable (the default card supplies its own on_attach/on_detach).
-    def n_sys():
-        return sum(1 for m in handle._session.context.messages if m.get("role") == "system")
-
-    base = n_sys()
-    list(handle.stream_user("在吗？"))
-    assert n_sys() == base + 1  # the entered marker, exactly once on first speech
-    list(handle.stream_user("还在吗"))
-    assert n_sys() == base + 1  # a second message does NOT add another entered marker
-    handle.detach()
-    # Departure is NON-BLOCKING: NOT injected into the live context now (that would
-    # interrupt work in flight); it is QUEUED, flushed at the chara's next own cycle.
-    assert n_sys() == base + 1            # no immediate departure marker
-    assert a.presence.pop_event() != ""   # but it was queued for the next cycle
-
-
-def test_visit_to_a_resting_chara_leaves_no_departure_note(agent):
-    import time as _time
-
-    from lunamoth.protocol.api import CharaHandle
-
-    a = agent()
-    a.state.set_rest_until(_time.time() + 600)
-    handle = CharaHandle(agent=a)
-    handle.attach(present=True)
-    before = len(handle._session.context.messages)
-    handle.detach()
-    assert len(handle._session.context.messages) == before
-    assert a.presence.pop_event() == ""
-
-
-def test_reattach_does_not_replay_the_opening(agent):
-    """A resident greets once per life, not once per page-load."""
+def test_reopen_does_not_replay_the_greeting(agent):
+    """A non-empty epoch opens silently; the greeting rides `restored`, not a
+    second opening — survives reconnect / page reload."""
     from lunamoth.protocol.api import CharaHandle
     from lunamoth.server.dispatch import JsonRpcDispatcher
 
     a = agent()
     a.state.set_rest_until(0)
-    a.transcript.reset()                     # isolate from the shared repo sandbox transcript
-    a.presence.path.unlink(missing_ok=True)  # shared SANDBOX_ROOT: ensure first meeting
+    a.transcript.reset()
     out = []
     d = JsonRpcDispatcher(out.append, handle=CharaHandle(agent=a))
 
@@ -238,100 +121,150 @@ def test_reattach_does_not_replay_the_opening(agent):
         return res["opening"] if isinstance(res, dict) else res.opening
 
     r1 = d.dispatch({"jsonrpc": "2.0", "id": 1, "method": "attach", "params": {}})
-    assert opening(r1) == "greeting"  # first meeting greets
+    assert opening(r1) == "greeting"   # first open greets
     r2 = d.dispatch({"jsonrpc": "2.0", "id": 2, "method": "attach", "params": {}})
-    assert opening(r2) == "none"      # reconnect does not
+    assert opening(r2) == "none"       # reopen does not
 
 
-def test_background_adopt_then_human_attach_still_greets(agent):
-    """The supervisor pre-attaches a resident with present=False (idle driving)
-    BEFORE the human connects. That background adopt must NOT eat the human's
-    opener — the first present=True attach still greets (regression: the
-    'greet once per life' change had neutered every human greeting)."""
+def test_greeting_survives_a_new_handle_on_the_same_transcript(agent):
+    """The KEY guarantee: the greeting authority is the transcript, not an
+    in-memory flag. A fresh handle (e.g. a restarted child / new process) on the
+    same already-greeted transcript must NOT re-greet."""
     from lunamoth.protocol.api import CharaHandle
 
     a = agent()
     a.state.set_rest_until(0)
     a.transcript.reset()
-    a.presence.path.unlink(missing_ok=True)    # shared SANDBOX_ROOT: ensure first meeting
-    handle = CharaHandle(agent=a)
-    bg = handle.attach(present=False)          # daemon adopts first
-    assert bg.opening == "none"
-    human = handle.attach(present=True)        # the human arrives
-    assert human.opening in ("greeting", "arrival", "probe")
-    assert human.opening_text
-    # a reconnect (second human attach) is presence-only, no re-greet
-    again = handle.attach(present=True)
+    first = CharaHandle(agent=a).attach()
+    assert first.opening == "greeting"
+    # A brand-new handle wrapping the same agent/transcript: the row is on disk.
+    again = CharaHandle(agent=a).attach()
     assert again.opening == "none"
 
 
-def test_detach_marker_is_flushed_at_the_next_self_work_cycle(agent):
-    """The departure queued on detach is injected at the START of the next idle
-    cycle (so in-flight work finishes first), NOT immediately on detach."""
+def test_reset_reshows_the_greeting(agent):
+    """/reset bumps the epoch to empty → the next open greets again (desired)."""
     from lunamoth.protocol.api import CharaHandle
 
     a = agent()
     a.state.set_rest_until(0)
     a.transcript.reset()
-    a.presence.mark_met()
-    handle = CharaHandle(agent=a)
-    handle.attach(present=True)
-    list(handle.stream_user("做个任务"))          # operator spoke → visit_spoke=True
-    handle.detach()                               # queues the departure (non-blocking)
-    session = handle._session
-    before = sum(1 for m in session.context.messages if m.get("role") == "system")
-    list(a.stream_think(session))                 # next self-work cycle flushes it first
-    after = sum(1 for m in session.context.messages if m.get("role") == "system")
-    assert after >= before + 1                    # the queued departure marker landed
-    assert a.presence.pop_event() == ""           # consumed, not left dangling
+    assert CharaHandle(agent=a).attach().opening == "greeting"
+    assert CharaHandle(agent=a).attach().opening == "none"
+    a.transcript.reset()  # like /reset
+    assert CharaHandle(agent=a).attach().opening == "greeting"
 
 
-def test_first_meeting_greets_even_after_self_work(agent):
-    """A live chara may self-work (writing transcript) before you first open the
-    chat; the first human attach must STILL show its first_mes intro — the greeting
-    is gated on first_meeting(), not on an empty transcript."""
+def test_reset_command_reseeds_greeting_before_selfwork(agent):
+    """The /reset COMMAND must re-seed first_mes into the fresh epoch IMMEDIATELY,
+    so a live chara that self-works before the human reopens still re-shows the
+    opener. (Self-work under a tool chara writes kind='chat' rows that an
+    empty-epoch gate alone can't distinguish — the command-level re-seed closes
+    that hole.)"""
+    from lunamoth.core.commands import _reset
+    from lunamoth.protocol.api import CharaHandle
+
+    a = agent()
+    a.state.set_rest_until(0)
+    session = a.make_session()
+    g = (a.greeting() or "").strip()
+    assert g, "default card should have a first_mes"
+
+    _reset(a, session, "")
+    # greeting is the FIRST row of the new epoch (rides `restored` on reopen)
+    assert session.context.messages, "reset must re-seed the greeting"
+    assert g[:40] in str(session.context.messages[0].get("content") or "")
+
+    # a self-work row afterwards must NOT erase the greeting from the reopened view
+    session.context.add("assistant", "...quiet self-work...", kind="think")
+    info = CharaHandle(agent=a).attach()
+    joined = " ".join(str(m.get("content") or "") for m in info.restored)
+    assert g[:40] in joined, "greeting must survive self-work after /reset"
+
+
+def test_background_then_foreground_open_greets_once(agent):
+    """A background open (the supervisor pre-attaching a resident) commits the
+    greeting just like a foreground one — there is no present/away distinction.
+    The point: it greets exactly once total, and a later open is silent."""
     from lunamoth.protocol.api import CharaHandle
 
     a = agent()
     a.state.set_rest_until(0)
     a.transcript.reset()
-    a.presence.path.unlink(missing_ok=True)
-    a.transcript.append_message({"role": "assistant", "content": "(it muses to itself)", "kind": "think"})
     handle = CharaHandle(agent=a)
-    info = handle.attach(present=True)
-    assert info.opening == "greeting" and info.opening_text   # not suppressed by prior self-work
-    assert info.restored                                      # the self-work still restores for display
+    bg = handle.attach(present=False)      # back-compat arg accepted, ignored
+    assert bg.opening == "greeting"        # empty epoch → greet (no present gate)
+    again = handle.attach(present=True)    # next open is silent
+    assert again.opening == "none"
 
+
+def test_detach_leaves_no_trace_and_is_a_noop(agent):
+    """Leaving the chat is not an event: detach touches nothing in the context."""
+    from lunamoth.protocol.api import CharaHandle
+
+    a = agent()
+    a.state.set_rest_until(0)
+    a.transcript.reset()
+    handle = CharaHandle(agent=a)
+    handle.attach()
+    list(handle.stream_user("做个任务"))
+    before = len(handle._session.context.messages)
+    handle.detach()
+    assert len(handle._session.context.messages) == before  # no departure marker
+
+
+def test_speaking_inserts_no_presence_marker(agent):
+    """A user message is just a user message — no "entered" marker is injected."""
+    from lunamoth.protocol.api import CharaHandle
+
+    a = agent()
+    a.state.set_rest_until(0)
+    a.transcript.reset()
+    handle = CharaHandle(agent=a)
+    handle.attach()
+
+    def n_sys():
+        return sum(1 for m in handle._session.context.messages if m.get("role") == "system")
+
+    base = n_sys()
+    list(handle.stream_user("在吗？"))
+    assert n_sys() == base  # no presence/marker system line added
+
+
+def test_env_facts_carry_no_operator_token(agent):
+    """The volatile env-facts line no longer carries operator present/away —
+    the chara's context is independent of attach state."""
+    a = agent(toolpack="sandbox")  # tools on → env facts present
+    s = a.make_session()
+    tail = "\n\n".join(a._volatile_tail(a._scan_text(s, "x"), s))
+    assert "operator=" not in tail
+
+
+# ---- restore / display behavior (unchanged by the refactor) --------------------
 
 def test_reconnect_shows_the_conversation_so_far(agent):
-    """A reconnect must restore the conversation that happened since the child
-    started (regression: the dispatch cached the empty background-attach
-    snapshot and replayed it forever)."""
+    """A reopen restores the conversation that happened since the child started."""
     from lunamoth.protocol.api import CharaHandle
 
     a = agent()
     a.state.set_rest_until(0)
     a.transcript.reset()
     handle = CharaHandle(agent=a)
-    handle.attach(present=False)
-    handle.attach(present=True)
+    handle.attach()
     list(handle.stream_user("记住：项目代号 Moth"))   # a real exchange lands in context
-    reattached = handle.attach(present=True)          # navigate away and back
-    joined = " ".join(c for _, c in [(m.get("role"), m.get("content") or "")
-                                     for m in [dict(x) for x in reattached.restored]])
+    reattached = handle.attach()                       # navigate away and back
+    joined = " ".join(str(m.get("content") or "") for m in reattached.restored)
     assert "项目代号 Moth" in joined
 
 
 def test_display_restore_shows_tools_without_changing_model_context(agent):
     """The FRONTEND restore gains tool calls / results / reasoning, while the
-    MODEL's replayed context (context.render()) is unchanged — tool results
-    stay forensic for the model on purpose."""
+    MODEL's replayed context (context.render()) is unchanged."""
     from lunamoth.protocol.api import CharaHandle
 
     a = agent()
     a.state.set_rest_until(0)
     a.transcript.reset()
-    # Persist a realistic tool round-trip straight into the transcript.
     a.transcript.append_message({"role": "user", "content": "list files"})
     a.transcript.append_message({"role": "assistant", "content": "",
                                  "reasoning_content": "I'll run terminal",
@@ -340,19 +273,31 @@ def test_display_restore_shows_tools_without_changing_model_context(agent):
     a.transcript.append_message({"role": "tool", "tool_call_id": "c1", "content": "a.txt\nb.txt"})
 
     handle = CharaHandle(agent=a)
-    info = handle.attach(present=True)
+    info = handle.attach()
     restored = [dict(m) for m in info.restored]
 
-    # The DISPLAY view carries reasoning, the tool call, and the tool result.
     assert any(m.get("reasoning_content") == "I'll run terminal" for m in restored)
     assert any(m.get("tool_calls") for m in restored)
     assert any(m.get("role") == "tool" and "a.txt" in str(m.get("content", "")) for m in restored)
 
-    # The MODEL's replayed context is unchanged: render() drops reasoning and,
-    # for paired calls, keeps tool results exactly as before this change.
     sess = handle._session
     view = sess.context.render(include_reasoning=False)
     assert all("reasoning_content" not in m for m in view)
-    # The session context did NOT gain the display-only legacy rows.
     assert sess.context.messages == [dict(m) for m in a.transcript.load(
         max_messages=a.RESTORE_MAX_MESSAGES)]
+
+
+# ---- FIX 3: StateSnapshot exposes the frozen-card visuals ----------------------
+
+def test_snapshot_exposes_visual_fields(agent):
+    """The snapshot carries avatar/sprite/bg/keyvisual so a chat view can show the
+    real avatar. With no card art they are empty strings, never missing."""
+    from lunamoth.protocol.api import CharaHandle
+
+    a = agent()
+    handle = CharaHandle(agent=a)
+    handle.attach()
+    snap = handle.snapshot(fresh=True)
+    for field in ("avatar_uri", "sprite_url", "bg_url", "keyvisual_url"):
+        assert isinstance(getattr(snap, field), str)
+    assert not hasattr(snap, "user_present")  # presence field retired

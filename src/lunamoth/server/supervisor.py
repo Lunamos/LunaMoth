@@ -816,11 +816,9 @@ class CharaChild:
             # A client leaving the room must not kill the resident. On the
             # child's stdio transport `detach` means "transport over, exit"
             # (the direct `serve --stdio` contract) — under the supervisor the
-            # child's lifecycle is OURS, so translate the leave into a
-            # presence fact and answer the client ourselves.
-            with contextlib.suppress(Exception):
-                if self._attached:
-                    await self.private_call("presence.set", {"present": False}, timeout=10.0)
+            # child's lifecycle is OURS, so we swallow the detach and answer the
+            # client ourselves (the chara is independent of attach/detach, so
+            # there is nothing to register on the leave).
             rid = req.get("id")
             driver = self.driver_slot.current
             if rid is not None and driver is not None:
@@ -852,12 +850,9 @@ class CharaChild:
         self._send_life_to(driver)
 
     async def disconnect_driver(self, driver: _Driver) -> None:
+        # A driver disconnecting just frees the slot; the resident keeps living
+        # exactly as it was (the chara is independent of attach/detach).
         self.driver_slot.clear(driver)
-        try:
-            if self._attached:
-                await self.private_call("presence.set", {"present": False}, timeout=10.0)
-        except Exception:
-            _log.debug("presence false failed for %s", self.name, exc_info=True)
 
     async def handle_rejoin(self, last_seq: int, driver: _Driver) -> bool:
         ok, frames = self.ring.replay_after(last_seq)
@@ -1854,12 +1849,7 @@ class Supervisor:
                     if isinstance(req, dict) and req.get("method") == "rejoin":
                         params = req.get("params") if isinstance(req.get("params"), dict) else {}
                         ok = await child.handle_rejoin(int(params.get("last_seq") or 0), driver)
-                        driver.joined = ok
-                        if ok:
-                            with contextlib.suppress(Exception):
-                                await child.private_call("presence.set", {"present": True}, timeout=10.0)
-                        else:
-                            driver.joined = True
+                        driver.joined = ok if ok else True
                         continue
                     driver.joined = True
                 await child.forward_client_frame(raw)

@@ -657,8 +657,6 @@ _FIELD_REWRITE_LABEL = {
     "tagline": "a one-line tagline",
     "user_name": "who YOU (the human) are in this world — a short name or role",
     "user_persona": "a short description of who YOU (the human) are to the character",
-    "on_attach": "the neutral one-line fact shown when you enter the conversation",
-    "on_detach": "the neutral one-line fact shown when you leave the conversation",
     "goals": "the character's seed goals, one short goal per line",
     "world_entries": "world-book lorebook entries, one per line as 'key1, key2 — content'",
 }

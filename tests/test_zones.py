@@ -66,7 +66,6 @@ def agent_factory(tmp_path, monkeypatch):
         if reset:
             a.transcript.reset()
         a.state.set_network(False)
-        a.state.set_present(False)
         return a
 
     return make
@@ -105,12 +104,12 @@ def test_runtime_flips_and_worldinfo_change_only_volatile_tail(agent_factory, tm
     before = _blob(a._volatile_tail(a._scan_text(s, "plain"), s))
 
     a.state.set_network(True)
-    a.state.set_present(True)
     after = _blob(a._volatile_tail(a._scan_text(s, "trigger"), s))
 
     assert _hash(a._stable_prefix()) == stable_hash
     assert before != after
-    assert "network=on" in after and "operator=present" in after
+    assert "network=on" in after
+    assert "operator=" not in after  # presence retired: no operator token in env facts
     assert "KEY-VOLATILE" in after
     assert "KEY-VOLATILE" not in _blob(a._stable_prefix())
 

@@ -217,15 +217,15 @@ def main(argv: list[str] | None = None) -> int:
         os.environ['LUNAMOTH_DEBUG'] = '1'  # picked up by setup_logging in the agent
 
     base_patience = float(args.patience) if args.patience is not None else None
-    # Presence: interactive terminal = operator attached; detached daemon
-    # (stdin is /dev/null, started by `lunamoth start`) = operator away. The
-    # handle does the presence/handoff bookkeeping on attach.
+    # An interactive terminal vs a detached daemon (stdin is /dev/null, started
+    # by `lunamoth start`) differ only in whether THIS frontend drives input —
+    # the chara itself is independent of attach/detach.
     interactive = sys.stdin.isatty()
     handle = CharaHandle()
     if interactive:
         handle.set_permission_hook(_stdin_permission_hook)
         handle.set_clarify_hook(_stdin_clarify_hook)
-    info = handle.attach(present=interactive)
+    info = handle.attach()
     if base_patience is None:
         base_patience = float(getattr(handle.snapshot(fresh=True), "patience", 600.0) or 600.0)
     name = info.char_name

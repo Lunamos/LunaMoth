@@ -33,7 +33,6 @@ from ..content.persona import (
     fallback_persona,
     system_language,
 )
-from .. import presence
 from . import providers
 from ..content import rules as rules_layer
 from ..tools.mcp import McpManager
@@ -148,7 +147,6 @@ class LunaMothAgent:
         self._art_staged = False  # assets/ sibling populated once per session, not per prefix build
         self.llm = LLMClient(self.settings.to_llm_config())
         self.thought_cfg = ThoughtConfig()
-        self.presence = presence.PresenceState(SANDBOX_ROOT)
         # Durable conversation log: every context line lands here as it happens,
         # so the chara keeps its conversation across detach/attach and daemons.
         self.transcript = TranscriptStore(SANDBOX_ROOT / "transcript.db")
@@ -389,19 +387,19 @@ class LunaMothAgent:
             return g or None
         return None
 
-    # ---- presence (operator attach/detach awareness) -------------------------------
-    # The enter/leave conversation fact is built by CharaHandle._presence_marker
-    # (protocol/api.py) via presence.marker_text — a passive, card-overridable
-    # context line. There is no "reaction turn" on attach/detach: that old
-    # on_attach/on_detach hook was removed (presence is a neutral fact, not a turn).
+    # ---- world events (a generic engine-injected event seam) -----------------------
+    # The chara has NO attach/detach awareness: a human coming or going changes
+    # nothing in its context. stream_event stays only as a generic seam reserved
+    # for a future GM/world-event layer (see protocol/api.py) — an engine-injected
+    # context line (role: system), not operator speech.
 
     def stream_event(self, event_text: str, session: Session):
-        """Stream the character's reaction to a presence event.
+        """Stream the character's reaction to an injected world event.
 
         The event is an engine-injected context line (role: system), not operator
-        speech — it is audited as a presence event, never as a user message.
+        speech — it is audited as a world event, never as a user message.
         """
-        self.audit.write("presence_event", kind="attach", text=event_text[:300])
+        self.audit.write("world_event", text=event_text[:300])
         # Commit the event line BEFORE streaming (interrupt-safe).
         scan_text = self._scan_text(session, event_text)
         session.context.add("system", event_text)
@@ -604,11 +602,10 @@ class LunaMothAgent:
         msgs: list[str] = []
         if self._tools_active():
             net = "on" if status.get("network_access") else "off"
-            who = "present" if status.get("user_present") else "away"
             today = datetime.now().strftime("%Y-%m-%d %a")
             msgs.append(
                 f"Environment: isolation={status.get('isolation', 'sandbox')}, network={net}, "
-                f"operator={who}, date={today}. workspace is your private read/write directory "
+                f"date={today}. workspace is your private read/write directory "
                 "(put work you want your user to see under works/); assets/ beside it is a "
                 "read-only reference shelf you can read but not write."
             )
@@ -941,12 +938,6 @@ class LunaMothAgent:
     def stream_think(self, session: Session):
         session.ticks += 1
         cycle = session.ticks
-        # Flush a deferred presence fact (e.g. the operator left while the chara was
-        # mid-task) at the START of a fresh self-work cycle — so it's registered
-        # AFTER the in-flight work wrapped up, never injected mid-turn.
-        pending = self.presence.pop_event()
-        if pending:
-            session.context.add("system", pending)
         agent_loop = self._agent_loop_active()
         speech: list[str] = []
         committed = False

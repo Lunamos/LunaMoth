@@ -63,7 +63,6 @@ class DummyHandle:
             user_name="operator",
             isolation="sandbox",
             net_on=False,
-            user_present=True,
             rest_until=0.0,
             quiet=300,
             patience=600.0,

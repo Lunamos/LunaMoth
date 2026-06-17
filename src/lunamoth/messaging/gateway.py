@@ -164,7 +164,6 @@ class MessagingGateway:
         self._attached = False
         self._refusals = RefusalThrottle()
         self._last_user_at = 0.0
-        self._present = False
         self._next_idle_at = time.monotonic()
         self._dedup = MessageDeduplicator()
 
@@ -185,8 +184,7 @@ class MessagingGateway:
         if self._started:
             return
         if not self._attached:
-            self.handle.attach(present=False)
-            self.handle.set_present(False)
+            self.handle.attach()
             self._attached = True
         for adapter in self.adapters:
             thread = threading.Thread(
@@ -212,8 +210,6 @@ class MessagingGateway:
                 adapter.close()
             except Exception:
                 _log.exception("failed to close messaging adapter %s", adapter.name)
-        if self._attached:
-            self.handle.set_present(False)
 
     def run(self, stop: threading.Event | None = None) -> None:
         self.start()
@@ -272,9 +268,6 @@ class MessagingGateway:
             now = time.monotonic()
             self._last_user_at = now
             self._next_idle_at = now + self._cycle_pause()
-            if not self._present:
-                self.handle.set_present(True)
-                self._present = True
 
             text = msg.text.strip()
             if not text:
@@ -304,10 +297,9 @@ class MessagingGateway:
     def _maybe_idle(self) -> bool:
         now = time.monotonic()
         quiet = self._quiet_seconds()
+        # Engagement is purely speech-driven: while the user has spoken within the
+        # last `quiet` seconds the chara attends; after that it resumes its own work.
         engaged = bool(self._last_user_at and now < self._last_user_at + quiet)
-        if self._present and not engaged:
-            self.handle.set_present(False)
-            self._present = False
         if engaged or self._resting() or now < self._next_idle_at:
             return False
         text = self._collect_say_text(self.handle.stream_idle())

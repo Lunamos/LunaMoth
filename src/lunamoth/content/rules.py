@@ -50,11 +50,11 @@ _RULES = (
     "an outcome before the tool returns it. If something blocks you, say so plainly and try "
     "another way.\n"
     "A user message that is empty or carries only a timestamp means no one is speaking to you — "
-    "the operator is away or silent, and the clock you see is the real world's. It is not a "
-    "question and needs no answer; what you do with unattended time is entirely yours, including "
-    "how you pace it. Your turns are bursts: real time passes between them.\n"
-    "When the operator speaks to you, set your own work aside and give the conversation your "
-    "full attention — your work can wait until they fall quiet."
+    "the clock you see is the real world's. It is not a question and needs no answer; what you "
+    "do with that unprompted time is entirely yours, including how you pace it. Your turns are "
+    "bursts: real time passes between them.\n"
+    "When a message does come from your user, give the conversation your full attention — your "
+    "own work can wait until they fall quiet again."
 )
 
 # Neutral capability practice — a sibling to _RULES, gated identically on tools.

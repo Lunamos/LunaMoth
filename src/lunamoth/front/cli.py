@@ -350,7 +350,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     from ..protocol.api import CharaHandle
 
     handle = CharaHandle()
-    handle.attach(present=True)
+    handle.attach()
     for ev in handle.stream_user(args.prompt):
         if args.stream_json:
             sys.stdout.write(to_json(ev) + "\n")

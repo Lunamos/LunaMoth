@@ -409,10 +409,10 @@ class LunaMothTUI(App):
         self.set_interval(0.06, self._flush_display)  # ~16fps repaint of the top pane
         self.set_interval(0.1, self._scheduler_tick)
         self.next_spont_at = time.monotonic() + 0.2
-        # Presence: the chara now has an operator attached (the handle does the
-        # transcript restore + handoff bookkeeping AND decides the opening move —
-        # one greeting tree for every frontend; we only render it).
-        info = self.handle.attach(present=True)
+        # The handle does the transcript restore AND decides the opening move
+        # (first_mes once on an empty epoch, else silent) — one tree for every
+        # frontend; we only render it. The chara is independent of attach/detach.
+        info = self.handle.attach()
         self.char_name = info.char_name
         # Attach grace (live mode): after greeting, leave the operator room for the
         # first word; if they stay silent the chara simply returns to its work.

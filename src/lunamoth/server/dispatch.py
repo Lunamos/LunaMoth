@@ -220,10 +220,12 @@ class JsonRpcDispatcher:
     # ---- method handlers -----------------------------------------------------
 
     def _attach(self, params: dict[str, Any]) -> Any:
-        # The handle owns the attach state machine (background adopt vs first
-        # human greeting vs reconnect): forward every attach to it and it
-        # returns the right opening + a FRESH `restored` snapshot. Re-running
-        # is safe — the session is built once, the greeting latches once.
+        # The handle owns the first-move decision (first_mes on an empty
+        # transcript epoch, else silent): forward every attach to it and it
+        # returns the right opening + a FRESH `restored` snapshot. Re-running is
+        # safe — the session is built once, the greeting commits once (transcript
+        # authority). `present` is accepted for protocol/back-compat but the chara
+        # is independent of whether a human is watching.
         present = bool(params.get("present", True))
         info = self.handle.attach(present=present)
         with self._lock:
@@ -255,7 +257,7 @@ class JsonRpcDispatcher:
         return None
 
     def _event(self, rid: Any, params: dict[str, Any], wants_response: bool) -> None:
-        """A world event turn (e.g. the card's on_attach arrival line)."""
+        """A world event turn (reserved seam for a future GM/world-event layer)."""
         self._require_attached()
         text = params.get("text")
         if not isinstance(text, str):
@@ -294,26 +296,22 @@ class JsonRpcDispatcher:
 
 
     def _presence_set(self, params: dict[str, Any]) -> dict[str, bool]:
+        # Presence was retired: the chara is independent of whether a human is
+        # watching. The RPC stays as a no-op purely for wire/back-compat — old
+        # clients that still send it get a clean ack, never an error. The only
+        # real effect is making sure the shared agent has a session when a client
+        # signals presence before any explicit attach.
         present = params.get("present")
         if not isinstance(present, bool):
             raise RpcError(-32602, "presence.set.present must be a boolean")
-        with self._lock:
-            attached = self._attached
         if present:
-            if attached:
-                self.handle.set_present(True)
-            else:
+            with self._lock:
+                attached = self._attached
+            if not attached:
                 self.handle.attach(present=True)
                 with self._lock:
                     self._attached = True
-            return {"ok": True, "present": True}
-        if attached:
-            # Keep the transport alive, but run the same presence handoff as a
-            # detach so card on_detach hooks are queued once.
-            self.handle.detach()
-        else:
-            self.handle.set_present(False)
-        return {"ok": True, "present": False}
+        return {"ok": True, "present": present}
 
     def _permission_reply(self, params: dict[str, Any]) -> dict[str, bool]:
         pid = params.get("id")

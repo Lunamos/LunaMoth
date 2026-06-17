@@ -41,17 +41,12 @@ class FakeHandle:
         self.user_calls = []
         self.command_calls = []
         self.idle_calls = 0
-        self.present_calls = []
         self.rest_until = 0.0
         self.quiet = 0
         self.attached = False
 
-    def attach(self, present=False):
+    def attach(self, present=True):
         self.attached = True
-        self.set_present(present)
-
-    def set_present(self, present: bool):
-        self.present_calls.append(bool(present))
 
     def snapshot(self):
         return StateSnapshot(
@@ -66,7 +61,6 @@ class FakeHandle:
             user_name="user",
             isolation="sandbox",
             net_on=False,
-            user_present=self.present_calls[-1] if self.present_calls else False,
             rest_until=self.rest_until,
             quiet=self.quiet,
             patience=600.0,
@@ -109,7 +103,7 @@ def test_gateway_inbound_reply_delivers_only_say_channel():
 
     assert handle.user_calls == ["hi"]
     assert adapter.sent == ["reply"]
-    assert True in handle.present_calls
+    assert handle.attached
 
 
 def test_gateway_idle_speak_delivered_muse_dropped():

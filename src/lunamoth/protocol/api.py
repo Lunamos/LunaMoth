@@ -20,7 +20,6 @@ from .events import Event
 
 # Re-exported for frontends (the UI shows token estimates without touching core).
 from ..core.context import estimate_tokens  # noqa: F401
-from .. import presence
 
 # Operator words that grant a permission request — shared by every frontend.
 GRANT_WORDS = frozenset({"y", "yes", "allow", "ok", "同意", "允许", "是"})
@@ -48,21 +47,16 @@ class CommandInfo:
 class AttachInfo:
     """Everything a frontend needs to open a session.
 
-    `opening` is the DECIDED first move (the greeting decision tree lives here,
-    not in each frontend): 'greeting' = display opening_text and call
-    record_greeting · 'arrival' = stream_event(opening_text) · 'probe' =
-    stream_user(opening_text) · 'none' = continue silently.
+    `opening` is the DECIDED first move: 'greeting' = the card's first_mes, shown
+    once at the chara's very first opening (the TRANSCRIPT epoch is empty), already
+    persisted server-side · 'none' = continue silently (a re-open, or a card with
+    no first_mes). The chara has NO attach/detach awareness — opening the chat is
+    not an event, only a way to watch and talk.
 
-    NOTE: attach() today only ever decides 'greeting' (first meeting) or 'none'.
-    'arrival' and 'probe' are RESERVED, forward-compat values: the presence model
-    deliberately keeps a RE-attach silent (the chara registers you only when you
-    speak — the entered marker carries that, see _presence_marker), so nothing
-    currently emits them. They stay in the contract (and the frontend branches
-    stay live) for the future GM/world-event layer; do NOT mistake them for dead
-    code, and do NOT remove the 'event' stream path — stream_event uses it for
-    world events independently of these openings. (The old card on_attach/on_detach
-    'reaction turn' hook was removed; on_attach/on_detach now only override the
-    neutral enter/leave marker TEXT — see presence.marker_text.)"""
+    'arrival' and 'probe' are RESERVED, forward-compat values for a future
+    GM/world-event layer; nothing emits them today, but the 'event' stream path
+    (stream_event) stays live for injected world events. Frontends that still
+    branch on them keep working — they simply never fire."""
     char_name: str
     lang: str
     mode: str
@@ -86,7 +80,6 @@ class StateSnapshot:
     user_name: str
     isolation: str
     net_on: bool
-    user_present: bool
     rest_until: float        # epoch the chara chose to rest until (0 = not resting)
     quiet: int               # engagement: silence (s) before it resumes its own work
     patience: float          # effective base seconds between spontaneous cycles
@@ -99,6 +92,12 @@ class StateSnapshot:
     memory_path: str
     sandbox_root: str
     workspace_root: str
+    # The active chara's frozen-card visuals, so a chat view can show the real
+    # avatar/art instead of a placeholder glyph (all '' when the card has none).
+    avatar_uri: str = ""
+    sprite_url: str = ""
+    bg_url: str = ""
+    keyvisual_url: str = ""
     # Wishes/skills/MCP listings are NOT here on purpose: the snapshot feeds a
     # status line polled several times a second, and those need disk walks.
     # Rich UIs get them from /wish /skills /mcp Reply.data on demand.
@@ -134,121 +133,52 @@ class CharaHandle:
         self._agent = agent or LunaMothAgent(settings)
         self._session = None
         self._snap: "tuple[float, StateSnapshot] | None" = None
-        # Latches once a human has been delivered the opener — a resident
-        # greets once per life, not once per page-load. A background (present
-        # =False) adopt never sets it, so it can't eat the human's greeting.
-        self._greeted = False
-        # The card greeting (first_mes) is persisted to the transcript exactly
-        # once, server-side, the moment attach() decides to show it — NOT left to
-        # a frontend `greet` round-trip (which, if dropped, would show the opener
-        # once but never record it, losing it from the transcript + board while
-        # the first-meeting flag is already consumed). This latch makes the later
-        # `greet` RPC idempotent.
-        self._greeting_committed = False
-        # Visit bookkeeping: a visit is presence-true → presence-false. A
-        # wordless visit leaves NO trace; the first words insert a neutral
-        # "entered" marker (once) and leaving after speaking adds a "left" one.
-        self._visit_spoke = False
-        self._visit_announced = False
 
     # ---- lifecycle -------------------------------------------------------------
 
     def attach(self, present: bool = True) -> AttachInfo:
-        """Open (or adopt) the conversation. `present` = a human is watching;
-        a daemon attaches with present=False to drive idle life.
+        """Open the conversation and decide the first move.
 
-        The state machine (so every frontend, and the supervisor's background
-        adopt-then-human-attach sequence, behaves identically):
-        - present=False: pure adoption — restore, set presence false, adopt a
-          queued handoff. NEVER greets and NEVER consumes the first-meeting,
-          so the daemon pre-attaching a resident can't eat the human's opener.
-        - present=True, first human this life: the greeting decision tree below
-          runs once, then `_greeted` latches.
-        - present=True, already greeted (reconnect / page reload): presence
-          fact only, opening='none' — a resident greets once per life, not per
-          page-load. `restored` is recomputed every time, so a reconnect after
-          a conversation shows that conversation (the old stale-cache bug)."""
+        The chara is INDEPENDENT of whether a human is watching: `present` is
+        kept only for transport/backward-compat and changes nothing about the
+        chara — opening the chat is not an event.
+
+        First move (one tree, every frontend): the card's first_mes is shown
+        exactly ONCE — at the chara's very first opening, recognized by an EMPTY
+        transcript epoch (no prior rows) — and is persisted to the transcript
+        FIRST, before anything else, so it can never be lost to a process death
+        or a dropped frontend socket. Every later open finds a non-empty epoch
+        and opens silently (opening='none'); the prior conversation rides
+        `restored`. `/reset` bumps the epoch to empty, so the first_mes naturally
+        re-shows on the next open."""
         a = self._agent
         if self._session is None:
             self._session = a.make_session()
+        # Capture `restored` BEFORE committing any greeting, so the opener is sent
+        # once (as opening_text) and never also folded into the restored tail on
+        # this same attach. On every LATER open the greeting rides `restored` from
+        # the transcript and opening='none' — no double-show.
         restored = self._display_restored()
-        a.state.set_present(present)
 
-        if not present:
-            # Daemon/background adoption: continue knowing the operator left.
-            handoff = a.presence.pop_event()
-            recent = self._session.context.messages[-3:]
-            if handoff and not any(
-                m.get("role") == "system" and m.get("content") == handoff for m in recent
-            ):
-                self._session.context.add("system", handoff)
-                restored = self._display_restored()
-            return AttachInfo(
-                char_name=a.char_name(), lang=a.lang, mode=a.settings.mode,
-                show_thinking=bool(a.settings.show_thinking),
-                restored=restored, opening="none", opening_text="",
-            )
-
-        # present=True — a human is watching.
-        a.presence.pop_event()  # discard any stale handoff — we're here now
-        # A reconnect after the opener was already delivered (same life) is
-        # presence bookkeeping only — a resident greets once per life, not once
-        # per page-load.
-        if self._greeted:
-            a.presence.mark_met()
-            self._begin_visit()
-            return AttachInfo(
-                char_name=a.char_name(), lang=a.lang, mode=a.settings.mode,
-                show_thinking=bool(a.settings.show_thinking),
-                restored=self._display_restored(), opening="none", opening_text="",
-            )
-        # Entering the room never wakes a RESTING chara: stay silent — but do NOT
-        # consume the first meeting. The card's first_mes is the chara's one
-        # introduction; a nap must DEFER it, never burn it, so it still shows the
-        # first time the chara is awake and actually seen (regression: folding
-        # `resting` into the greeted short-circuit marked-met a never-greeted
-        # sleeper and lost its first_mes forever).
-        resting = float(a.state.load().get("rest_until", 0.0) or 0.0) > time.time()
-        if resting:
-            self._begin_visit()
-            return AttachInfo(
-                char_name=a.char_name(), lang=a.lang, mode=a.settings.mode,
-                show_thinking=bool(a.settings.show_thinking),
-                restored=self._display_restored(), opening="none", opening_text="",
-            )
-        # Entering the room never forces a turn: you can just watch the chara
-        # do its own thing. The ONLY opener is the card's designed first_mes,
-        # shown ONCE at the first meeting (a brand-new chara introducing
-        # itself). A return visit, or a card with no first_mes, opens silently
-        # — the chara learns you arrived only when YOU speak (see stream_user).
+        # The transcript is the SINGLE authority for "has this chara ever opened".
+        # A fresh epoch (no rows) → show + persist the card greeting once. Persist
+        # FIRST: record_greeting writes the transcript row before we return, so a
+        # crash/drop after this point still leaves the greeting on disk and on the
+        # board. (make_session restored an empty context for an empty epoch, so the
+        # row we add is the first message — no double-show on reconnect.)
         greeting = a.greeting() or ""
-        # The first-meeting flag is the authority (mark_met() flips it after this
-        # attach, so a reconnect never re-greets). Do NOT also gate on `restored`:
-        # a live chara that already did some self-work before you first open the
-        # chat has a non-empty transcript, but this is STILL its first meeting with
-        # you and its first_mes intro must show.
-        first = a.presence.first_meeting()
-        if greeting and first:
+        empty_epoch = a.transcript.count() == 0
+        if greeting and empty_epoch:
             opening, opening_text = "greeting", greeting
+            self.record_greeting(opening_text)  # transcript first — survives anything
         else:
             opening, opening_text = "none", ""
-        info = AttachInfo(
+
+        return AttachInfo(
             char_name=a.char_name(), lang=a.lang, mode=a.settings.mode,
             show_thinking=bool(a.settings.show_thinking),
             restored=restored, opening=opening, opening_text=opening_text,
         )
-        a.presence.mark_met()
-        self._greeted = True
-        # Persist the opener NOW, server-side — not on a frontend round-trip.
-        # `restored` was captured above (pre-greeting), so this never double-shows
-        # on this attach; on any reconnect the greeting rides `restored` from the
-        # transcript. record_greeting is idempotent, so the frontend's later
-        # `greet` call is a harmless no-op.
-        if opening == "greeting" and opening_text:
-            self.record_greeting(opening_text)
-        if present:
-            self._begin_visit()
-        return info
 
     def _display_restored(self) -> tuple:
         """The restored tail SENT TO THE FRONTEND for display.
@@ -267,68 +197,37 @@ class CharaHandle:
             return tuple(rows)
         return tuple(dict(m) for m in self._session.context.messages)
 
-    def _begin_visit(self) -> None:
-        self._visit_spoke = False
-        self._visit_announced = False
-
-    def _presence_marker(self, kind: str) -> str:
-        """The neutral '<user> entered/left the conversation' FACT. Names the
-        operator by {{user}}; the bundled default is English, and a card MAY
-        override the wording (in any language) via extensions.lunamoth.on_attach
-        / on_detach (see presence.marker_text). A passive context line — never a
-        roleplay turn."""
-        a = self._agent
-        return presence.marker_text(a.character, kind, a.char_name(), a.settings.user_name)
-
     def record_greeting(self, text: str) -> None:
         """Commit the card greeting (first_mes) to the conversation, exactly once.
 
-        attach() calls this server-side the moment it decides to greet, so the
-        opener reaches the transcript (and thus the board preview + any reconnect)
-        even if the frontend never completes its `greet` round-trip. The latch
-        makes that frontend call — and any double-fire — a no-op."""
-        if self._greeting_committed or not text:
+        attach() calls this server-side the moment it decides to greet — the
+        opener reaches the transcript (and thus the board preview + any reopen)
+        before attach() even returns, so it survives a process death or a dropped
+        frontend socket. A frontend's later `greet` round-trip (and any
+        double-fire) is a harmless no-op: the transcript is the authority, and a
+        non-empty epoch already carries the line."""
+        if not text:
             return
-        self._greeting_committed = True
         if self._session is None:
             self._session = self._agent.make_session()
+        # Idempotent: don't re-append a greeting the transcript already holds (the
+        # frontend echoes opening_text back via `greet` after attach committed it).
+        last = self._session.context.messages[-1] if self._session.context.messages else None
+        if last and last.get("role") == "assistant" and (last.get("content") or "") == text:
+            return
         self._session.context.add("assistant", text)
 
     def detach(self) -> None:
-        """Presence bookkeeping on the way out (idempotence is the caller's job).
+        """Transport teardown only.
 
-        A wordless visit leaves NO trace. A visit where the operator spoke queues
-        a single neutral departure marker — NON-BLOCKING: it is NOT injected into
-        the live context now. Injecting immediately would interrupt work in flight
-        (the common case: you assign a task, then leave it to run). Instead the
-        chara finishes the current turn, then picks the marker up at its next own
-        cycle (stream_think flushes the queue) or when another process adopts it —
-        so it registers 'you left' AFTER wrapping up, then goes fully autonomous."""
-        if self._visit_spoke:
-            marker = self._presence_marker("left")
-            self._agent.presence.queue_event(marker)  # deferred; flushed at the next cycle
-            self._agent.audit.write("presence_event", kind="left", text=marker[:120])
-        self._visit_spoke = False
-        self._visit_announced = False
-        self._agent.state.set_present(False)
-
-    def set_present(self, present: bool) -> None:
-        if present and self._session is not None:
-            self._begin_visit()
-        self._agent.state.set_present(present)
+        The chara is independent of attach/detach: leaving the chat is not an
+        event and leaves no trace. Frontends/transports call this on the way out;
+        there is nothing for the agent to register."""
+        return None
 
     # ---- conversation (generators of protocol events) ---------------------------
 
     def stream_user(self, text: str, attachments=None) -> "Iterator[Event]":
-        # The first words of a visit insert a neutral "operator entered" fact
-        # before the message — entering was silent, engaging is what the chara
-        # registers. Once per visit.
-        if self._session is not None and not self._visit_announced:
-            self._visit_announced = True
-            marker = self._presence_marker("entered")
-            self._session.context.add("system", marker)
-            self._agent.audit.write("presence_event", kind="entered", text=marker[:120])
-        self._visit_spoke = True
         return self._agent.stream_handle(text, self._session, attachments)
 
     def stream_event(self, text: str) -> "Iterator[Event]":
@@ -358,6 +257,7 @@ class CharaHandle:
         a = self._agent
         status = a.state.load()
         mem = a.memory
+        visuals = self._card_visuals()
         snap = StateSnapshot(
             char_name=a.char_name(), lang=a.lang, mode=a.settings.mode,
             provider=a.settings.provider, model=a.settings.model,
@@ -367,7 +267,6 @@ class CharaHandle:
             user_name=a.settings.user_name,
             isolation=str(status.get("isolation", a.settings.py_backend)),
             net_on=bool(status.get("network_access")),
-            user_present=bool(status.get("user_present")),
             rest_until=float(status.get("rest_until", 0.0) or 0.0),
             quiet=int(getattr(a.settings, "quiet", 300)),
             patience=float(a.effective_patience()),
@@ -380,12 +279,32 @@ class CharaHandle:
             memory_path=str(mem.root),
             sandbox_root=str(a.sandbox.root),
             workspace_root=str(a.sandbox.root / "workspace"),
+            avatar_uri=visuals["avatar_uri"],
+            sprite_url=visuals["sprite_url"],
+            bg_url=visuals["bg_url"],
+            keyvisual_url=visuals["keyvisual_url"],
         )
         self._snap = (time.monotonic(), snap)
         return snap
 
+    def _card_visuals(self) -> dict:
+        """The active chara's frozen-card visuals (avatar + art URLs). Cached per
+        handle keyed on the card path — the frozen session card doesn't change
+        within a life, and the snapshot polls several times a second."""
+        from ..content.cards import card_visuals
+
+        path = (self._agent.character.source_path if self._agent.character else "") or ""
+        cached = getattr(self, "_visuals_cache", None)
+        if cached is not None and cached[0] == path:
+            return cached[1]
+        v = card_visuals(path)
+        self._visuals_cache = (path, v)
+        return v
+
     def reconfigure(self, settings) -> None:
         self._agent.reconfigure(settings)
+        self._visuals_cache = None  # the card may have changed
+        self._snap = None
         if self._session is not None:
             self._session.context.max_tokens = self._agent.context_limit()
 

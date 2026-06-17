@@ -10,7 +10,6 @@ DEFAULT_STATUS = {
     "isolation": "sandbox",          # dir | sandbox | docker (informational)
     "network_access": True,          # ON by default (owner 2026-06-15); operator can /net off
     "writable_paths": [],            # extra dirs the terminal tool may write to
-    "user_present": False,           # is an operator attached right now? (set by TUI/daemon)
     "rest_until": 0.0,               # epoch until which the chara chose to rest (rest tool)
 }
 # NOTE: there is deliberately NO per-session `tool_access` list here. Which tools
@@ -54,20 +53,18 @@ class EnvState:
             data.pop("tool_access", None)
             changed = True
         data.setdefault("isolation", "sandbox")
-        data.setdefault("user_present", False)
         data.setdefault("rest_until", 0.0)
+        # user_present was retired — the chara is independent of attach/detach.
+        # Drop any leftover so an old state file can't mislead a reader.
+        if "user_present" in data:
+            data.pop("user_present", None)
+            changed = True
         if changed:
             self.save(data)
         return data
 
     def save(self, data: dict[str, Any]) -> None:
         self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    def set_present(self, present: bool) -> dict[str, Any]:
-        data = self.load()
-        data["user_present"] = bool(present)
-        self.save(data)
-        return data
 
     def set_network(self, allowed: bool) -> dict[str, Any]:
         data = self.load()

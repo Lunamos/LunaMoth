@@ -152,7 +152,10 @@ def test_session_restores_conversation(agent):
     # A brand-new session (fresh attach / restart) restores the same conversation.
     s2 = a.make_session()
     assert ("user", "记住这句话") in s2.context.pairs()
-    # /reset starts a new epoch: the next session comes up empty.
+    # /reset starts a new epoch AND re-seeds the card's opening line (first_mes),
+    # so the chara re-introduces itself. The prior conversation is gone — no user
+    # turn survives; only the re-seeded assistant greeting (if the card has one).
     a.handle("/reset", s2)
     s3 = a.make_session()
-    assert s3.context.messages == []
+    assert ("user", "记住这句话") not in s3.context.pairs()
+    assert all(role == "assistant" for role, _ in s3.context.pairs())

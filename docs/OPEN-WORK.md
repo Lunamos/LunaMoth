@@ -640,3 +640,40 @@ architecture/rationale worth keeping (change only with owner sign-off):
   runs TWO server stacks on TWO ports (stdlib http.server + websockets, WS = http+1
   for non-loopback) — single-port ASGI (Starlette/uvicorn) is the eventual cleanup;
   it's the backbone of the deferred UI/feel refactor loop.
+
+# Loop 2026-06-18 — recurring-bug + UX sweep (owner /loop, in progress)
+
+Owner blessed free refactoring; no back-compat with old cards/tavern/contexts.
+
+- **[DONE] First-message swallow — permanent root fix.** Was a dual-authority desync
+  (durable presence `met` committed before the transcript greeting row). Fix: the
+  TRANSCRIPT is the single authority — `attach()` shows card `first_mes` iff the epoch
+  is empty and persists it FIRST; `/reset` re-seeds the greeting into the fresh epoch
+  at the command level (survives a live chara self-working before reopen). (api.py,
+  commands.py, tests/test_presence.py)
+- **[DONE] Delete all operator enter/leave (presence) logic.** Model context+behavior
+  now independent of attach/detach. Kept mode=live|chat, muse/say, rest/patience, the
+  speech-driven quiet timer. (presence/, core/state, core/agent, core/rules, protocol/api,
+  dispatch, supervisor, messaging)
+- **[DONE] StateSnapshot now carries the active chara's avatar/sprite/bg/keyvisual.**
+- **[TODO] #1b Frontend: render the active chara's avatar/visuals in the chat view**
+  (Chat.tsx header + empty-state + StreamItems Avatar were stubbed at glyphOf) and add
+  an in-session bg/sprite (立绘) control (a ChatPanel tab calling card.save_asset/
+  card.visual_generate against the chara's frozen session card).
+- **[TODO] #3 Image assets: compress quality + progressive load** (compressed first).
+- **[TODO] #4 Matte models: let the user install BiRefNet's two models from web/electron;
+  delete the other two; shareable across instances; default to the stronger one.**
+- **[TODO] #5 Unify key management into ONE settings surface** (multiple text keys +
+  multiple image keys from multiple sources); kill the two-tab split + inconsistent
+  input control styles.
+- **[TODO] #6 The empty rightmost column on web looks abrupt — fill or remove it.**
+- **[TODO] Mobile: make the web app responsive (mobile-first for the new UI work above).**
+- **[TODO] Delete per-chara `docker` isolation entirely** (isolation.py `_docker`/argv,
+  runner.py docker tier + image/memory/cpus params, session `docker` option, CLI
+  `--isolation docker`). Keep `sandbox` + the full-access dir mode; rename `dir`→`admin`
+  (same dir, full-machine r/w). (owner 2026-06-18)
+- Review LOW/MEDIUM from the keystone review: `_card_visuals` re-reads the card from
+  disk instead of reusing the in-memory `character` (cached, harmless); bundled cards
+  still carry inert `on_attach`/`on_detach` keys (cleanup).
+- Discipline: nothing env-specific or personal (server IPs, deploy domains) in the
+  repo; the per-host management tool stays server-only.

@@ -99,9 +99,10 @@ def test_driver_takeover_closes_old_driver():
 
 
 def test_client_detach_does_not_kill_the_resident_child():
-    """A client leaving the room is a presence fact, not a child shutdown:
-    the supervisor must translate `detach` instead of forwarding it (the
-    child's stdio transport treats a forwarded detach as 'exit')."""
+    """A client leaving the room is NOT a child shutdown: the supervisor must
+    swallow `detach` and answer the client itself instead of forwarding it (the
+    child's stdio transport treats a forwarded detach as 'exit'). The chara is
+    independent of attach/detach, so there is nothing to register on the leave."""
     import asyncio
 
     from lunamoth.server.supervisor import CharaChild
@@ -129,11 +130,11 @@ def test_client_detach_does_not_kill_the_resident_child():
 
     async def run():
         # proc is None: if the frame were forwarded (or ensure_started were
-        # reached) this would raise / try to spawn — translation must short-circuit.
+        # reached) this would raise / try to spawn — the swallow must short-circuit.
         await child.forward_client_frame('{"jsonrpc":"2.0","id":7,"method":"detach"}')
 
     asyncio.run(run())
-    assert calls == [("presence.set", {"present": False})]
+    assert calls == []  # detach is swallowed, no presence translation
     assert sent and sent[0]["id"] == 7 and sent[0]["result"]["ok"] is True
     assert child.proc is None and child.state == "stopped"
 

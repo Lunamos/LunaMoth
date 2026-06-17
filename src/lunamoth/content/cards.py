@@ -369,3 +369,64 @@ def looks_like_world_book(obj: Any) -> bool:
         and not isinstance(obj.get("data"), dict)
         and not obj.get("spec")
     )
+
+
+# ---- card visuals (avatar + art-asset URLs) — ONE source for hub + snapshot -------
+# The server's /asset route resolves these p= URLs (confined to card/session
+# dirs); the avatar rides an inline data-URI (small) while the heavier art rides
+# cacheable same-origin URLs. Shared so the deck list and the live snapshot
+# expose the SAME shape from the SAME card path.
+_AVATAR_MIME = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "svg": "image/svg+xml"}
+
+
+def _asset_url(p: "Path | None") -> str:
+    if p is None:
+        return ""
+    import urllib.parse
+
+    return "/asset?p=" + urllib.parse.quote(str(p))
+
+
+def card_avatar_data_uri(card: "CharacterCard") -> str:
+    """A card's avatar as a data-URI: sidecar file first, inline SVG fallback, else ''."""
+    sidecar = card.avatar_path()
+    if sidecar is not None:
+        ext = sidecar.suffix.lower().lstrip(".")
+        mime = _AVATAR_MIME.get(ext, "application/octet-stream")
+        try:
+            data = base64.b64encode(sidecar.read_bytes()).decode("ascii")
+            return f"data:{mime};base64,{data}"
+        except OSError:
+            return ""
+    ext = card.extensions.get("lunamoth") if isinstance(card.extensions, dict) else None
+    if isinstance(ext, dict):
+        svg = ext.get("avatar_svg")
+        if isinstance(svg, str) and svg.strip():
+            import urllib.parse
+
+            return "data:image/svg+xml;charset=utf-8," + urllib.parse.quote(svg.strip())
+    return ""
+
+
+def card_visuals(card_path: "str | Path") -> dict[str, str]:
+    """{avatar_uri, sprite_url, bg_url, keyvisual_url} for one card path.
+
+    All values are strings ('' when absent). Cheap — touches the disk only to
+    read the (small) avatar sidecar; the art-asset fields are just URLs the
+    server resolves on demand. Used by hub list entries and by the live
+    StateSnapshot (from the chara's frozen session card). Never raises: an
+    unreadable card yields the empty shape."""
+    empty = {"avatar_uri": "", "sprite_url": "", "bg_url": "", "keyvisual_url": ""}
+    p = Path(str(card_path or ""))
+    if not p.is_file():
+        return dict(empty)
+    try:
+        card = CharacterCard.load(p)
+    except Exception:  # noqa: BLE001 — a bad card just has no visuals
+        return dict(empty)
+    return {
+        "avatar_uri": card_avatar_data_uri(card),
+        "sprite_url": _asset_url(card.asset_path("sprite")),
+        "bg_url": _asset_url(card.asset_path("background")),
+        "keyvisual_url": _asset_url(card.asset_path("keyvisual")),
+    }
