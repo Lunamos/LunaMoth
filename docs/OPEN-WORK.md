@@ -487,6 +487,35 @@ conversation↔self-work is load-bearing and stays. Meaningful simplification, n
 full module collapse. Lone cost: losing the "just changed this turn" signal in
 history (the timestamp/gap approximates it).
 
+## Frontend refactor pass (2026-06-17) — done, and two deferred-with-rationale
+
+Grounded in a React-philosophy + frontend-design audit (server-state vs UI-state,
+derive-don't-sync, composition-over-config). DONE + pushed: the CRITICAL dead
+avatar-gen pipeline removal; 4 streaming-core bugs (dead unread/superReadTs,
+non-deterministic restored ids, swallowed rejoin gap, stale super-chat watermark);
+card serialization unified onto the tested serializeCardFields (undefined=preserve
+contract); DeckModal reuse + hub refresh() lost-update + assertNever exhaustiveness;
+HubContext split (stable useHubApi vs changing useHubState — pushes no longer
+re-render the tree) + typed wire-boundary decoders (killed `p as LifeSnapshot`).
+
+DEFERRED (considered, judged net-negative TODAY — revisit with test scaffolding):
+- **useCharaStream controller extraction** — split the 100-line connect/attach
+  effect (client construct + 9 callback wirings + async attach + timers) into a
+  controller the hook thinly wraps. Pure readability in the MOST delicate code
+  (streaming lifecycle), and the web side has near-zero coverage of this hook — a
+  rewrite needs `app.run_test()`-style pilot coverage FIRST. Also fixes the
+  timers-created-inside-the-async-IIFE cleanup race the audit flagged.
+- **CardContentForm spine** — one field-spec driving CardEditor / WakeSheet /
+  CreateFlow. Declined: `CardBlock` is ALREADY the shared row primitive, and the
+  three flows (tabbed editor / 2-step wake / section-chain create) differ enough
+  that one spec-driven form needs per-flow flags (which fields, editable cond,
+  AI-rewrite, initial source) = config-explosion. The error-prone part
+  (serialization) is already unified; the remaining dup is just JSX layout.
+
+Other audit findings still open (lower value): useAsync/useBusySet hooks to fold
+the repeated alive-flag load + Set busy-tracker (~10 files); per-pane file split of
+ChatPanel's 6 bundled panes; React.memo on the markdown items (measure first).
+
 ---
 
 # Appendix A — client + deploy architecture reference
