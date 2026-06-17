@@ -12,6 +12,7 @@ import { useT, useLang } from "../../i18n";
 import { useHub } from "../../state/hub";
 import { errText, rpcErrText } from "../../lib/status";
 import { Caps } from "../deck/Caps";
+import { DeckModal } from "../ui/DeckModal";
 import { deckToast } from "../ui/deckToast";
 import type { ModelInfo } from "../deck/types";
 
@@ -268,37 +269,35 @@ function KeyUpdatePrompt({ candidates, onClose }: { candidates: KeyCandidate[]; 
   };
 
   return (
-    <div className="modal-layer open" onClick={(ev) => ev.target === ev.currentTarget && onClose()}>
-      <div className="modal sheet">
-        <h2>{t("key-update-title")}</h2>
-        <div className="sub">{t("key-update-sub")}</div>
-        <label className="check-row select-all">
-          <input
-            type="checkbox"
-            checked={allOn}
-            onChange={() => setChecked(allOn ? new Set() : new Set(candidates.map((c) => c.name)))}
-          />
-          <b>{t("select-all")}</b>
-        </label>
-        <div className="key-update-list">
-          {candidates.map((c) => (
-            <label className="check-row" key={c.name}>
-              <input type="checkbox" checked={checked.has(c.name)} onChange={() => toggle(c.name)} />
-              <span>
-                <b>{c.char_name || c.name}</b> <small>{c.name}</small>
-              </span>
-              {c.model && <code>{c.model}</code>}
-            </label>
-          ))}
-        </div>
-        <div className="acts" style={{ marginTop: 16 }}>
-          <button className="btn text" onClick={onClose}>{t("later")}</button>
-          <div className="grow" />
-          <button className="btn primary big" disabled={applying || checked.size === 0} onClick={() => void apply()}>
-            {applying ? <span className="spin" /> : t("key-update-apply", { n: checked.size })}
-          </button>
-        </div>
+    <DeckModal open variant="sheet" onClose={onClose}>
+      <h2>{t("key-update-title")}</h2>
+      <div className="sub">{t("key-update-sub")}</div>
+      <label className="check-row select-all">
+        <input
+          type="checkbox"
+          checked={allOn}
+          onChange={() => setChecked(allOn ? new Set() : new Set(candidates.map((c) => c.name)))}
+        />
+        <b>{t("select-all")}</b>
+      </label>
+      <div className="key-update-list">
+        {candidates.map((c) => (
+          <label className="check-row" key={c.name}>
+            <input type="checkbox" checked={checked.has(c.name)} onChange={() => toggle(c.name)} />
+            <span>
+              <b>{c.char_name || c.name}</b> <small>{c.name}</small>
+            </span>
+            {c.model && <code>{c.model}</code>}
+          </label>
+        ))}
       </div>
-    </div>
+      <div className="acts" style={{ marginTop: 16 }}>
+        <button className="btn text" onClick={onClose}>{t("later")}</button>
+        <div className="grow" />
+        <button className="btn primary big" disabled={applying || checked.size === 0} onClick={() => void apply()}>
+          {applying ? <span className="spin" /> : t("key-update-apply", { n: checked.size })}
+        </button>
+      </div>
+    </DeckModal>
   );
 }

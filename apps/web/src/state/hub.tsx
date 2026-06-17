@@ -44,19 +44,33 @@ export function HubProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
   const [snapshot, setSnapshot] = useState<HubSnapshot | null>(null);
   const refreshing = useRef(false);
+  const refreshAgain = useRef(false);
 
   const refresh = useMemo(
-    () => async () => {
-      if (refreshing.current) return;
-      refreshing.current = true;
-      try {
-        const snap = await hub.call<HubSnapshot>("hub.state", {}, 20000);
-        setSnapshot(snap);
-      } catch {
-        /* a failed refresh leaves the last good snapshot; reconnect drives the next */
-      } finally {
-        refreshing.current = false;
-      }
+    () => {
+      // Coalesce: if a push arrives while a refresh is in flight, don't DROP it
+      // (that left the roster stale until the next push) — flag a trailing re-run
+      // so we always converge on the latest hub.state.
+      const run = async (): Promise<void> => {
+        if (refreshing.current) {
+          refreshAgain.current = true;
+          return;
+        }
+        refreshing.current = true;
+        try {
+          const snap = await hub.call<HubSnapshot>("hub.state", {}, 20000);
+          setSnapshot(snap);
+        } catch {
+          /* a failed refresh leaves the last good snapshot; reconnect drives the next */
+        } finally {
+          refreshing.current = false;
+        }
+        if (refreshAgain.current) {
+          refreshAgain.current = false;
+          await run();
+        }
+      };
+      return run;
     },
     [hub],
   );

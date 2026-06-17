@@ -10,6 +10,7 @@ import remarkGfm from "remark-gfm";
 import { useT, type TFn } from "../../i18n";
 import { assetUrl } from "../../rpc";
 import { glyphOf, paletteClass } from "../../lib/format";
+import { assertNever } from "../../lib/exhaustive";
 import {
   chipLabel,
   summarizeToolTally,
@@ -324,6 +325,8 @@ export function StreamItemView({
     case "clarify":
       return <ClarifyBox item={item} onReply={onClarify} />;
     default:
-      return null;
+      // Compile-time exhaustiveness: a new StreamItem kind that isn't handled
+      // above stops `item` being `never` and fails this call's typecheck.
+      return assertNever(item);
   }
 }
