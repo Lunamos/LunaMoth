@@ -7,7 +7,11 @@
   --text:#1D2730; --text-2:#5F7280; --text-3:#93A3AE;
   --bg:#F5F6F8; --panel:#FFFFFF; --hairline:rgba(20,40,60,.10); --hairline-2:rgba(20,40,60,.06);
   --green:#2FBF5A; --red:#E5484D; --amber:#D9930D;
-  --radius:10px;
+  /* Scale tokens — the consistency layer (a control should pick from these, not a
+     one-off literal). --radius stays the canonical mid; sm/lg/pill round it out. */
+  --radius:10px; --r-sm:7px; --r-lg:14px; --r-pill:999px;
+  --field-bg:#FAFBFC; --field-radius:8px; --control-h:32px;
+  --fw-medium:550; --fw-semibold:650;
   --statusbar-h:24px;
   --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
   --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
@@ -1109,7 +1113,7 @@ details.cv-raw pre{
 }
 .confirm-input,.text-input{
   width:100%; font:inherit; font-size:13px; padding:8px 11px; border-radius:8px;
-  border:1px solid var(--hairline); margin-bottom:14px; color:var(--text); background:#FAFBFC; outline:none;
+  border:1px solid var(--hairline); margin-bottom:14px; color:var(--text); background:var(--field-bg); outline:none;
 }
 .confirm-input:focus,.text-input:focus{border-color:var(--accent)}
 /* three-step delete confirmation */
@@ -1243,7 +1247,7 @@ details.cv-raw pre{
 .gw-field .why{font-size:10.5px; color:var(--text-3)}
 .gw-field input{
   font:inherit; font-size:12.5px; font-family:var(--mono); padding:6px 10px; border-radius:7px;
-  border:1px solid var(--hairline); background:#FAFBFC; color:var(--text); outline:none;
+  border:1px solid var(--hairline); background:var(--field-bg); color:var(--text); outline:none;
 }
 .gw-field input:focus{border-color:var(--accent)}
 .gw-adv summary{font-size:12px; color:var(--text-2); cursor:pointer; user-select:none; margin-bottom:8px}
@@ -1266,7 +1270,7 @@ details.cv-raw pre{
 .sheet .field-row{margin-bottom:14px}
 .sheet label{display:block; font-size:12px; color:var(--text-2); margin-bottom:5px; font-weight:550}
 .input-like{
-  font-size:13.5px; padding:8px 12px; border-radius:8px; border:1px solid var(--hairline); background:#FAFBFC;
+  font-size:13.5px; padding:8px 12px; border-radius:8px; border:1px solid var(--hairline); background:var(--field-bg);
   display:flex; align-items:center; gap:8px;
 }
 .input-like input,.input-like select{
@@ -1626,7 +1630,13 @@ body.dark{
   --bg:#191E23; --panel:#232A31; --text:#E9EDF0; --text-2:#9DACB8; --text-3:#67767F;
   --hairline:rgba(255,255,255,.12); --hairline-2:rgba(255,255,255,.07);
   --accent-soft:rgba(91,159,212,.18); --accent-deep:#7FB6DE;
+  --field-bg:#1C2228;
 }
+/* Dark-parity for the few colored badges that only had a light treatment (a near-
+   white fill / dark text that glared or went muddy on a dark surface). */
+body.dark .cv-st.kw{background:rgba(47,191,90,.16); color:#5BD389}
+body.dark .goal-badge.done{color:#5BD389}
+body.dark .key-badge.warn{color:#E0A53A}
 body.dark .sidebar{background:linear-gradient(180deg,rgba(28,34,40,.94),rgba(24,30,36,.94))}
 body.dark .panel{background:linear-gradient(180deg,#1F252B,#1C2228)}
 body.dark .nav-item.active{background:rgba(91,159,212,.20)}
