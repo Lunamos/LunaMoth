@@ -347,7 +347,7 @@ export const I18N = {
   "fr-create-title": ["创建你的角色", "Create your character"],
   "fr-create-sub": ["描述你想象的世界与角色，AI 自动生成角色卡", "Describe your world & character — AI writes the card"],
   "btn-try": ["或者从我们提供的默认角色开始", "Or start from one of our characters"],
-  "btn-try-sub": ["", ""],
+  "btn-try-sub": ["最快看到一个角色活过来的方式", "the fastest way to watch a character come alive"],
   "bp-header": ["LunaMoth 内置的推荐角色——他们来自不同的背景与世界观，掌握并热爱不同的技能；自主运行时，他们都会着手构筑自己的个人网站。", "LunaMoth's recommended built-in characters — each from a different background and worldview, each loving a different craft. Left to run on their own, every one of them sets out to build their own personal website."],
   "deck-pick": ["✨ 默认", "✨ Default"],
   "deck-unwoken": ["未唤醒", "Not awakened"],

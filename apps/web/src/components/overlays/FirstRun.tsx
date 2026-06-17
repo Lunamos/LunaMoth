@@ -31,6 +31,11 @@ export function FirstRun({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="overlay open" id="overlay-firstrun">
+      {/* A way out: dismiss to the board (always re-openable via the board's
+          "meet your character" CTA), so the welcome never traps a new user. */}
+      <button className="fr-close" onClick={onClose} title={t("cancel")} aria-label={t("cancel")}>
+        ×
+      </button>
       <div className="fr-dots" id="fr-dots">
         <i className={pane === "welcome" ? "on" : "done"} />
         <i className={pane === "picker" ? "on" : ""} />
