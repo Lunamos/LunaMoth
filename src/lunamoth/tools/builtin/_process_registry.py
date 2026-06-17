@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import queue as _queue_mod
 import subprocess
-import sys
 import threading
 import time
 import uuid
@@ -39,10 +38,7 @@ from typing import List, Optional
 
 from ...session.isolation import (
     _base_env,
-    _linux_jail,
-    _macos_jail,
-    backend,
-    os_sandbox_available,
+    build_jail_command,
 )
 from ..runner import _drain_nonblocking, _kill_group, strip_ansi
 
@@ -106,26 +102,20 @@ def _build_isolation_cmd(
 ) -> tuple[list[str], Optional[str], str]:
     """argv / run_cwd / note for a background command under the session jail.
 
-    Mirrors ``runner.run_terminal``'s dispatch so a background command is jailed
-    exactly like a foreground one. Returns ``(cmd, run_cwd, note)`` where *note*
-    is a degradation message when a requested jail is unavailable (never a silent
-    escape — same contract as the foreground runner).
+    A THIN call into the shared ``session/isolation.build_jail_command`` ladder
+    (native OS jail → Landlock → refuse) so a background command is jailed
+    EXACTLY like a foreground ``run_terminal`` — the security contract is the
+    same code, not a parallel copy that can drift.
+
+    Raises :class:`JailUnavailableError` when ``sandbox`` is requested but no
+    jail is available: the background process must NOT start unconfined (a chara
+    could read the global key in ~/.lunamoth). ``spawn`` lets it propagate so the
+    tool layer turns it into a visible error to the model — NEVER a silent escape
+    to directory trust.
     """
-    isolation = (isolation or backend()).lower()
-    if isolation in {"dir", "local", "docker"}:  # legacy values → admin (no jail)
-        isolation = "admin"
-    note = ""
-    if isolation == "sandbox" and os_sandbox_available():
-        cmd = (_macos_jail if sys.platform == "darwin" else _linux_jail)(
-            command, workspace, allow_network, writable
-        )
-        run_cwd = str(workspace) if sys.platform == "darwin" else None
-    else:
-        if isolation != "admin":
-            note = f"\n[lunamoth: '{isolation}' jail unavailable, ran with directory trust]"
-        cmd = ["/bin/bash", "-c", command]
-        run_cwd = str(workspace)
-    return cmd, run_cwd, note
+    return build_jail_command(
+        command, workspace, isolation, allow_network=allow_network, writable=writable,
+    )
 
 
 class ProcessRegistry:

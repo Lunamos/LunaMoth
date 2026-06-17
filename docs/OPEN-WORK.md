@@ -661,9 +661,12 @@ Owner blessed free refactoring; no back-compat with old cards/tavern/contexts.
   Chat header + empty-state + per-message Avatar render avatar_uri (glyph only as
   fallback); the chara background uses the already-ported-but-unwired .chat-bg/
   .chat-veil/.chat-sprite layers via assetUrl(); + a mobile right-panel drawer.
-- **[TODO] #1b in-session bg/sprite (立绘) EDIT control** (a ChatPanel tab calling
-  card.save_asset / card.asset_delete / card.visual_generate against the active
-  chara's frozen session card path) — RENDER done, EDIT control still to build.
+- **[DONE] #1b in-session bg/sprite (立绘) EDIT control.** A "视觉/Visuals" ChatPanel tab
+  renders the shared VisualEditor against the ACTIVE chara's frozen session card (found via
+  the snapshot's locked/owner==name entry); edits live-refresh the chat. Backend fix:
+  `_writable_card_path` now also accepts `<sessions>/<name>/card.json` (traversal-confined),
+  so asset writes to a chara's own card are allowed — not just the user deck. (Found by
+  review: the editor was rendering but every save was rejected -32031 until this.)
 - **[DONE] #3 Image compression + progressive load.** Inline avatar data-URI → ≤160px
   WEBP thumbnail (157KB→8KB; board total 1248KB→70KB, −94%) with an mtime-keyed cache;
   full-res still via /asset + card.avatar_read. Bundled cards/ re-compressed in place
@@ -682,8 +685,10 @@ Owner blessed free refactoring; no back-compat with old cards/tavern/contexts.
   unchanged; secrets stay write-only.
 - **[DONE] #6 Empty rightmost column.** Was an `auto-fill` phantom-track gutter in the
   Board `.grid`; switched to `auto-fit` + `minmax(280px,340px)` + `justify-content:center`.
-- **[PARTIAL] Mobile responsive** — done for Board, Settings nav, chat right-panel drawer,
-  unified Keys pane; continue across remaining views as they're touched.
+- **[DONE] Mobile responsive sweep** — Board, Settings nav, Keys pane, chat right-panel
+  drawer + Visuals editor, Deck, Gateways, overlays (CreateFlow/WakeSheet/ModelGate/
+  BuiltinPicker/Login), CardView, Composer, panel-tabs scroll. All in the one
+  `@media (max-width:680px)` block; desktop unchanged. (Worth a manual phone eyeball.)
 - LOW (from #5/#6 review): orphaned CSS `.keys-block`/`.image-form`; image-key form lacks
   an inline Cancel (asymmetry with the text add-form). Cosmetic.
 - **[DONE] Deleted per-chara `docker` isolation; `dir`→`admin`.** Two modes now:
@@ -691,11 +696,19 @@ Owner blessed free refactoring; no back-compat with old cards/tavern/contexts.
   r/w, same workspace). Legacy `dir`/`local`/`docker` normalize to `admin` at every read
   site. (isolation.py, runner.py, _process_registry.py, sessions.py, cli.py, state.py,
   hub.py, supervisor.py + tests)
-- **[TODO] background-process sandbox degrade (MEDIUM, pre-existing).** `_process_registry`
-  silently degrades `sandbox`→directory-trust on a no-bwrap host and never tries Landlock,
-  diverging from `runner.run_terminal`'s native→Landlock→refuse ladder. Align them (factor
-  the ladder into one helper both call). Latent on the bwrap-equipped server; bites a
-  no-userns deploy.
+- **[DONE] background-process sandbox-degrade aligned.** Factored the ladder into
+  `session/isolation.py:build_jail_command` (raises JailUnavailableError when `sandbox` has
+  no bwrap+no Landlock); both `runner.run_terminal` and `_process_registry._build_isolation_cmd`
+  use it. A background `sandbox` spawn now native→Landlock→REFUSES (raises before Popen →
+  surfaced as a tool_error) instead of silently running unconfined.
+
+## Loop 2026-06-18 — STATUS: all reported issues + extras DONE
+#1 (avatar render + in-session edit) · #2 (first-message permanent + presence deleted) ·
+#3 (image compression/progressive) · #4 (BiRefNet matte) · #5 (unified keys) · #6 (empty
+column) · docker→admin · mobile sweep · bg-process ladder. All shipped to main + deployed
+to the system-level Aliyun install, each adversarially subagent-reviewed. Residual LOW
+cosmetics noted above (orphaned CSS, image-key inline-cancel, animated-webp flatten,
+imaging.py one-off helpers in-package).
 - Review LOW/MEDIUM from the keystone review: `_card_visuals` re-reads the card from
   disk instead of reusing the in-memory `character` (cached, harmless); bundled cards
   still carry inert `on_attach`/`on_detach` keys (cleanup).

@@ -27,19 +27,16 @@ import os
 import re
 import signal
 import subprocess
-import sys
 import time
 from pathlib import Path
 
 from ..obs import get_logger
 from ..session.isolation import (
+    JailUnavailableError,
     _base_env,
-    _linux_jail,
-    _linux_landlock_jail,
-    _macos_jail,
     backend,
-    landlock_available,
-    os_sandbox_available,
+    build_jail_command,
+    os_sandbox_available as os_sandbox_available,  # re-export for callers/tests
 )
 
 _log = get_logger("runner")
@@ -244,34 +241,22 @@ def run_terminal(
             cwd = cand
 
     note = clamp_note
-    cmd: list[str]
-    run_cwd: str | None
-    if isolation == "admin":
-        # Explicit opt-out of the jail (operator chose `admin`): full-machine
-        # read/write, cwd in the workspace (trusted operator).
-        cmd = ["/bin/bash", "-c", command]
-        run_cwd = str(cwd)
-    elif isolation == "sandbox":
-        # Isolation ladder: native OS jail (bwrap/seatbelt) → Landlock → refuse.
+    # The isolation ladder (native OS jail → Landlock → refuse, never directory
+    # trust) lives in ONE place — session/isolation.build_jail_command — shared
+    # with the background process path so the security contract can't drift.
+    try:
+        cmd, jail_cwd, jail_note = build_jail_command(
+            command, workspace, isolation, allow_network=allow_network, writable=writable,
+        )
+    except JailUnavailableError as e:
         # NEVER degrade to directory trust — under it the chara could read the
         # whole container, incl. the global key in ~/.lunamoth (OPEN-WORK SEC-low).
-        if os_sandbox_available():
-            cmd = (_macos_jail if sys.platform == "darwin" else _linux_jail)(command, workspace, allow_network, writable)
-            run_cwd = str(cwd) if sys.platform == "darwin" else None  # bwrap sets its own chdir
-        elif landlock_available():
-            cmd = _linux_landlock_jail(command, workspace, allow_network, writable)
-            run_cwd = str(cwd)
-            if not allow_network:
-                # Honest: Landlock ABI v1 confines the filesystem only — it cannot
-                # gate the network, so `/net off` is NOT enforced under this tier.
-                note += "\n[lunamoth: Landlock jail — filesystem confined, but network not gated (ABI v1)]"
-        else:
-            return ("[lunamoth: refused — sandbox isolation requested but no jail is available "
-                    "(no bwrap user namespaces, no Landlock ≥5.13). Not running unconfined. "
-                    "Install bubblewrap, run on a Landlock-capable kernel, or set isolation=admin "
-                    "to explicitly opt out of the jail.]" + note).strip()
-    else:
-        return (f"[lunamoth: refused — unknown isolation {isolation!r}]" + note).strip()
+        return (f"[lunamoth: refused — {e}]" + note).strip()
+    note += jail_note
+    # admin / macOS sandbox honor the resolved workdir; Linux bwrap sets its own
+    # --chdir (jail_cwd is None there). The helper returns the workspace as the
+    # default cwd; substitute the resolved workdir when the jail allows a cwd.
+    run_cwd = str(cwd) if jail_cwd is not None else None
 
     t0 = time.monotonic()
     try:

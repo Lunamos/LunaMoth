@@ -9,18 +9,21 @@
 
 import { useEffect, useState } from "react";
 import { useT } from "../../i18n";
-import { useHubApi } from "../../state/hub";
+import { useHubApi, useHubState } from "../../state/hub";
 import { deckToast } from "../ui/deckToast";
 import { GatewayPane } from "./GatewayPane";
+import { VisualEditor } from "../deck/VisualEditor";
+import type { DeckCard } from "../deck/types";
 import type { CharaStream, Snapshot } from "../../hooks/useCharaStream";
 
-type PanelTab = "status" | "skills" | "goals" | "memory" | "gateway" | "settings";
+type PanelTab = "status" | "skills" | "goals" | "memory" | "visuals" | "gateway" | "settings";
 
 const TABS: { key: PanelTab; label: string }[] = [
   { key: "status", label: "pg-status" },
   { key: "skills", label: "p-skills" },
   { key: "goals", label: "p-goals" },
   { key: "memory", label: "p-memory" },
+  { key: "visuals", label: "p-visuals" },
   { key: "gateway", label: "p-gateway" },
   { key: "settings", label: "pg-settings" },
 ];
@@ -43,6 +46,7 @@ export function ChatPanel({ stream, name }: { stream: CharaStream; name: string 
           {tab === "skills" && <SkillsPane stream={stream} name={name} />}
           {tab === "goals" && <WishesPane name={name} />}
           {tab === "memory" && <MemoryPane name={name} />}
+          {tab === "visuals" && <VisualsPane stream={stream} name={name} />}
           {tab === "gateway" && <GatewayPane name={name} />}
           {tab === "settings" && <SettingsPane stream={stream} />}
         </div>
@@ -302,6 +306,45 @@ function MemoryPane({ name }: { name: string }) {
         <h4>{t("d-mem-user")}</h4>
         <div className="memory-text">{ex.user_memory || t("d-empty-mem")}</div>
       </div>
+    </div>
+  );
+}
+
+/* Visuals tab — edit the ACTIVE chara's立绘/背景/头像 from inside the chat.
+ * The living chara owns a FROZEN session card; its art assets are set via the
+ * SAME hub RPCs the deck's VisualEditor uses (card.save_asset / card.asset_delete /
+ * card.visual_generate). We locate that card via the hub roster: the LOCKED deck
+ * entry whose `owner` is this chara (hub._session_card_entry sets owner = session
+ * name). After an edit we refresh the chat snapshot so the backdrop / sprite /
+ * avatar update without a reload. keyvisual is shown (upload/clear only — the image
+ * pipeline can't generate it). */
+const SESSION_VIS_KINDS = ["background", "sprite", "keyvisual", "avatar"] as const;
+
+function VisualsPane({ stream, name }: { stream: CharaStream; name: string }) {
+  const t = useT();
+  const { snapshot } = useHubState();
+  const cards = (snapshot?.cards as DeckCard[] | undefined) || [];
+  // The frozen session card: the locked deck entry owned by this chara.
+  const sessionCard = cards.find((c) => c.locked && c.owner === name);
+
+  if (!sessionCard) {
+    // Roster not yet loaded, or this chara has no frozen card on disk.
+    return <div className="placeholder-pane">{snapshot ? t("cv-no-art") : "…"}</div>;
+  }
+  return (
+    <div className="vis-session">
+      <div className="av-note" style={{ marginBottom: 12 }}>{t("vis-session-note")}</div>
+      <VisualEditor
+        cardPath={sessionCard.path}
+        card={sessionCard}
+        disabled={false}
+        kinds={SESSION_VIS_KINDS}
+        onChanged={() => {
+          // Reflect the new art in the live chat (backdrop / sprite / avatar) without
+          // a reload — the chat reads bg_url / sprite_url / avatar_uri off the snapshot.
+          void stream.refreshSnapshot();
+        }}
+      />
     </div>
   );
 }

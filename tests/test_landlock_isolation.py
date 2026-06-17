@@ -4,7 +4,7 @@ These cover the 2026-06-17 hardening: a chara's `terminal` must not silently run
 unconfined when the OS jail is unavailable (the no-userns case), and when
 Landlock IS available it must confine reads to workspace+assets.
 """
-import lunamoth.tools.runner as R
+import lunamoth.session.isolation as ISO
 from lunamoth.session import landlock
 from lunamoth.tools.runner import run_terminal
 
@@ -18,13 +18,72 @@ def test_landlock_abi_version_is_nonneg_int():
 
 
 def test_sandbox_refuses_when_no_jail_available(tmp_path, monkeypatch):
-    """No bwrap AND no Landlock → REFUSE, never run unconfined (directory trust)."""
-    monkeypatch.setattr(R, "os_sandbox_available", lambda: False)
-    monkeypatch.setattr(R, "landlock_available", lambda: False)
+    """No bwrap AND no Landlock → REFUSE, never run unconfined (directory trust).
+
+    The ladder decision lives in ``session/isolation.build_jail_command`` (the
+    one copy shared by the foreground runner and the background process path), so
+    that is where availability is mocked away.
+    """
+    monkeypatch.setattr(ISO, "os_sandbox_available", lambda: False)
+    monkeypatch.setattr(ISO, "landlock_available", lambda: False)
     ws = tmp_path / "ws"
     out = run_terminal("echo SHOULD_NOT_RUN", ws, isolation="sandbox", timeout=10)
     assert "refused" in out.lower()
     assert "SHOULD_NOT_RUN" not in out
+
+
+def test_background_sandbox_refuses_when_no_jail_available(tmp_path, monkeypatch):
+    """The BACKGROUND process path goes native→Landlock→refuse just like the
+    foreground — a bg `sandbox` spawn on a no-jail host must NOT start unconfined.
+
+    This mirrors ``test_sandbox_refuses_when_no_jail_available`` for the path that
+    previously silently degraded to directory trust (the security inconsistency).
+    """
+    monkeypatch.setattr(ISO, "os_sandbox_available", lambda: False)
+    monkeypatch.setattr(ISO, "landlock_available", lambda: False)
+    from lunamoth.session.isolation import JailUnavailableError
+    from lunamoth.tools.builtin._process_registry import ProcessRegistry
+
+    ws = tmp_path / "ws"
+    reg = ProcessRegistry()
+    with pytest.raises(JailUnavailableError):
+        reg.spawn("echo SHOULD_NOT_RUN", ws, isolation="sandbox")
+    # Nothing was tracked — the process never started.
+    assert reg.count_running() == 0
+    assert reg.list_sessions() == []
+
+
+def test_background_sandbox_refusal_surfaces_as_tool_error(tmp_path, monkeypatch):
+    """End-to-end: the `terminal(background=true)` tool turns the refusal into a
+    visible error to the model, never a silent unconfined run."""
+    import json
+
+    monkeypatch.setattr(ISO, "os_sandbox_available", lambda: False)
+    monkeypatch.setattr(ISO, "landlock_available", lambda: False)
+    from lunamoth.tools.builtin.terminal import terminal
+
+    class _State:
+        def load(self):
+            return {"isolation": "sandbox", "network_access": False, "writable_paths": []}
+
+    class _Ctx:
+        def __init__(self, ws):
+            self._ws = ws
+            self.state = _State()
+            self.processes = None
+
+        @property
+        def workspace(self):
+            return self._ws
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    res = json.loads(terminal({"command": "echo SHOULD_NOT_RUN", "background": True}, _Ctx(ws)))
+    # tool_error: an `error` field, no session_id/pid (the process never started).
+    assert "error" in res
+    assert "session_id" not in res
+    assert "SHOULD_NOT_RUN" not in res.get("output", "")
+    assert "no jail is available" in res["error"].lower()
 
 
 def test_admin_still_runs_unconfined_when_explicit(tmp_path):
@@ -42,7 +101,7 @@ def test_legacy_docker_value_maps_to_admin_and_runs(tmp_path):
 @pytest.mark.skipif(not landlock.available(), reason="no Landlock (kernel <5.13 / not Linux)")
 def test_landlock_tier_runs_normal_commands(tmp_path, monkeypatch):
     """When bwrap is absent but Landlock is present, the sandbox tier still runs."""
-    monkeypatch.setattr(R, "os_sandbox_available", lambda: False)  # force the Landlock tier
+    monkeypatch.setattr(ISO, "os_sandbox_available", lambda: False)  # force the Landlock tier
     ws = tmp_path / "sandbox" / "sessions" / "x" / "workspace"
     ws.mkdir(parents=True)
     out = run_terminal("echo hi-from-landlock", ws, isolation="sandbox", allow_network=True, timeout=20)
@@ -52,7 +111,7 @@ def test_landlock_tier_runs_normal_commands(tmp_path, monkeypatch):
 @pytest.mark.skipif(not landlock.available(), reason="no Landlock (kernel <5.13 / not Linux)")
 def test_landlock_blocks_reads_outside_workspace(tmp_path, monkeypatch):
     """The chara can read its workspace but NOT a secret outside it (the key file case)."""
-    monkeypatch.setattr(R, "os_sandbox_available", lambda: False)
+    monkeypatch.setattr(ISO, "os_sandbox_available", lambda: False)
     secret = tmp_path / "desktop.json"
     secret.write_text("TOPSECRET_KEY")
     ws = tmp_path / "sandbox" / "sessions" / "x" / "workspace"

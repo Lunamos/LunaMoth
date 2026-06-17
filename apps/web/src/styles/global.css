@@ -618,6 +618,47 @@ body.dark .drop-overlay{background:color-mix(in srgb, var(--accent) 22%, transpa
   .key-field{flex-direction:column; align-items:stretch; gap:5px}
   .key-field>span{width:auto}
   .key-row{flex-wrap:wrap}
+
+  /* 工具栏：窄屏让标题/搜索/按钮换行而非横向溢出 */
+  .toolbar{flex-wrap:wrap; gap:8px 10px}
+  .toolbar .searchfield{flex:1 1 100%; order:5}
+  .toolbar .seg{flex:none}
+
+  /* 卡册：窄屏每行两列（去掉 184px 下限，避免横向溢出与过窄卡片） */
+  .deck{padding:8px 14px 22px}
+  .deck-grid{grid-template-columns:repeat(2,1fr); gap:12px}
+
+  /* 网关：窄屏单列满宽（去掉 280px 下限） */
+  .gw-overview{grid-template-columns:1fr; padding:16px 14px}
+  .gw-newpop{left:0; right:0; min-width:0}
+
+  /* 弹窗/抽屉：窄屏占满宽度、限制高度、可滚动、可关闭 */
+  .modal{width:100%; max-width:100%; max-height:90vh; padding:20px 18px 18px; border-radius:14px}
+  .flow-card{width:100%; max-width:100%; max-height:92vh; border-radius:14px}
+  .flow{padding:18px 16px 22px}
+  .flow-inner,.flow-bar{width:100%; max-width:100%}
+  .name-pair,.embodiment-grid{grid-template-columns:1fr}
+  .sheet,.sheet.wide{width:100%; max-width:100%}
+  .login-card,#overlay-login .login-card{width:100%; max-width:92%; padding:24px 22px 22px}
+  .bp-host{width:94vw}
+
+  /* 卡片详情：视觉缩略图与表情两列，底栏按钮可换行 */
+  .cv-tiles{grid-template-columns:repeat(2,1fr)}
+  .cv-emos{grid-template-columns:repeat(auto-fill,minmax(78px,1fr))}
+  .cardview .cv-scroll{padding:16px 16px 20px}
+  .cardview .cv-foot{flex-wrap:wrap; gap:8px}
+
+  /* 撰写框：窄屏满宽、收紧内边距 */
+  .composer-wrap{padding:8px 12px 14px}
+  .composer,.attach-stage,.work-status{max-width:100%}
+
+  /* 右侧面板标签页：标签较多时横向滚动而非挤压（视觉 tab 加入后共 7 个） */
+  .panel-tabs{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  .panel-tabs span{flex:none; padding:0 9px}
+
+  /* 会话内视觉编辑器：在抽屉里满宽、立绘横排可换行 */
+  .vis-modal{width:100%}
+  .vis-slot-acts{gap:6px}
 }
 
 /* 看板 ⋯ 菜单（浮动小面板） */

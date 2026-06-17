@@ -192,6 +192,68 @@ def _linux_landlock_jail(command: str, workspace: Path, allow_network: bool, wri
     return _linux_landlock_argv(["/bin/bash", "-c", command], workspace, allow_network, writable)
 
 
+def build_jail_command(
+    command: str,
+    workspace: Path,
+    isolation: str,
+    *,
+    allow_network: bool = False,
+    writable: Sequence[Path] = (),
+) -> tuple[list[str], str | None, str]:
+    """The ONE isolation-ladder selector for a non-interactive ``bash -c`` run.
+
+    Shared by ``tools/runner.run_terminal`` (foreground) and
+    ``tools/builtin/_process_registry`` (background) so a command is jailed
+    IDENTICALLY either way — the security contract can't drift between them.
+
+    Returns ``(cmd, run_cwd, note)``:
+
+      * ``admin`` (and the legacy ``dir``/``local``/``docker`` aliases) → no jail,
+        ``run_cwd`` is the workspace (the caller may override it with an explicit
+        cwd). The explicit operator opt-out.
+      * ``sandbox`` with a native OS jail (bwrap on Linux / sandbox-exec on macOS)
+        → the jail argv; ``run_cwd`` is the workspace on macOS, ``None`` on Linux
+        (bwrap sets its own ``--chdir``).
+      * ``sandbox`` with no native jail but Landlock available (Linux no-userns) →
+        the Landlock re-exec argv, ``run_cwd`` the workspace, plus a ``note`` when
+        ``allow_network`` is False (ABI v1 can't gate the network).
+
+    Raises :class:`JailUnavailableError` when ``sandbox`` is requested but NEITHER
+    a native jail NOR Landlock is available — the command must NOT run unconfined
+    (a chara could read the global key in ~/.lunamoth). NEVER degrades to
+    directory trust; callers turn the refusal into a visible error.
+    """
+    isolation = (isolation or backend()).lower()
+    if isolation in {"dir", "local", "docker"}:  # legacy values → admin (no jail)
+        isolation = "admin"
+    writable_list = list(writable)
+    if isolation == "admin":
+        return ["/bin/bash", "-c", command], str(workspace), ""
+    if isolation == "sandbox":
+        # Isolation ladder: native OS jail (bwrap/seatbelt) → Landlock → refuse.
+        if os_sandbox_available():
+            cmd = (_macos_jail if sys.platform == "darwin" else _linux_jail)(
+                command, workspace, allow_network, writable_list
+            )
+            run_cwd = str(workspace) if sys.platform == "darwin" else None
+            return cmd, run_cwd, ""
+        if landlock_available():
+            cmd = _linux_landlock_jail(command, workspace, allow_network, writable_list)
+            note = ""
+            if not allow_network:
+                # Honest: Landlock ABI v1 confines the filesystem only — it cannot
+                # gate the network, so `/net off` is NOT enforced under this tier.
+                note = "\n[lunamoth: Landlock jail — filesystem confined, but network not gated (ABI v1)]"
+            return cmd, str(workspace), note
+        raise JailUnavailableError(
+            "sandbox isolation requested but no jail is available "
+            "(no bwrap user namespaces, no Landlock >=5.13). Not running unconfined. "
+            "Install bubblewrap, run on a Landlock-capable kernel, or set isolation=admin "
+            "to explicitly opt out of the jail."
+        )
+    raise JailUnavailableError(f"unknown isolation mechanism {isolation!r}")
+
+
 def interactive_shell_argv(
     isolation: str,
     workspace: Path,

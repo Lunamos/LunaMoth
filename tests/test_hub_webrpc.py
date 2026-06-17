@@ -657,3 +657,23 @@ def test_default_flag_survives_tag_display_truncation():
     assert luna and all(c["default"] is False for c in luna)
     # the displayed tag list is still capped at 4 (default need not appear there)
     assert all(len(c["tags"]) <= 4 for c in cards)
+
+
+def test_session_card_is_writable_else_refused(tmp_path):
+    """The in-chat Visuals editor edits the chara's FROZEN session card, so asset
+    writes to <sessions>/<name>/card.json must be allowed — not just the user deck.
+    A path outside both roots is refused (-32031)."""
+    uc = H.user_cards_dir() / "Foo"
+    uc.mkdir(parents=True)
+    (uc / "card.json").write_text("{}", encoding="utf-8")
+    assert H._writable_card_path(str(uc / "card.json")).name == "card.json"  # deck card: ok
+
+    sc = S.sessions_dir() / "quinn"
+    sc.mkdir(parents=True)
+    (sc / "card.json").write_text("{}", encoding="utf-8")
+    assert H._writable_card_path(str(sc / "card.json")).name == "card.json"  # session card: ok (the fix)
+
+    bogus = tmp_path / "outside.json"  # sibling of LUNAMOTH_HOME → under neither root
+    bogus.write_text("{}", encoding="utf-8")
+    with pytest.raises(Exception):
+        H._writable_card_path(str(bogus))

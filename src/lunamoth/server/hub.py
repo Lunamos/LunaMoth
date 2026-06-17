@@ -717,15 +717,25 @@ def _avatar_sidecar_path(card_path: Path, ext: str) -> Path:
 
 
 def _writable_card_path(path: str) -> Path:
-    """A user-deck JSON card path we may edit, or a visible error."""
+    """A JSON card path we may edit: a user-deck card OR a chara's own frozen
+    session card (so the in-chat Visuals editor can change the LIVING chara's
+    art). Both are traversal-confined to their root; anything else is refused."""
     p = Path(str(path or ""))
     if not p.is_file():
         raise RpcError(-32035, f"no such card: {path}")
-    if user_cards_dir() not in p.parents:
-        raise RpcError(-32031, "only cards in the user deck can be edited")
     if p.suffix.lower() != ".json":
         raise RpcError(-32031, "avatar editing needs a JSON card (PNG cards are read-only here)")
-    return p
+    rp = p.resolve()
+    if user_cards_dir().resolve() in rp.parents:
+        return p
+    # A frozen session card lives at <sessions>/<name>/card.json (exactly one
+    # level deep). Sidecars the asset RPCs write land beside it, inside the
+    # session dir — confined. This is what lets the chat Visuals tab edit the
+    # active chara's own card.
+    sessions = S.sessions_dir().resolve()
+    if rp.name == "card.json" and rp.parent.parent == sessions:
+        return p
+    raise RpcError(-32031, "only a deck card or a chara's own session card can be edited")
 
 
 def _avatar_data_uri(card_path: Path, card: "CharacterCard") -> str:

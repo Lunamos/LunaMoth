@@ -27,10 +27,15 @@ import type { DeckCard } from "./types";
 
 const ART_EXTS = ["png", "jpg", "jpeg", "webp"];
 const ART_UPLOAD_MAX = 16 * 1024 * 1024;
-const VIS_KINDS = ["avatar", "sprite", "background"] as const;
+// The deck's default set. The in-session editor passes its own list (it surfaces
+// keyvisual too — uploaded/cleared only, since the image pipeline can't generate it).
+const DEFAULT_KINDS = ["avatar", "sprite", "background"] as const;
+// Only these kinds can be AI-generated (card.visual_generate / pipeline.prompt_for).
+// keyvisual is upload/clear only.
+const GENERATABLE: Record<string, boolean> = { avatar: true, sprite: true, background: true };
 const REF_MAX = 3; // user reference images per generation
 
-type VisKind = (typeof VIS_KINDS)[number];
+type VisKind = "avatar" | "sprite" | "background" | "keyvisual";
 
 interface Ref {
   data_b64: string;
@@ -93,6 +98,7 @@ function fileToB64(f: File): Promise<string> {
 function initUrlFor(kind: VisKind, card: DeckCard): string {
   if (kind === "avatar") return avatarSrc(card);
   if (kind === "sprite") return card.sprite_url ? assetUrl(String(card.sprite_url)) : "";
+  if (kind === "keyvisual") return card.keyvisual_url ? assetUrl(String(card.keyvisual_url)) : "";
   return card.bg_url ? assetUrl(String(card.bg_url)) : "";
 }
 
@@ -101,11 +107,14 @@ export function VisualEditor({
   card,
   disabled,
   onChanged,
+  kinds = DEFAULT_KINDS,
 }: {
   cardPath: string;
   card: DeckCard;
   disabled: boolean;
   onChanged: () => void;
+  /** which visual slots to show + order. Default = the deck's avatar/sprite/background. */
+  kinds?: readonly VisKind[];
 }) {
   const t = useT();
   const { hub, refresh } = useHubApi();
@@ -142,19 +151,18 @@ export function VisualEditor({
   const removeRef = (i: number) => setRefs((cur) => cur.filter((_, j) => j !== i));
 
   // Slot refs so "generate all" can drive each slot's generate-and-save.
-  const slotApi = useRef<Record<VisKind, (() => Promise<void>) | null>>({
-    avatar: null,
-    sprite: null,
-    background: null,
-  });
+  const slotApi = useRef<Partial<Record<VisKind, (() => Promise<void>) | null>>>({});
   const [genAllBusy, setGenAllBusy] = useState(false);
 
+  // The kinds "generate all" actually drives (only the generatable ones).
+  const genKinds = kinds.filter((k) => GENERATABLE[k]);
+
   const generateAll = async () => {
-    if (!confirm(t("vis-gen-all-confirm", { n: VIS_KINDS.length }))) return;
+    if (!confirm(t("vis-gen-all-confirm", { n: genKinds.length }))) return;
     setGenAllBusy(true);
     cachedBrief.current = null; // a fresh set → a fresh brief
     try {
-      for (const k of VIS_KINDS) {
+      for (const k of genKinds) {
         const fn = slotApi.current[k];
         if (fn) {
           try {
@@ -214,14 +222,14 @@ export function VisualEditor({
       </div>
 
       <div className="vis-slots">
-        {VIS_KINDS.map((kind) => (
+        {kinds.map((kind) => (
           <VisualSlot
             key={kind}
             kind={kind}
             cardPath={cardPath}
             initUrl={initUrlFor(kind, card)}
             disabled={disabled}
-            canGenerate={hasImageKey}
+            canGenerate={hasImageKey && !!GENERATABLE[kind]}
             getBrief={getBrief}
             refData={refData}
             hubCall={hub.call.bind(hub)}
@@ -235,14 +243,16 @@ export function VisualEditor({
         ))}
       </div>
 
-      <div className="vis-all">
-        <button className="btn primary" disabled={disabled || genAllBusy || !hasImageKey} onClick={() => void generateAll()}>
-          {genAllBusy ? <span className="spin" /> : t("vis-gen-all", { n: VIS_KINDS.length })}
-        </button>
-        <div className="av-note" style={{ marginTop: 6 }}>
-          {t("vis-gen-all-cost", { n: VIS_KINDS.length })}
+      {genKinds.length > 0 && (
+        <div className="vis-all">
+          <button className="btn primary" disabled={disabled || genAllBusy || !hasImageKey} onClick={() => void generateAll()}>
+            {genAllBusy ? <span className="spin" /> : t("vis-gen-all", { n: genKinds.length })}
+          </button>
+          <div className="av-note" style={{ marginTop: 6 }}>
+            {t("vis-gen-all-cost", { n: genKinds.length })}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
