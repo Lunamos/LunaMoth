@@ -17,12 +17,8 @@ import { CharaClient } from "../rpc";
 import type { ProtocolEvent } from "../protocol";
 import { useT, type TFn } from "../i18n";
 import { lifeWord, type LifeSnapshot } from "../lib/status";
-import {
-  StreamModel,
-  type StreamItem,
-  type UserAttachment,
-  type RestoredMessage,
-} from "../components/chat/streamModel";
+import { StreamModel, type StreamItem, type UserAttachment } from "../components/chat/streamModel";
+import { ChatSession, errMsg } from "./chatSession";
 
 /** A staged/sent attachment: local preview + the raw-base64 wire payload. */
 export interface StagedAttachment extends UserAttachment {
@@ -37,13 +33,6 @@ export interface WorkState {
   phase: WorkPhase;
   thinkTokens: number;
   toolName: string;
-}
-
-export interface AttachInfo {
-  char_name?: string;
-  restored?: RestoredMessage[];
-  opening?: string;
-  opening_text?: string;
 }
 
 export interface Snapshot {
@@ -332,13 +321,15 @@ export function useCharaStream(name: string): CharaStream {
     [bump],
   );
 
-  /* ---- the connect/attach lifecycle (chat.js open) — one effect per name ---- */
+  /* ---- the connect/attach lifecycle (chat.js open) — one ChatSession per name ----
+     The lifecycle (connect → wire → attach → restore → snapshot → opening, plus
+     the life/snapshot timers and teardown) lives in ChatSession so it's unit-
+     testable and owns its own timers; this effect only resets per-name React
+     state and bridges the hook's callbacks/refs in via `deps`. */
   useEffect(() => {
     disposedRef.current = false;
     const model = new StreamModel();
     modelRef.current = model;
-    const client = new CharaClient(name);
-    clientRef.current = client;
     setCharName(name);
     setConnected(false);
     setReady(false);
@@ -350,99 +341,32 @@ export function useCharaStream(name: string): CharaStream {
     applyStatusWord(t("st-connecting"));
     bump();
 
-    let lifeTimer: ReturnType<typeof setInterval> | null = null;
-    let snapTimer: ReturnType<typeof setInterval> | null = null;
-
-    (async () => {
-      try {
-        await client.connect();
-        if (disposedRef.current) return;
-        setConnected(true);
-        client.onProtocolEvent = (ev) => onEvent(ev);
-        client.onPermissionAsk = (p) => {
-          model.pushPermission(p.id, p.kind, p.reason);
-          bump();
-        };
-        client.onClarifyAsk = (p) => {
-          model.pushClarify(p.id, p.question, p.choices);
-          bump();
-        };
-        client.onPeerMessage = (p) => {
-          if (!p.text) return;
-          model.pushUser(p.text, [], { via: p.source || undefined });
-          bump();
-        };
-        client.onTurnEnd = () => {
-          if (disposedRef.current) return;
-          // a turn the app didn't drive (self-work / gateway) just ended
-          if (!appTurnRef.current) finalize();
-          flushQueueRef.current();
-        };
-        client.onLifeState = (p) => {
-          lifeRef.current = p; // already a decoded, coerced LifeSnapshot
-          renderLifeState();
-          if (!lifeTimer) lifeTimer = setInterval(renderLifeState, 1000);
-        };
-        client.onRejoinGap = () => {
-          // We reconnected having missed events while disconnected — the live
-          // transcript is now incomplete. Surface that instead of swallowing it
-          // (a silent gap is exactly the failure the project's no-hidden-errors
-          // rule guards against); the restored history is intact on re-attach.
-          if (!disposedRef.current) {
-            model.systemLine(t("rejoin-gap"), "arrived");
-            bump();
-          }
-          client.clearRejoin();
-        };
-        client.onClose = () => {
-          if (!disposedRef.current) {
-            setConnected(false);
-            model.systemLine(t("conn-lost"));
-            bump();
-          }
-        };
-
-        const info = await client.attach<AttachInfo>();
-        if (disposedRef.current) return;
-        const cn = info.char_name || name;
-        setCharName(cn);
-        model.renderRestored(info.restored || []);
-        bump();
-        setReady(true);
-        // attach ≠ wake: a resting chara stays asleep; only note arrival otherwise
-        const snap = await refreshSnapshot();
-        const restingNow = !!(snap && snap.rest_until && snap.rest_until * 1000 > Date.now());
-        const hasOpening = info.opening && info.opening !== "none" && !!info.opening_text;
-        if (!restingNow && !hasOpening) {
-          model.systemLine(t("st-arrived"), "arrived");
-          bump();
-        }
-        snapTimer = setInterval(() => {
-          if (!document.hidden) void refreshSnapshot();
-        }, 6000);
-        await handleOpening(client, model, info, runStream, finalize, bump);
-      } catch (e) {
-        if (!disposedRef.current) {
-          setError(errMsg(e));
-          model.systemLine(errMsg(e));
-          bump();
-        }
-      }
-    })();
+    const session = new ChatSession(name, (n) => new CharaClient(n), {
+      t,
+      model,
+      bump,
+      isDisposed: () => disposedRef.current,
+      isAppTurn: () => appTurnRef.current,
+      setConnected,
+      setCharName,
+      setReady,
+      setError,
+      setLife: (life) => {
+        lifeRef.current = life;
+      },
+      onEvent,
+      renderLifeState,
+      finalize,
+      flushQueue: () => flushQueueRef.current(),
+      refreshSnapshot,
+      runStream,
+    });
+    clientRef.current = session.client;
+    void session.start();
 
     return () => {
       disposedRef.current = true;
-      if (lifeTimer) clearInterval(lifeTimer);
-      if (snapTimer) clearInterval(snapTimer);
-      // Leaving the chat is a pure presence fact — detach, never interrupt.
-      (async () => {
-        try {
-          await client.detach();
-        } catch {
-          /* gone */
-        }
-        client.close();
-      })();
+      session.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name]);
@@ -467,37 +391,6 @@ export function useCharaStream(name: string): CharaStream {
     note,
     client: clientRef.current!,
   };
-}
-
-/* ---- opening decision tree (chat.js handleOpening) ---- */
-async function handleOpening(
-  client: CharaClient,
-  model: StreamModel,
-  info: AttachInfo,
-  runStream: (fn: () => Promise<unknown>) => Promise<void>,
-  finalize: () => void,
-  bump: () => void,
-): Promise<void> {
-  const text = info.opening_text || "";
-  if (info.opening === "greeting" && text) {
-    model.pushText(text, "say");
-    model.closeCurrent();
-    finalize();
-    bump();
-    try {
-      await client.sock.call("greet", { text }, 10000);
-    } catch {
-      /* older server */
-    }
-  } else if (info.opening === "arrival" && text) {
-    await runStream(() => client.sock.call("event", { text }));
-  } else if (info.opening === "probe" && text) {
-    await runStream(() => client.send(text));
-  }
-}
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
 }
 
 /** Local HH:MM (mirror of lib.format.fmtClock — avoids a cyclic import here). */
