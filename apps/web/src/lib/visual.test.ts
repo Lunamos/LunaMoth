@@ -14,14 +14,14 @@ describe("readVisualPrefs", () => {
     localStorage.clear();
   });
 
-  it("with nothing stored: bg/pos default; numeric opacities read as 0", () => {
-    // Faithful to app.js: Number(localStorage.getItem(...)) is Number(null)===0,
-    // which passes the 0..100 range check, so an ABSENT opacity reads as 0 (not
-    // the default). Only bgOn (null-guarded) and spritePos fall back to defaults.
+  it("with nothing stored: every field falls back to its default", () => {
+    // An ABSENT key must read as its default, not 0. (The old app.js behaviour
+    // — Number(null)===0 passing the range check — was a bug: the chat veil
+    // defaulted to fully transparent instead of VISUAL_DEFAULTS.veilOpacity.)
     expect(readVisualPrefs()).toEqual({
       bgOn: VISUAL_DEFAULTS.bgOn,
-      veilOpacity: 0,
-      spriteOpacity: 0,
+      veilOpacity: VISUAL_DEFAULTS.veilOpacity,
+      spriteOpacity: VISUAL_DEFAULTS.spriteOpacity,
       spritePos: VISUAL_DEFAULTS.spritePos,
     });
   });

@@ -41,7 +41,13 @@ export function readVisualPrefs(charaName?: string | null): VisualPrefs {
     }
   };
   const num = (k: string, d: number): number => {
-    const v = Number(get(k));
+    // An ABSENT key must fall back to the default — NOT 0. `Number(null)===0`
+    // (and `Number("")===0`) would otherwise pass the 0..100 range check and
+    // silently read as 0, so e.g. the chat veil defaulted to fully transparent
+    // instead of VISUAL_DEFAULTS.veilOpacity. Null-guard before coercing.
+    const raw = get(k);
+    if (raw === null || raw === "") return d;
+    const v = Number(raw);
     return Number.isFinite(v) && v >= 0 && v <= 100 ? v : d;
   };
   let pos = (get("lm-sprite-pos") || VISUAL_DEFAULTS.spritePos) as SpritePos;
