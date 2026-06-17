@@ -95,7 +95,13 @@ body.col-resizing *{cursor:col-resize !important}
 
 /* ---------- 角色看板 ---------- */
 .board{flex:1; min-height:0; overflow:auto; padding:8px 28px 28px; display:flex; flex-direction:column}
-.grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:18px}
+/* #6 — auto-FIT (not auto-fill) so empty grid tracks collapse instead of leaving
+   a bare rightmost column when there are only a few charas; the card width is
+   capped (minmax max = 340px) so a lone card doesn't balloon, and the whole grid
+   is centered so leftover space sits symmetrically rather than as one abrupt
+   right-hand gutter. Collapses to a single full-width column on a phone. */
+.grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,340px));
+  gap:18px; justify-content:center; width:100%}
 .chara-card{
   background:var(--panel); border-radius:14px; overflow:hidden; position:relative;
   box-shadow:0 0 0 1px var(--hairline-2),0 1px 3px rgba(10,30,50,.05);
@@ -595,6 +601,23 @@ body.dark .drop-overlay{background:color-mix(in srgb, var(--accent) 22%, transpa
   /* 聊天头部在窄屏上收紧间距，标签可横向滚动而非溢出换行 */
   .chat-head{padding:0 10px; gap:7px}
   .chat-tabs{overflow-x:auto; -webkit-overflow-scrolling:touch; flex:none}
+
+  /* 看板：窄屏单列满宽（去掉 280px 下限，避免横向溢出） */
+  .board{padding:6px 14px 18px}
+  .grid{grid-template-columns:1fr}
+  .toolbar{padding:14px 16px 8px}
+
+  /* 设置：窄屏导航横向滚动，正文满宽、内边距收紧 */
+  .settings-root{flex-direction:column}
+  .settings-nav{width:auto; flex-direction:row; overflow-x:auto; -webkit-overflow-scrolling:touch;
+    padding:8px 14px; gap:4px; border-bottom:1px solid var(--hairline-2)}
+  .settings-nav button{white-space:nowrap; flex:none}
+  .settings-body{max-width:none; padding:16px 16px 26px}
+  /* 统一密钥行：窄屏让字段标签上置、输入满宽、动作可换行 */
+  .keys-form,.image-form{max-width:none}
+  .key-field{flex-direction:column; align-items:stretch; gap:5px}
+  .key-field>span{width:auto}
+  .key-row{flex-wrap:wrap}
 }
 
 /* 看板 ⋯ 菜单（浮动小面板） */
@@ -1605,11 +1628,17 @@ body.dark .bp-dots i.on{background:var(--accent)}
 .settings-pane .okline{font-size:13px; font-weight:550; color:var(--green)}
 .settings-pane .okline.bad{color:var(--red)}
 .keys-block{margin-top:26px; border-top:1px solid var(--hairline-2); padding-top:20px}
+/* #5 — the unified Keys surface: a second section header gets the same rhythm as
+   a fresh pane top, with a hairline separating the text keys from the image key. */
+.keys-unified h2.keys-section{margin-top:30px; padding-top:22px; border-top:1px solid var(--hairline-2)}
 .keys-list{display:flex; flex-direction:column; gap:8px; margin:12px 0}
 .key-row{display:flex; align-items:center; gap:12px; padding:9px 12px; border:1px solid var(--hairline-2);
   border-radius:10px; font-size:13px}
-.key-row>div:first-child{flex:1; min-width:0}
+.key-row.on{border-color:var(--accent); background:var(--accent-soft)}
+.key-meta{flex:1; min-width:0; display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+.key-meta b{font-weight:600}
 .key-acts{display:flex; gap:6px; align-items:center; flex:none}
+.keys-add-btn{margin-top:4px}
 .key-badge{font-size:11px; padding:2px 9px; border-radius:99px; background:rgba(20,40,60,.07); color:var(--text-2)}
 .key-badge.on{background:var(--accent-soft); color:var(--accent-deep); font-weight:600}
 .key-badge.warn{background:rgba(180,120,40,.14); color:#9a6a14}
@@ -1618,8 +1647,10 @@ body.dark .bp-dots i.on{background:var(--accent)}
 .keys-form,.image-form{display:flex; flex-direction:column; gap:10px; margin-top:14px; max-width:440px}
 .key-field{display:flex; align-items:center; gap:12px; font-size:13px}
 .key-field>span{flex:none; width:96px; color:var(--text-2)}
-.key-field>input{flex:1; padding:7px 11px; border:1px solid var(--hairline); border-radius:8px;
+.key-field>input{flex:1; min-width:0; padding:7px 11px; border:1px solid var(--hairline); border-radius:8px;
   background:var(--panel); color:var(--text); font:inherit; font-size:13px}
+.key-field>input.mono{font-family:var(--mono); font-size:12px}
+.key-field>input:focus{border-color:var(--accent); outline:none}
 .keys-form .acts,.image-form .acts{display:flex; gap:12px; align-items:center; margin-top:4px}
 body.dark .key-field>input{background:#1C2228; border-color:var(--hairline)}
 body.dark .key-badge{background:rgba(255,255,255,.08)}

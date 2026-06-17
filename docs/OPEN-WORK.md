@@ -667,11 +667,16 @@ Owner blessed free refactoring; no back-compat with old cards/tavern/contexts.
 - **[TODO] #3 Image assets: compress quality + progressive load** (compressed first).
 - **[TODO] #4 Matte models: let the user install BiRefNet's two models from web/electron;
   delete the other two; shareable across instances; default to the stronger one.**
-- **[TODO] #5 Unify key management into ONE settings surface** (multiple text keys +
-  multiple image keys from multiple sources); kill the two-tab split + inconsistent
-  input control styles.
-- **[TODO] #6 The empty rightmost column on web looks abrupt — fill or remove it.**
-- **[TODO] Mobile: make the web app responsive (mobile-first for the new UI work above).**
+- **[DONE] #5 Unified key management.** One "Keys/密钥" pane (KeysPane) hosts BOTH the
+  multiple named text/provider keys AND the global image key/model via one shared
+  KeyField/KeyRow component (consistent controls); ImageKeyPane deleted; RPC contract
+  unchanged; secrets stay write-only.
+- **[DONE] #6 Empty rightmost column.** Was an `auto-fill` phantom-track gutter in the
+  Board `.grid`; switched to `auto-fit` + `minmax(280px,340px)` + `justify-content:center`.
+- **[PARTIAL] Mobile responsive** — done for Board, Settings nav, chat right-panel drawer,
+  unified Keys pane; continue across remaining views as they're touched.
+- LOW (from #5/#6 review): orphaned CSS `.keys-block`/`.image-form`; image-key form lacks
+  an inline Cancel (asymmetry with the text add-form). Cosmetic.
 - **[DONE] Deleted per-chara `docker` isolation; `dir`→`admin`.** Two modes now:
   `sandbox` (bwrap→Landlock→refuse ladder, untouched) + `admin` (no jail, full-machine
   r/w, same workspace). Legacy `dir`/`local`/`docker` normalize to `admin` at every read
