@@ -18,7 +18,14 @@ import { deckToast } from "../ui/deckToast";
 interface KeyRowData { label: string; provider: string; base_url: string; model: string; has_key: boolean; active: boolean }
 interface ImageDefaults { has_image_key?: boolean; image_model?: string }
 
-const OPENROUTER = { label: "OpenRouter", provider: "openrouter", base_url: "https://openrouter.ai/api/v1" };
+/* Curated OpenAI-compatible providers offered as preset rows (one key each).
+   base_url is editable later via a custom endpoint if a region/path differs. */
+const PRESETS: ReadonlyArray<{ label: string; provider: string; base_url: string; descKey: string }> = [
+  { label: "OpenRouter", provider: "openrouter", base_url: "https://openrouter.ai/api/v1", descKey: "prov-openrouter-desc" },
+  { label: "火山引擎", provider: "volcano", base_url: "https://ark.cn-beijing.volces.com/api/v3", descKey: "prov-volcano-desc" },
+  { label: "混元", provider: "hunyuan", base_url: "https://api.hunyuan.cloud.tencent.com/v1", descKey: "prov-hunyuan-desc" },
+  { label: "阿里云", provider: "dashscope", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", descKey: "prov-aliyun-desc" },
+];
 
 export function KeysPane() {
   const t = useT();
@@ -76,7 +83,7 @@ export function KeysPane() {
   };
 
   const byLabel = (l: string) => rows?.find((r) => r.label === l) || null;
-  const customRows = (rows || []).filter((r) => r.label !== OPENROUTER.label);
+  const customRows = (rows || []).filter((r) => !PRESETS.some((p) => p.label === r.label));
 
   return (
     <div className="settings-pane on prov-pane">
@@ -84,12 +91,14 @@ export function KeysPane() {
       <div className="sub">{t("prov-sub")}</div>
 
       <div className="prov-list">
-        <ProviderRow
-          name={OPENROUTER.label} desc={t("prov-openrouter-desc")} row={byLabel(OPENROUTER.label)}
-          busy={busy === OPENROUTER.label}
-          onSave={(k) => saveKey(OPENROUTER.label, OPENROUTER.provider, OPENROUTER.base_url, k, false)}
-          onUse={() => useKey(OPENROUTER.label)}
-        />
+        {PRESETS.map((pp) => (
+          <ProviderRow
+            key={pp.label} name={pp.label} desc={t(pp.descKey as Parameters<typeof t>[0])} row={byLabel(pp.label)}
+            busy={busy === pp.label}
+            onSave={(k) => saveKey(pp.label, pp.provider, pp.base_url, k, false)}
+            onUse={() => useKey(pp.label)}
+          />
+        ))}
         {customRows.map((r) => (
           <ProviderRow
             key={r.label} name={r.label} desc={r.base_url} custom row={r} busy={busy === r.label}

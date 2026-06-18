@@ -26,8 +26,8 @@ describe("I18N strings map", () => {
   // 模型 pane = picker) added 5 (model-pane-sub, model-other, model-other-note,
   // model-other-ph, model-no-key) → 509; the picker redesign added 2 note keys
   // (model-note-flash, model-note-pro) → 511.
-  it("preserves the full key set from the source dict (556 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(556);
+  it("preserves the full key set from the source dict (555 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(555);
   });
 
   it("every value is a [zh, en] string tuple", () => {

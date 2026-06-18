@@ -802,3 +802,87 @@ identical → gates → commit → deploy):
       (MEDIA:<path> inline-marker convention like hermes), neutralize residual
       "Hermes/the VM/Linux environment" strings in tool descriptions.
 - De-brand invariant: literal "hermes"/"Hermes"/"the VM" must never appear in `src/`.
+
+---
+
+## Settings · 模型/提供商 rebuild + multi-provider image backend (handover, 2026-06-18)
+
+Frontend owner's session. Touched files (frontend + a little backend); the
+image-backend item below is the main OPEN piece.
+
+### Shipped (frontend, verified by typecheck + vitest + vite build)
+- **Settings · 模型 (ModelPane)** rebuilt after Hermes: a flat **Select** (white /
+  light-blue border / square corners — `components/settings/Select.tsx`), a
+  PROVIDER box + a MODEL box (provider:model), **Test connection**, **Reasoning**
+  (OpenRouter-only; OpenRouter wraps the unified param), an optional **上下文长度**
+  (`model_context`, 0=auto, custom-model fallback), and a config-driven
+  **其他模态 / TaskModels** list (`components/settings/TaskModels.tsx`): per-function
+  model overrides for 图像理解(vision) / 生成角色卡(card_model) / 生图 Prompt
+  (image_prompt_model) / 图像生成(image_model). Add a function = add a row to `TASKS`.
+- **Settings · 提供商 (KeysPane)** = the key library: one row per provider, one key
+  per provider — preset rows **OpenRouter / 火山引擎(volcano) / 混元(hunyuan) /
+  阿里云(dashscope)** + self-registered custom OpenAI-compatible endpoints
+  (name+base_url+key) + the image-gen key row. (Renamed from 密钥; KeyField.tsx deleted.)
+- Backend defaults added to `_DEFAULT_FIELDS` (hub.py): `reasoning`, `vision_model`,
+  `card_model`, `image_prompt_model`, `model_context`. Wired: `cards.draft`→card_model,
+  `card.visual_brief`→image_prompt_model, `context_window(override=model_context)`
+  (providers.py, custom-model fallback; OpenRouter ignores it). `wake()` copies
+  reasoning + vision_model + model_context into the frozen session cfg.
+- Other: ST card-IMPORT feature removed/deferred (Import.tsx/importCard.ts deleted;
+  paste a foreign card's JSON into the create box instead). Toolpack UI removed
+  (tools = fixed `sandbox` set). Docker isolation option removed from the wake UI.
+  Wordmark + per-card name → Fraunces (self-hosted woff2). statusbar moved out of
+  `#app` (the stray empty right column). Sliders (`.lm-range`) + settings scrollbar
+  restyled (narrow, light-blue). matte/生图 → moved to the bottom of the 模型 pane as
+  「背景去除」 with an in-app **安装** button + progress (download% / installing… /
+  failed) and a **安装依赖** button (`matte.install_deps` → `uv sync --extra visuals`
+  in `config.ROOT`, the LunaMoth project venv — NOT system Python; flips
+  `deps_available()` in-process).
+
+### OPEN — multi-provider image generation (NOT done; research captured here)
+`tools/builtin/_image_gen.py` is **Volcano-Ark-only** today: synchronous POST
+`https://ark.cn-beijing.volces.com/api/v3/images/generations`, body `{model,prompt,
+size,response_format:"url",watermark, image:[refs]}`, Bearer `image_api_key`, returns
+`data[].url`. So **Doubao-Seedream (5.0/4.0) works now** (Ark, just a model id).
+混元/阿里云 generation does NOT work — they need provider adapters. Proposed design:
+route by `image_model` id prefix (doubao*/seedream*→ark, wan*/wanx*→dashscope,
+hunyuan*→hunyuan) and resolve the per-provider key from the `keys` library
+(desktop.json keys map, match by provider; Ark falls back to `image_api_key`).
+
+Verified API shapes (the perishable part):
+- **DashScope (阿里云通义万相, `wan2.6-image`) — ASYNC task**:
+  - Create: `POST https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation`
+    headers `Authorization: Bearer <key>`, `Content-Type: application/json`,
+    `X-DashScope-Async: enable`. Body:
+    `{"model":"wan2.6-image","input":{"messages":[{"role":"user","content":[{"text":PROMPT},{"image":URL_OR_DATAURI}, …]}]},"parameters":{"n":1,"size":"1280*1280","watermark":false}}`.
+    Refs = extra `{"image":…}` entries in `content` (1–4, URL or `data:image/...;base64,`).
+  - Response: `{"output":{"task_id":...,"task_status":"PENDING"}}`.
+  - Poll: `GET https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}` ~every 10s until
+    `output.task_status=="SUCCEEDED"` → image at `output.choices[].message.content[].image` (URL, 24h).
+  - (intl/us hosts: `dashscope-intl` / `dashscope-us`.)
+- **Hunyuan (HunyuanImage 3.0)**: the OpenAI-compatible endpoint
+  `https://api.hunyuan.cloud.tencent.com/v1` does **NOT** expose images/generations
+  (chat/completions + vision only — confirmed via Tencent doc 1729/111007). Image gen
+  is the **native Tencent Cloud API** (TC3-HMAC-SHA256 signed, async
+  Submit/QueryHunyuanImageJob) — NOT yet researched to request-level detail; this is
+  the risky adapter (signing + async). Confirm format before implementing.
+- Ark: keep as-is (synchronous, simplest).
+
+### Other open threads
+- **Test connection** is single-route: `key.test({})` tests the ACTIVE default
+  (model-pane provider+model). Now that many keys coexist, add a per-row test in the
+  提供商 pane → needs `key.test` to accept a named-key `label` and resolve that key's
+  secret (small backend add).
+- Vision pipeline: the SIBLING wired it (`llm.py` uses `cfg.vision_model` to describe
+  an image when the main model lacks vision). My wake-cfg copy of `vision_model`
+  closes the loop — UI choice now reaches the chara.
+- Minor leftovers (cosmetic, owner sweep): a few dead i18n keys orphaned by the
+  rewrites (set-image, image-sub, image-key-label, image-model-label, matte-no-deps,
+  matte-download, matte-shared-note) and dead CSS (old `.keys-*`/`.key-row`/`.matte-deps`/
+  `.matte-acts`; `.lm-range` is unused-but-intentionally-restyled). `i18n.test.ts`
+  pins the key count — update it when sweeping.
+- CLAUDE.md: the presence/lifecycle paragraph (Chara life) still mentions
+  "first meeting / [operator entered] / user_present", which contradicts the
+  presence-DELETED note above it — reconcile (sibling's area).
+- Nothing committed: this session's changes are all in the working tree (intermixed
+  with the sibling's uncommitted work) — stage per-file, never `git add -A`.

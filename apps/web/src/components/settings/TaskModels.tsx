@@ -19,14 +19,25 @@ export interface TaskModel {
   field: string; // the defaults.* field it persists to
   source: "catalog" | "free"; // catalog = main provider's models.list; free = type any id
   phKey?: TKey; // placeholder for free-source rows
+  opts?: SelectOption[]; // curated quick-picks for a free-source row (still type-any)
 }
+
+/* Image-gen model quick-picks. Doubao/Seedream run on the wired Volcano Ark
+   backend today; the Hunyuan ids are offered for when the multi-provider image
+   backend lands (the field accepts any id regardless). */
+const IMAGE_MODELS: SelectOption[] = [
+  { value: "doubao-seedream-5-0-260128", label: "Doubao Seedream 5.0", note: "Volcano Ark" },
+  { value: "doubao-seedream-4-0", label: "Doubao Seedream 4.0", note: "Volcano Ark" },
+  { value: "hunyuan-image-3.0-instruct", label: "HunyuanImage 3.0 Instruct", note: "Hunyuan" },
+  { value: "hunyuan-image-3.0", label: "Hunyuan Image 3.0", note: "Hunyuan" },
+];
 
 /* The functions that can run on their own model. Order = display order. */
 export const TASKS: ReadonlyArray<TaskModel> = [
   { key: "vision", labelKey: "aux-vision", descKey: "aux-vision-desc", field: "vision_model", source: "catalog" },
   { key: "card", labelKey: "aux-card", descKey: "aux-card-desc", field: "card_model", source: "catalog" },
   { key: "imageprompt", labelKey: "aux-imgprompt", descKey: "aux-imgprompt-desc", field: "image_prompt_model", source: "catalog" },
-  { key: "imagegen", labelKey: "aux-imagegen", descKey: "aux-imagegen-desc", field: "image_model", source: "free", phKey: "image-gen-ph" },
+  { key: "imagegen", labelKey: "aux-imagegen", descKey: "aux-imagegen-desc", field: "image_model", source: "free", phKey: "image-gen-ph", opts: IMAGE_MODELS },
 ];
 
 export function TaskModels({
@@ -48,7 +59,7 @@ export function TaskModels({
           key={task.key}
           task={task}
           value={values[task.field] || ""}
-          options={task.source === "catalog" ? catalog : []}
+          options={task.source === "catalog" ? catalog : (task.opts ?? [])}
           onApply={(v) => onApply(task.field, v)}
         />
       ))}
@@ -91,7 +102,7 @@ function TaskModelRow({
             value={draft}
             options={options}
             onChange={setDraft}
-            search={task.source === "catalog"}
+            search
             allowCustom
             placeholder={task.phKey ? t(task.phKey) : t("model-other-ph")}
           />
