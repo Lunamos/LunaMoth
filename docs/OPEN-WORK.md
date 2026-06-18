@@ -779,8 +779,13 @@ identical → gates → commit → deploy):
       backstop, so hermes's window-drop + locally-fabricated static summary is NOT
       ported. FOLLOW-UP: no `redact_sensitive_text` programmatic scrub yet (the
       prompt-level `[REDACTED]` instruction is in; the code-level scrub is a gap).
-- [ ] **Phase 4 — Prompts** (`content/rules.py`): migrate task-completion discipline +
-      tool-use enforcement + SKILLS guidance from hermes, de-branded (no "hermes"/"VM").
+- [~] **Phase 4 — Prompts**: SKILLS guidance DONE (`tools/skills.py render_block`:
+      ported hermes's "## Skills (mandatory)" header faithfully de-branded — MUST-load,
+      err-on-the-side, skills-encode-the-user's-approach, the "only proceed without
+      loading if none relevant" bookend). The task-completion "Finish the job"
+      paragraph for `content/rules.py` _RULES is SPEC'd but DEFERRED: a parallel
+      sibling holds `rules.py` uncommitted, so editing it now would risk a
+      staging-clobber — add it after the sibling's rules.py commit lands.
 - [ ] **Phase 5 — Tools**: delete `web.py` (web_search/web_extract), delete `send_file`
       (MEDIA:<path> inline-marker convention like hermes), neutralize residual
       "Hermes/the VM/Linux environment" strings in tool descriptions.

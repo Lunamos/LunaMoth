@@ -285,12 +285,21 @@ class SkillStore:
         lines = [
             "## Skills (mandatory)",
             "",
-            "You have skills — reusable procedures for specific tasks. Before you "
-            "reply, scan this list: if any skill is even partially relevant to what "
-            "you're about to do, load it with skill_view(name) first and follow it. "
-            "Err on the side of loading. If a skill is wrong or incomplete, fix it "
-            "with skill_manage(action='patch'). After a hard or iterative task, "
-            "consider saving what you learned as a new skill.",
+            "Before replying, scan the skills below. If a skill matches or is even "
+            "partially relevant to your task, you MUST load it with skill_view(name) "
+            "and follow its instructions. Err on the side of loading — it is always "
+            "better to have context you don't need than to miss critical steps, "
+            "pitfalls, or established workflows. Skills contain specialized knowledge "
+            "— API endpoints, tool-specific commands, and proven workflows that "
+            "outperform general-purpose approaches. Load the skill even if you think "
+            "you could handle the task with basic tools like terminal. Skills also "
+            "encode the user's preferred approach, conventions, and quality standards "
+            "for tasks like code review, planning, and testing — load them even for "
+            "tasks you already know how to do, because the skill defines how it "
+            "should be done here. If a skill has issues, fix it with "
+            "skill_manage(action='patch'). After a difficult or iterative task, save "
+            "what you learned as a skill; if a skill you loaded was missing steps or "
+            "had wrong commands, update it before finishing.",
             "",
             "<available_skills>",
         ]
@@ -305,4 +314,8 @@ class SkillStore:
             for s in entries:
                 lines.append(f"- {s['name']}: {s['description']}")
         lines.append("</available_skills>")
+        lines.append("")
+        lines.append(
+            "Only proceed without loading a skill if genuinely none are relevant to the task."
+        )
         return "\n".join(lines)

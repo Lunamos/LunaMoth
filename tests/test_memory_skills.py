@@ -420,6 +420,13 @@ def test_skillstore_scan_render_for_agent(tmp_path):
     assert "## Skills (mandatory)" in block
     assert "<available_skills>" in block
     assert "bake-page" in block
+    # the migrated "mandatory" strength + bookend (apple-to-apple, de-branded)
+    assert "MUST load" in block
+    assert "Err on the side of loading" in block
+    assert "user's preferred approach" in block
+    assert "Only proceed without loading a skill if genuinely none are relevant" in block
+    for banned in ("hermes", "Hermes", "Nous", "the VM"):
+        assert banned not in block
 
 
 def test_skillstore_read_and_create_back_compat(tmp_path):
