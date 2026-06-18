@@ -763,10 +763,22 @@ identical → gates → commit → deploy):
       (native Anthropic / OpenRouter-claude / else-off), `cache_ttl` config,
       wired into both llm.py request builders on the API copy only (never the
       stable-prefix cache). Comparison agent verdict: IDENTICAL. tests/test_cache.py.
-- [ ] **Phase 3 — Compaction + Summary** (`core/compaction.py`): match the trigger
-      (threshold/protect-first/last/anti-thrash + failure cooldown), the structured
-      `## Active Task … ## Critical Context` template, iterative-update framing, the
-      REFERENCE-ONLY handoff prefix, the deterministic static fallback.
+- [x] **Phase 3 — Compaction + Summary** (`core/compaction.py`): the MECHANICS
+      were already a faithful hermes port (anti-thrash guard, failure cooldown,
+      live tool-output prune, align/anchor, persist+reload). Ported the missing
+      MODEL-FACING content: the structured `## Active Task … ## Critical Context`
+      template (with hermes's worked examples, de-branded), `_SUMMARIZER_PREAMBLE`,
+      temporal-anchoring, first-vs-iterative framing, and the REFERENCE-ONLY
+      `SUMMARY_PREFIX` handoff. Comparison agent verdict: FAITHFUL.
+      DELIBERATE KEEPS (NOT matched to hermes, with reason): (1) trigger stays
+      **0.75** of `(window − trim_buffer)` — it's calibrated to fire just before
+      trim hard-drops; matching hermes's `0.50` of the raw window would compact
+      over-eagerly and burn summary calls (the burned-key failure family). (2)
+      summary-failure stays a **no-op + trim backstop** — CLAUDE.md's "No failure
+      fallbacks, ever" explicitly names "compaction → trim" as the only allowed
+      backstop, so hermes's window-drop + locally-fabricated static summary is NOT
+      ported. FOLLOW-UP: no `redact_sensitive_text` programmatic scrub yet (the
+      prompt-level `[REDACTED]` instruction is in; the code-level scrub is a gap).
 - [ ] **Phase 4 — Prompts** (`content/rules.py`): migrate task-completion discipline +
       tool-use enforcement + SKILLS guidance from hermes, de-branded (no "hermes"/"VM").
 - [ ] **Phase 5 — Tools**: delete `web.py` (web_search/web_extract), delete `send_file`

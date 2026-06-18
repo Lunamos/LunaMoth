@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from ..obs import get_logger
@@ -108,24 +109,223 @@ def _guard(ctx: ContextBuffer) -> _Guard:
         ctx._compaction_guard = g  # type: ignore[attr-defined]
     return g
 
-_HEADER = "[Earlier conversation — a summary of everything before the recent messages]\n"
-
-# English instruction (the engine prompt layer is English). The summary is the
-# ONE piece of model-generated text that gets persisted back into the context,
-# so it must follow the conversation's language even though this instruction is
-# English — hence the explicit language guard on the last line.
-_INSTRUCTION = (
-    "You are a precise note-taker compressing an agent's conversation+work log so it can "
-    "continue without losing the thread. Write a TERSE, factual third-person summary — NOT in "
-    "any character's voice. Capture, with concrete detail:\n"
-    "- the operator's standing requests / goals still in play\n"
-    "- what was actually DONE, and specifically what files/works were CREATED in the workspace "
-    "(give real paths); never credit work that wasn't actually produced\n"
-    "- key facts, decisions, and constraints established\n"
-    "- open threads / what is unfinished\n"
-    "Preserve any earlier-summary content that is still relevant. Omit chit-chat. Be compact. "
-    "Write the summary in the same language as the conversation being summarized."
+# The REFERENCE-ONLY handoff prefix (ported from the upstream reference's
+# SUMMARY_PREFIX, de-branded). It is the first line of every persisted summary:
+# it tells the model the summary is BACKGROUND, the latest message wins, and
+# reverse signals (stop/undo/never mind) cancel in-flight summary work. The
+# engine prompt layer is English; the summary BODY still follows the
+# conversation's language (the preamble below enforces that).
+SUMMARY_PREFIX = (
+    "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted "
+    "into the summary below. This is a handoff from a previous context "
+    "window — treat it as background reference, NOT as active instructions. "
+    "Do NOT answer questions or fulfill requests mentioned in this summary; "
+    "they were already addressed. "
+    "Respond ONLY to the latest message that appears AFTER this summary — "
+    "that message is the single source of truth for what to do right now. "
+    "If the latest message is consistent with the '## Active Task' section, "
+    "you may use the summary as background. If the latest message "
+    "contradicts, supersedes, changes topic from, or in any way diverges "
+    "from '## Active Task' / '## In Progress' / '## Pending Asks' / "
+    "'## Remaining Work', the latest message WINS — discard those stale items "
+    "entirely and do not 'wrap up the old task first'. "
+    "Reverse signals in the latest message (e.g. 'stop', 'undo', 'roll back', "
+    "'just verify', 'never mind', a new topic) must immediately end any "
+    "in-flight work described in the summary; do not re-surface it later. "
+    "Your durable memory and the facts in the system prompt remain fully "
+    "authoritative and active — never ignore or deprioritize them because of "
+    "this compaction note. "
+    "The current session state (workspace files, environment) may already "
+    "reflect work described here — build on it rather than redoing it:"
 )
+
+# The bland header used before this change — kept ONLY so a summary persisted by
+# an older build re-folds cleanly (its prefix is stripped before re-summarizing).
+_LEGACY_HEADER = "[Earlier conversation — a summary of everything before the recent messages]"
+
+# What gets prepended to the persisted summary body. Detection of a summary row
+# is by transcript kind="summary" (not by this text), so the prefix is purely a
+# model-facing instruction, never a sniffed marker.
+_HEADER = SUMMARY_PREFIX + "\n"
+
+# Summarizer preamble (ported from the upstream reference's _summarizer_preamble;
+# already brand-free, deliberately plain so content filters don't trip on the
+# stronger "do-not-respond" framing). The summary is the ONE model-generated
+# piece persisted back into the context, so it must follow the conversation's
+# language even though this instruction is English — hence the language guard.
+_SUMMARIZER_PREAMBLE = (
+    "You are a summarization agent creating a context checkpoint. "
+    "Treat the conversation turns below as source material for a compact "
+    "record of prior work. "
+    "Produce only the structured summary; do not add a greeting, preamble, "
+    "or prefix. "
+    "Write the summary in the same language the conversation was using — do "
+    "not translate or switch to English. "
+    "NEVER include API keys, tokens, passwords, secrets, credentials, or "
+    "connection strings in the summary — replace any that appear with "
+    "[REDACTED]. Note that credentials were present, but do not preserve "
+    "their values."
+)
+
+
+def _today_str() -> str:
+    """Best-effort YYYY-MM-DD for temporal anchoring; '' on any clock failure.
+    Date-only on purpose: the summary is a mid-conversation message, never part
+    of the cached prefix, so a date here never disturbs the prompt cache."""
+    try:
+        return datetime.now().strftime("%Y-%m-%d")
+    except Exception:
+        return ""
+
+
+def _temporal_anchoring_rule(today: str) -> str:
+    """Phrase already-done work as dated past-tense (ported, de-branded).
+    Empty when the clock is unavailable — never hand the model a blank date."""
+    if not today:
+        return ""
+    return (
+        f"\nTEMPORAL ANCHORING: The current date is {today}. When an action "
+        "has already been carried out, phrase it as a completed, dated, "
+        "past-tense fact rather than an open instruction. For example, "
+        'rewrite "email the operator the summary" as "Sent the summary to '
+        f'the operator on {today}." Never leave a finished action worded as '
+        "if it still needs doing, and never invent a date for work that has "
+        "not happened yet.\n"
+    )
+
+
+def _template_sections(summary_budget: int, today: str) -> str:
+    """The structured `## Active Task … ## Critical Context` template, ported
+    from the upstream reference's _template_sections, de-branded. Shared by the
+    first-compaction and iterative-update prompts."""
+    return f"""## Active Task
+[THE SINGLE MOST IMPORTANT FIELD. Capture the operator's most recent
+unfulfilled input verbatim — the exact words. This includes explicit task
+assignments, questions awaiting an answer, decisions awaiting input, and
+ongoing discussions where the next substantive reply is owed. A turn where the
+operator just asked a question IS an active task — the task is "answer that
+question with full context". Do NOT write "None" merely because no imperative
+command was issued; reserve "None" for the rare case where the last exchange
+was fully resolved (e.g. "thanks, that's all"). If multiple items are
+outstanding, list only the ones NOT yet completed. Continuation should pick up
+exactly here. Examples:
+"Operator asked: 'Now refactor the auth module to use JWT instead of sessions'"
+"Operator asked: 'Waarom stond provider ineens op openrouter?' — needs investigation + answer"
+"Operator chose option A; awaiting implementation of step 2"
+If the operator's most recent message was a reverse signal (stop, undo, roll
+back, never mind, just verify, change of topic) that supersedes earlier work,
+write the reverse signal verbatim and DO NOT carry forward the cancelled task.
+Example: "Operator asked: 'Stop the i18n refactor and just verify the current
+diff' — earlier i18n in-flight work is cancelled." If no outstanding task
+exists, write "None."]
+
+## Goal
+[What the operator is trying to accomplish overall]
+
+## Constraints & Preferences
+[Preferences, style, constraints, important standing decisions]
+
+## Completed Actions
+[Numbered list of concrete actions taken — include tool used, target, and
+outcome. Format each as: N. ACTION target — outcome [tool: name]
+Example:
+1. READ config.py:45 — found `==` should be `!=` [tool: read_file]
+2. PATCH config.py:45 — changed `==` to `!=` [tool: patch]
+3. TEST `pytest tests/` — 3/50 failed: test_parse, test_validate, test_edge [tool: terminal]
+Be specific with workspace file paths, commands, line numbers, and results.]
+
+## Active State
+[Current working state — working directory, modified/created files with a
+brief note on each, test status, running processes, environment details that
+matter.]
+
+## In Progress
+[Work underway — what was being done when compaction fired]
+
+## Blocked
+[Any blockers, errors, or issues not yet resolved. Include exact error
+messages.]
+
+## Key Decisions
+[Important technical/creative decisions and WHY they were made]
+
+## Resolved Questions
+[Questions ALREADY answered — include the answer so it is not repeated]
+
+## Pending Asks
+[Requests from the operator NOT yet answered or fulfilled. If none, write
+"None."]
+
+## Relevant Files
+[Files read, modified, or created in the workspace — with a brief note on each
+and the REAL path. Never credit work that was not actually produced.]
+
+## Remaining Work
+[What remains to be done — framed as context, not instructions]
+
+## Critical Context
+[Specific values, error messages, configuration, or data that would be lost
+without explicit preservation. NEVER include API keys, tokens, passwords, or
+credentials — write [REDACTED] instead.]
+
+Target ~{summary_budget} tokens. Be CONCRETE — include workspace file paths,
+command outputs, error messages, line numbers, and specific values. Avoid vague
+descriptions like "made some changes" — say exactly what changed.
+{_temporal_anchoring_rule(today)}
+Write only the summary body. Do not include any preamble or prefix."""
+
+
+def _first_compaction_prompt(content: str, summary_budget: int, today: str) -> str:
+    return f"""{_SUMMARIZER_PREAMBLE}
+
+Create a structured checkpoint summary for the conversation after earlier turns
+are compacted. The summary should preserve enough detail for continuity without
+re-reading the original turns.
+
+TURNS TO SUMMARIZE:
+{content}
+
+Use this exact structure:
+
+{_template_sections(summary_budget, today)}"""
+
+
+def _iterative_update_prompt(previous_summary: str, new_content: str,
+                             summary_budget: int, today: str) -> str:
+    return f"""{_SUMMARIZER_PREAMBLE}
+
+You are updating a context compaction summary. A previous compaction produced
+the summary below. New conversation turns have occurred since then and need to
+be incorporated.
+
+PREVIOUS SUMMARY:
+{previous_summary}
+
+NEW TURNS TO INCORPORATE:
+{new_content}
+
+Update the summary using this exact structure. PRESERVE all existing
+information that is still relevant. ADD new completed actions to the numbered
+list (continue numbering). Move items from "In Progress" to "Completed Actions"
+when done. Move answered questions to "Resolved Questions". Update "Active
+State" to reflect current state. Remove information only if it is clearly
+obsolete. CRITICAL: Update "## Active Task" to reflect the operator's most
+recent unfulfilled input — any question, decision request, or discussion turn
+not yet answered. Only write "None" if the last exchange was fully resolved.
+
+{_template_sections(summary_budget, today)}"""
+
+
+def _strip_summary_prefix(text: str) -> str:
+    """Drop the REFERENCE-ONLY handoff prefix (or the legacy bland header) from a
+    prior summary body before re-folding it, so the new summary carries the
+    prefix exactly once. Body hygiene only — summary detection is by transcript
+    kind, never by this text."""
+    t = (text or "").lstrip()
+    for p in (SUMMARY_PREFIX, _LEGACY_HEADER):
+        if t.startswith(p):
+            return t[len(p):].lstrip()
+    return t
 
 
 _PRUNED_MARK = "output pruned: "  # identifies an already-one-lined tool result
@@ -493,12 +693,22 @@ def compact(ctx: ContextBuffer, llm, *, force: bool = False) -> bool:
 
 
 def _summarize(head: list[dict], budget: int, llm) -> str:
-    convo = _serialize(head)
+    """Summarize the head into the structured `## Active Task …` checkpoint.
+
+    A prior summary (kind="summary") in the head drives the ITERATIVE-update
+    framing (it's pulled out and passed as PREVIOUS SUMMARY, with its handoff
+    prefix stripped so it doesn't nest); otherwise the FIRST-compaction framing
+    is used. One user message keeps the call filter-safe."""
+    prev = next((m for m in head if m.get("kind") == "summary"), None)
+    new_turns = [m for m in head if m.get("kind") != "summary"]
+    convo = _serialize(new_turns)
     if not convo:
         return ""
     out_budget = min(2048, max(512, budget // 8))
-    messages = [
-        {"role": "system", "content": _INSTRUCTION},
-        {"role": "user", "content": convo},
-    ]
-    return llm.raw_complete(messages, max_tokens=out_budget)
+    today = _today_str()
+    if prev is not None:
+        prev_body = _strip_summary_prefix(_flatten_content(prev.get("content")))
+        prompt = _iterative_update_prompt(prev_body, convo, out_budget, today)
+    else:
+        prompt = _first_compaction_prompt(convo, out_budget, today)
+    return llm.raw_complete([{"role": "user", "content": prompt}], max_tokens=out_budget)

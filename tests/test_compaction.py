@@ -54,16 +54,31 @@ def test_compact_replaces_head_keeps_tail():
 
 
 def test_iterative_summary_folds_previous():
-    # A summary message (kind='summary') sits at messages[0] after compaction; the
-    # next compaction includes it in the head, so _serialize labels it as the prior
-    # summary and the model folds it into the new one — iterative update for free.
+    # A prior summary (kind='summary') in the head drives the ITERATIVE-update
+    # framing: it's pulled out and passed as PREVIOUS SUMMARY (prefix stripped),
+    # while only the new turns are serialized. Iterative update for free.
     head = [
-        {"role": "system", "content": "older facts here", "kind": "summary"},
+        {"role": "system", "content": compaction.SUMMARY_PREFIX + "\nolder facts here", "kind": "summary"},
         {"role": "user", "content": "do the thing"},
         {"role": "assistant", "content": "done"},
     ]
-    serialized = compaction._serialize(head)
-    assert "earlier summary" in serialized and "older facts here" in serialized
+    llm = FakeLLM(summary="UPDATED")
+    seen = {}
+    orig = llm.raw_complete
+
+    def capture(messages, max_tokens=1024, timeout=60.0):
+        seen["prompt"] = messages[0]["content"]
+        return orig(messages, max_tokens)
+
+    llm.raw_complete = capture
+    out = compaction._summarize(head, 4000, llm)
+    assert out == "UPDATED"
+    p = seen["prompt"]
+    assert "PREVIOUS SUMMARY:" in p                 # iterative framing chosen
+    assert "older facts here" in p                  # prior body folded in
+    assert "do the thing" in p and "done" in p      # new turns included
+    # the prior summary's REFERENCE-ONLY prefix is stripped so it doesn't nest
+    assert p.count("[CONTEXT COMPACTION — REFERENCE ONLY]") == 0
 
 
 def test_serialize_prunes_tool_outputs_without_mutating_head():
@@ -205,13 +220,16 @@ def test_last_user_message_stays_out_of_the_summary():
     orig = llm.raw_complete
 
     def capture(messages, max_tokens=1024, timeout=60.0):
-        seen["convo"] = messages[1]["content"]
+        # One filter-safe user message now carries the whole structured prompt.
+        seen["convo"] = messages[0]["content"]
         return orig(messages, max_tokens)
 
     llm.raw_complete = capture
     assert _cp(ctx, 4000, llm) is True
-    assert "IMPORTANT" not in seen["convo"]  # not summarized
-    assert any(m.get("role") == "user" and "IMPORTANT" in str(m.get("content"))
+    # the specific ask must not be in the summarized turns (the template
+    # boilerplate itself contains the word "IMPORTANT", so match the phrase)
+    assert "refactor the parser next" not in seen["convo"]
+    assert any(m.get("role") == "user" and "refactor the parser next" in str(m.get("content"))
                for m in ctx.messages)        # kept verbatim in the tail
 
 
@@ -226,6 +244,77 @@ def test_anchor_refuses_when_only_the_head_remains():
     llm = FakeLLM(summary="S")
     assert _cp(ctx, 4000, llm) is False
     assert llm.calls == 0  # bailed before any summarizer spend
+
+
+# ---- the structured summary template + REFERENCE-ONLY handoff (apple-to-apple) ----------
+
+
+def _capture_prompt(ctx, window, summary="S"):
+    llm = FakeLLM(summary=summary)
+    seen = {}
+    orig = llm.raw_complete
+
+    def capture(messages, max_tokens=1024, timeout=60.0):
+        seen["prompt"] = messages[0]["content"]
+        return orig(messages, max_tokens)
+
+    llm.raw_complete = capture
+    _cp(ctx, window, llm)
+    return seen.get("prompt", "")
+
+
+def test_summary_carries_reference_only_prefix():
+    ctx = ContextBuffer(max_tokens=10_000_000)
+    _fill(ctx, 40, 500)
+    assert _cp(ctx, 4000, FakeLLM(summary="BODY")) is True
+    head = ctx.messages[0]
+    assert head["kind"] == "summary"
+    assert head["content"].startswith(compaction.SUMMARY_PREFIX)
+    assert "REFERENCE ONLY" in head["content"] and "latest message WINS" in head["content"]
+
+
+def test_first_compaction_uses_structured_template():
+    ctx = ContextBuffer(max_tokens=10_000_000)
+    _fill(ctx, 40, 500)
+    prompt = _capture_prompt(ctx, 4000)
+    for section in ("## Active Task", "## Completed Actions", "## Pending Asks",
+                    "## Critical Context"):
+        assert section in prompt
+    assert "summarization agent creating a context checkpoint" in prompt
+    assert "PREVIOUS SUMMARY:" not in prompt   # first compaction, not iterative
+
+
+def test_temporal_anchoring_present_and_dated(monkeypatch):
+    monkeypatch.setattr(compaction, "_today_str", lambda: "2026-06-18")
+    ctx = ContextBuffer(max_tokens=10_000_000)
+    _fill(ctx, 40, 500)
+    prompt = _capture_prompt(ctx, 4000)
+    assert "TEMPORAL ANCHORING: The current date is 2026-06-18" in prompt
+    # absent when the clock is unavailable
+    monkeypatch.setattr(compaction, "_today_str", lambda: "")
+    ctx2 = ContextBuffer(max_tokens=10_000_000)
+    _fill(ctx2, 40, 500)
+    assert "TEMPORAL ANCHORING" not in _capture_prompt(ctx2, 4000)
+
+
+def test_strip_summary_prefix_handles_current_and_legacy():
+    assert compaction._strip_summary_prefix(compaction.SUMMARY_PREFIX + "\nbody") == "body"
+    assert compaction._strip_summary_prefix(compaction._LEGACY_HEADER + "\nold body") == "old body"
+    assert compaction._strip_summary_prefix("no prefix here") == "no prefix here"
+
+
+def test_no_brand_strings_in_model_facing_summary_text():
+    banned = ("hermes", "Hermes", "the VM", "MEMORY.md", "USER.md")
+    surfaces = [
+        compaction.SUMMARY_PREFIX,
+        compaction._SUMMARIZER_PREAMBLE,
+        compaction._template_sections(1024, "2026-06-18"),
+        compaction._first_compaction_prompt("X", 1024, "2026-06-18"),
+        compaction._iterative_update_prompt("P", "X", 1024, "2026-06-18"),
+    ]
+    for s in surfaces:
+        for b in banned:
+            assert b not in s, f"{b!r} leaked into model-facing summary text"
 
 
 # ---- prune old tool outputs in the LIVE window (audit #13) ------------------------------
