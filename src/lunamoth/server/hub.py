@@ -1924,6 +1924,11 @@ def wake(card_path: str, name: str = "", isolation: str = "sandbox",
         # non-secret overrides, so the key isn't duplicated into every chara's dir.
         "model": model or defaults.get("model", cfg["model"]),
         "model_context": int(defaults.get("model_context") or 0),
+        # per-session model knobs the agent/llm read (Settings.reasoning /
+        # Settings.vision_model) must be copied from the global defaults at wake,
+        # else a woken chara silently ignores the Model-pane choices.
+        "reasoning": str(defaults.get("reasoning") or cfg["reasoning"]),
+        "vision_model": str(defaults.get("vision_model") or ""),
         "character_path": str(frozen),
         "py_backend": _ISOLATION_TO_BACKEND.get(meta.isolation, "sandbox"),
     })
