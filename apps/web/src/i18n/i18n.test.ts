@@ -17,9 +17,11 @@ describe("I18N strings map", () => {
   // unifying the Keys settings surface (#5) added 5 (model-label, keys-edit,
   // keys-set, keys-saved, set-keys) → 504; the matte models cleanup (#4) added 1
   // (matte-shared-note) → 505; the in-session visuals editor (#1b) added 3
-  // (vis-kind-keyvisual, p-visuals, vis-session-note) → 508.
-  it("preserves the full key set from the source dict (508 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(508);
+  // (vis-kind-keyvisual, p-visuals, vis-session-note) → 508; dropping the
+  // muse-label (the say|muse channel is a backend forwarding hint, not a desktop
+  // display distinction — muse now renders identically to say) removed 1 → 507.
+  it("preserves the full key set from the source dict (507 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(507);
   });
 
   it("every value is a [zh, en] string tuple", () => {

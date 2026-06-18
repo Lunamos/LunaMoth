@@ -7,12 +7,17 @@
  * of typed `StreamItem`s. The model keeps a private `cur` cursor describing the
  * item currently being appended to. The contract preserved verbatim:
  *
- *  - Consecutive deltas of the SAME `kind` (say / super / muse / think) append to
+ *  - Consecutive deltas of the SAME `kind` (say / super / think) append to
  *    ONE item's accumulated text. A `kind` CHANGE first closes the current item
- *    (which markdown-renders say/super text) and opens a fresh one.
+ *    (which markdown-renders say/super text) and opens a fresh one. The `muse`
+ *    channel is NOT a display distinction: it only tells the backend messaging
+ *    gateway whether to forward a turn externally. On the desktop there is no
+ *    gateway, so muse text renders identically to say (it accumulates into a
+ *    `say` item — a separate self-work turn is still its own message because the
+ *    turn boundary closes the previous item, but with no channel-based styling).
  *  - A run of consecutive tool calls folds into ONE `tool-group` item; its
  *    summary is a hermes-style tally ("read 1 file · ran 2 commands"). Any
- *    non-tool item (text/muse/think/attachment/system) breaks the group.
+ *    non-tool item (text/think/attachment/system) breaks the group.
  *  - The `speak` tool ending ok sets a pending-super flag; the NEXT say-channel
  *    text opens as a bright super-chat bubble (the chara reaching out).
  *  - think deltas accumulate into the SINGLE think block for the turn
@@ -22,9 +27,8 @@
  * Subtle behaviors interpreted from chat.js, documented here:
  *  - super-chat read/unread is a CSS class applied later by the view from its own
  *    read watermark (Chat.tsx superReadTs); the model only records the super's `ts`.
- *  - closeCurrent only markdown-renders say|super (muse/think stay plain text) —
- *    we mirror that by tagging the item with `rendered` so the view picks the
- *    renderer. think text is never markdown.
+ *  - closeCurrent markdown-renders say|super; think stays plain text. Muse text
+ *    is folded into say, so it is markdown-rendered like any other message.
  *  - tool_end with no matching tool_start (orphan) still counts in the tally and
  *    appends a chip (chat.js showToolEnd's `!rec` branch).
  */
@@ -35,7 +39,6 @@ export type ItemKind =
   | "user"
   | "say"
   | "super"
-  | "muse"
   | "think"
   | "tool-group"
   | "attachment"
@@ -65,7 +68,7 @@ export interface ToolGroupItem {
 
 export interface TextItem {
   id: string;
-  kind: "say" | "super" | "muse";
+  kind: "say" | "super";
   raw: string;
   /** super-chat only: the speak timestamp (epoch s). Read/unread is derived in the
    *  view from its own watermark (Chat.tsx superReadTs) — NOT stored on the item. */
@@ -226,12 +229,13 @@ export class StreamModel {
   /* ---- the live event dispatch (chat.js onEvent) ---- */
   // Returns whether `speak` just ok'd (so the caller can flag a notification);
   // the work-state phase the caller surfaces is derived separately.
+  // The `channel` (say|muse) is a backend-gateway forwarding hint, NOT a display
+  // distinction — on the desktop both render identically. Muse text accumulates
+  // into a normal `say` item; a self-work turn is still its own message because
+  // the turn boundary closes the previous item. (A pending super-chat only
+  // applies to the say channel — a muse turn never opens a super bubble.)
   pushText(text: string, channel: "say" | "muse"): void {
-    if (channel === "muse") {
-      this.appendMuse(text);
-      return;
-    }
-    const isSuper = this.pendingSuper;
+    const isSuper = channel === "say" && this.pendingSuper;
     this.pendingSuper = false;
     this.appendSay(text, isSuper);
   }
@@ -323,7 +327,7 @@ export class StreamModel {
     this.turnThink = null;
   }
 
-  /* ---- the accumulator internals (chat.js appendCharText/appendMuseText/…) ---- */
+  /* ---- the accumulator internals (chat.js appendCharText/…) ---- */
   private appendSay(text: string, isSuper: boolean, tsOverride?: number): void {
     const kind: "say" | "super" = isSuper ? "super" : "say";
     if (this.cur.kind !== kind) {
@@ -341,17 +345,6 @@ export class StreamModel {
     }
     const item = this.cur.item as TextItem;
     item.raw += text;
-  }
-
-  private appendMuse(text: string): void {
-    if (this.cur.kind !== "muse") {
-      this.closeCurrent();
-      this.breakToolGroup();
-      const item: TextItem = { id: this.nextId(), kind: "muse", raw: "" };
-      this.items.push(item);
-      this.cur = { kind: "muse", item };
-    }
-    (this.cur.item as TextItem).raw += text;
   }
 
   private appendThink(text: string): void {
@@ -414,13 +407,6 @@ export class StreamModel {
       } else if (m.role === "tool") {
         if (hasText) this.restoreToolResult(m, restoreChips);
       } else if (m.role === "assistant") {
-        if (m.kind === "think") {
-          if (hasText) {
-            this.appendMuse(content);
-            this.closeCurrent();
-          }
-          continue;
-        }
         const reasoning =
           typeof m.reasoning_content === "string" ? m.reasoning_content.trim() : "";
         if (reasoning) {

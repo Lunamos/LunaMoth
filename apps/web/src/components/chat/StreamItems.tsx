@@ -1,8 +1,10 @@
 /* The stream item renderers — one component per StreamItem kind, mirroring the
- * DOM that chat.js built (char-msg / muse-msg / think-block / tool-group /
- * attachment / sys-note / user-msg + the inline permission & clarify boxes). The
- * CSS class names are reused 1:1 from front/web/style.css (ported in global.css).
- */
+ * DOM that chat.js built (char-msg / think-block / tool-group / attachment /
+ * sys-note / user-msg + the inline permission & clarify boxes). The CSS class
+ * names are reused 1:1 from front/web/style.css (ported in global.css).
+ *
+ * The say|muse channel is a backend messaging-gateway forwarding hint, not a
+ * display distinction — on the desktop muse renders identically to say. */
 
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -42,7 +44,7 @@ function Avatar({ name, avatarUri }: { name: string; avatarUri?: string }) {
   );
 }
 
-/** Markdown for say/super; plain text for muse/think (chat.js closeCurrent). */
+/** Markdown for say/super; plain text for think (chat.js closeCurrent). */
 function Markdown({ text }: { text: string }) {
   return <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>;
 }
@@ -77,16 +79,6 @@ function SayMessage({
           <Markdown text={item.raw} />
         </div>
       </div>
-    </div>
-  );
-}
-
-function MuseMessage({ item }: { item: TextItem }) {
-  const t = useT();
-  return (
-    <div className="muse-msg">
-      <div className="muse-label">{t("muse-label")}</div>
-      <div className="muse-text">{item.raw}</div>
     </div>
   );
 }
@@ -189,17 +181,8 @@ function AttachmentCard({ item, charName, avatarUri }: { item: AttachmentItem; c
     </div>
   );
   const cap = item.caption ? <div className="attach-cap">{item.caption}</div> : null;
-  if (item.channel === "muse") {
-    return (
-      <div className="muse-msg">
-        <div className="muse-label">{t("muse-label")}</div>
-        <div className="muse-text">
-          {media}
-          {cap}
-        </div>
-      </div>
-    );
-  }
+  // The say|muse channel is a backend forwarding hint, not a display
+  // distinction — a muse attachment renders the same as a say one.
   return (
     <div className="char-msg">
       <Avatar name={charName} avatarUri={avatarUri} />
@@ -331,8 +314,6 @@ export function StreamItemView({
     case "say":
     case "super":
       return <SayMessage item={item} charName={charName} superReadTs={superReadTs} avatarUri={avatarUri} />;
-    case "muse":
-      return <MuseMessage item={item} />;
     case "think":
       return <ThinkBlock item={item} />;
     case "tool-group":

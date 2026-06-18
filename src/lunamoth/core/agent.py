@@ -923,14 +923,12 @@ class LunaMothAgent:
         session.context.add("system", note)
 
     def _record_think(self, session: Session):
-        """record() wrapper for idle cycles: monologue text is tagged kind='think'
-        (so old cycles age out of the API view — see ContextBuffer.render), while
-        tool calls/results the chara makes stay untagged: real actions are worth
-        remembering at full strength."""
+        """record() wrapper for idle cycles. Self-work output is recorded as a
+        NORMAL assistant message — exactly like a chat turn. There is no
+        per-message classification: a chara's self-directed turns are first-class
+        history, aged only by the normal trim/compaction path (hermes-faithful)."""
 
         def record(msg: dict) -> None:
-            if msg.get("role") == "assistant" and not msg.get("tool_calls") and msg.get("content"):
-                msg = {**msg, "kind": "think"}
             session.context.add_message(msg)
 
         return record
@@ -951,7 +949,7 @@ class LunaMothAgent:
             if thought:
                 if not agent_loop:
                     mark = self.llm.INTERRUPT_MARK if interrupted else ""
-                    session.context.add("assistant", f"{thought}{mark}", kind="think")
+                    session.context.add("assistant", f"{thought}{mark}")
             self.audit.write("internal_cycle", tick=cycle, text=thought[:1000], ts=datetime.now(timezone.utc).isoformat())
 
         try:

@@ -35,14 +35,43 @@ describe("StreamModel — same-type append vs type-change close", () => {
     expect(says[0].raw).toBe("Hello world");
   });
 
-  it("opens a NEW item when the channel changes say → muse → say", () => {
+  it("renders muse identically to say (the channel is a backend forwarding hint)", () => {
+    // The say|muse channel only tells the backend gateway whether to forward a
+    // turn externally; on the desktop there's no gateway, so muse must render
+    // like say. A muse delta accumulates into a normal `say` item with no
+    // channel-based visual or structural difference.
+    m.pushText("self-work thought", "muse");
+    expect(kinds(m)).toEqual(["say"]);
+    expect((m.items[0] as TextItem).raw).toBe("self-work thought");
+  });
+
+  it("does NOT structurally break on a channel switch within a turn", () => {
+    // The channel is no longer a display distinction, so a say → muse → say
+    // switch carries no structural break: like any same-kind run, the deltas
+    // accumulate into ONE say item. Separate self-work TURNS stay separate
+    // because the turn boundary (finalize / closeCurrent) closes the item — see
+    // the next test — NOT because of the channel.
     m.pushText("a", "say");
     m.pushText("b", "muse");
     m.pushText("c", "say");
-    expect(kinds(m)).toEqual(["say", "muse", "say"]);
-    expect((m.items[0] as TextItem).raw).toBe("a");
-    expect((m.items[1] as TextItem).raw).toBe("b");
-    expect((m.items[2] as TextItem).raw).toBe("c");
+    expect(kinds(m)).toEqual(["say"]);
+    expect((m.items[0] as TextItem).raw).toBe("abc");
+  });
+
+  it("keeps successive muse turns as separate messages across a turn boundary", () => {
+    m.pushText("turn one", "muse");
+    m.finalize();
+    m.pushText("turn two", "muse");
+    expect(kinds(m)).toEqual(["say", "say"]);
+    expect((m.items[0] as TextItem).raw).toBe("turn one");
+    expect((m.items[1] as TextItem).raw).toBe("turn two");
+  });
+
+  it("appends consecutive muse deltas into ONE say item", () => {
+    m.pushText("first ", "muse");
+    m.pushText("second", "muse");
+    expect(kinds(m)).toEqual(["say"]);
+    expect((m.items[0] as TextItem).raw).toBe("first second");
   });
 
   it("accumulates think deltas into a single streaming think block", () => {

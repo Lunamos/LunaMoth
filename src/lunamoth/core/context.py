@@ -10,19 +10,16 @@ Extra keys we use:
     tool_call_id    a tool-result message answering one call
     reasoning_content  model thinking, stored for the record but NOT replayed
                     to the API (most providers reject or double-bill it)
-    kind            'think' marks idle self-talk monologues; render() replays
-                    only the most recent few so monologue floods can't bury
-                    the operator's actual instructions
+
+A chara's self-work turns are ordinary assistant messages here — no per-message
+classification, aged only by the normal trim/compaction path (hermes-faithful:
+context is bounded by length, never by deleting a class of messages).
 """
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
-
-# How many idle self-talk monologues stay visible to the model. Older ones
-# remain in memory/transcript but are dropped from the API view.
-THINK_WINDOW = 4
 
 # Keys allowed through to the chat-completions API.
 _API_KEYS = ("role", "content", "tool_calls", "tool_call_id", "name")
@@ -80,31 +77,12 @@ class ContextBuffer:
         self.messages.append(msg)
         if self.persist is not None:
             self.persist(msg)
-        self._prune_thinks()
         self.trim()
 
     def restore(self, rows: list[dict]) -> None:
         """Load previously persisted history WITHOUT re-persisting it."""
         self.messages = [dict(m) for m in rows]
-        self._prune_thinks()
         self.trim()
-
-    def _prune_thinks(self) -> None:
-        """Drop idle monologues beyond THINK_WINDOW from the buffer itself.
-
-        They are already persisted to the transcript, never replayed to the API,
-        and must not occupy token budget — otherwise a chatty daemon's thinks
-        would crowd the operator's real instructions out of the trim window.
-        """
-        seen = 0
-        keep_from_end: list[int] = []
-        for i in range(len(self.messages) - 1, -1, -1):
-            if self.messages[i].get("kind") == "think":
-                seen += 1
-                if seen > THINK_WINDOW:
-                    keep_from_end.append(i)
-        for i in keep_from_end:
-            del self.messages[i]
 
     def pairs(self) -> list[tuple[str, str]]:
         """(role, content) view for UIs/tests — structured fields flattened away.

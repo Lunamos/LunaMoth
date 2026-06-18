@@ -157,8 +157,10 @@ class TranscriptStore:
             except (TypeError, ValueError):
                 self.append(role, str(msg.get("content") or ""), kind="chat")
             return
-        kind = "think" if msg.get("kind") == "think" else "chat"
-        self.append(role, str(msg.get("content") or ""), kind=kind)
+        # Self-work and chat assistant turns are recorded uniformly as "chat":
+        # no per-message classification of the chara's own output (hermes-faithful).
+        # ("summary"/"struct" above are structural infra, not output classes.)
+        self.append(role, str(msg.get("content") or ""), kind="chat")
 
     def load(self, max_messages: int = 0) -> list[dict]:
         """Conversation messages of the current epoch, oldest first, as dicts."""
@@ -200,11 +202,10 @@ class TranscriptStore:
                 except (json.JSONDecodeError, TypeError):
                     pass
                 out.append({"role": str(role), "content": str(content)})
-            elif kind == "think":
-                out.append({"role": str(role), "content": str(content), "kind": "think"})
             elif kind == "summary":
                 out.append({"role": str(role), "content": str(content), "kind": "summary"})
             else:
+                # Plain chat AND legacy "think" rows load as ordinary messages.
                 out.append({"role": str(role), "content": str(content)})
         return out
 
@@ -251,11 +252,10 @@ class TranscriptStore:
                 except (json.JSONDecodeError, TypeError):
                     pass
                 out.append({"role": str(role), "content": str(content)})
-            elif kind == "think":
-                out.append({"role": str(role), "content": str(content), "kind": "think"})
             elif kind == "summary":
                 out.append({"role": str(role), "content": str(content), "kind": "summary"})
             else:
+                # Plain chat AND legacy "think" rows render as ordinary messages.
                 out.append({"role": str(role), "content": str(content)})
         return out
 

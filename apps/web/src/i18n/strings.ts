@@ -84,7 +84,6 @@ export const I18N = {
   "attach-tip": ["也可以把文件拖到聊天区。", "You can also drag files onto the chat."],
   "attach-no-clip-image": ["剪贴板里没有图片", "No image in the clipboard"],
   "stop": ["停下", "Stop"],
-  "muse-label": ["自语 / muse", "self-talk / muse"],
   "thinking-live": ["思考中… ({n} tok)", "thinking… ({n} tok)"],
   "thinking-done": ["思考 · {n} tok", "thinking · {n} tok"],
   "work-thinking": ["✶ 思考中 ({n} tok)", "✶ thinking ({n} tok)"],

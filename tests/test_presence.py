@@ -176,7 +176,7 @@ def test_reset_command_reseeds_greeting_before_selfwork(agent):
     assert g[:40] in str(session.context.messages[0].get("content") or "")
 
     # a self-work row afterwards must NOT erase the greeting from the reopened view
-    session.context.add("assistant", "...quiet self-work...", kind="think")
+    session.context.add("assistant", "...quiet self-work...")
     info = CharaHandle(agent=a).attach()
     joined = " ".join(str(m.get("content") or "") for m in info.restored)
     assert g[:40] in joined, "greeting must survive self-work after /reset"

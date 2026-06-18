@@ -38,13 +38,15 @@ def test_structured_messages_roundtrip(tmp_path):
     t.append_message({"role": "user", "content": "run it"})
     t.append_message(call)
     t.append_message({"role": "tool", "tool_call_id": "c1", "content": "exit=0"})
-    t.append_message({"role": "assistant", "content": "done", "kind": "think"})
+    t.append_message({"role": "assistant", "content": "done"})
     rows = TranscriptStore(t.path).load()
     assert rows[0] == {"role": "user", "content": "run it"}
     assert rows[1]["tool_calls"][0]["function"]["name"] == "terminal"
     assert rows[1]["reasoning_content"] == "let me look around"
     assert rows[2] == {"role": "tool", "tool_call_id": "c1", "content": "exit=0"}
-    assert rows[3]["kind"] == "think"  # idle monologues stay tagged across restarts
+    # Self-work / chat assistant turns load uniformly as ordinary messages
+    # (no per-message classification — hermes-faithful).
+    assert rows[3] == {"role": "assistant", "content": "done"}
 
 
 def test_load_tail_limit(tmp_path):
@@ -75,7 +77,7 @@ def test_export_jsonl_complete_roundtrip(tmp_path):
     ], "reasoning_content": "let me look around"}
     t.append_message(call)
     t.append_message({"role": "tool", "tool_call_id": "c1", "content": "exit=0\nfile.txt"})
-    t.append_message({"role": "assistant", "content": "done", "kind": "think"})
+    t.append_message({"role": "assistant", "content": "done"})
 
     out = tmp_path / "conv.jsonl"
     n = t.export_jsonl(out)

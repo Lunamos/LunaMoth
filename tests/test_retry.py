@@ -186,7 +186,7 @@ def test_idle_cycle_failure_surfaces_without_fallback(agent, monkeypatch):
     with pytest.raises(RuntimeError, match="upstream died"):
         list(a.stream_think(s))
     # No fabricated "cycle 0042: buffer stable" output ever enters the context.
-    assert all(m.get("kind") != "think" for m in s.context.messages)
+    assert not [m for m in s.context.messages if m.get("role") == "assistant"]
 
 
 # ---- empty-completion detection (audit #4) ---------------------------------------------

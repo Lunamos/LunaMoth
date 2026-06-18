@@ -714,3 +714,24 @@ imaging.py one-off helpers in-package).
   still carry inert `on_attach`/`on_detach` keys (cleanup).
 - Discipline: nothing env-specific or personal (server IPs, deploy domains) in the
   repo; the per-host management tool stays server-only.
+
+### Follow-up — context management realigned with hermes (owner decision 2026-06-18)
+The muse/self-work design had drifted from hermes: self-work assistant turns were
+tagged `kind="think"` and pruned by a `THINK_WINDOW`, and the frontend rendered muse
+in a special `.muse-msg` bubble. Owner ruling: "我们就一视同仁地处理所有的 assistant…
+事实上 muse 都不应该在前端上特殊处理，它仅仅是用来标记要不要发给网关的". So:
+- **Removed** `THINK_WINDOW` + `_prune_thinks` from `core/context.py`; `_record_think`
+  and `stream_think.commit()` now record self-work as ordinary assistant messages with
+  NO `kind`. Self-work turns are first-class history, aged ONLY by compaction — exactly
+  like chat turns (hermes bounds context by length only, head/tail protected).
+- **Kept**: the ephemeral idle tick (`[time]`, in_context=False); `channel=MUSE` as a
+  pure stream-time gateway-forwarding hint (muse = do-not-forward, say = forward),
+  decided by turn type and never stored on a message; `summary`/`struct` kinds (compaction
+  marker + tool-call JSON serialization — structural infra, not classification); legacy
+  `'think'` transcript rows still load (as ordinary messages).
+- **Frontend**: deleted `MuseMessage`/`appendMuse`/the `"muse"` ItemKind/`.muse-msg`
+  CSS/`muse-label` i18n — muse now renders identically to say; separate self-work turns
+  stay separate bubbles via the turn-end `finalize()`. The dead `kind==="think"` restore
+  branch was removed too. `channel` stays on the protocol type (gateway plumbing).
+- Gates: pytest 908 passed; ruff clean; web build + vitest 155 passed; adversarial
+  subagent review clean (no `kind="think"` behavior anywhere, no dangling muse refs).

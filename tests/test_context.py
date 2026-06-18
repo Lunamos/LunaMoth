@@ -1,7 +1,7 @@
-"""Context management: interrupt-safe commits, think windowing, tool-aware trim."""
+"""Context management: interrupt-safe commits, uniform self-work turns, tool-aware trim."""
 import pytest
 
-from lunamoth.core.context import THINK_WINDOW, ContextBuffer
+from lunamoth.core.context import ContextBuffer
 from lunamoth.session.settings import Settings
 
 
@@ -12,18 +12,21 @@ def test_render_sanitizes_and_withholds_reasoning():
     assert out == [{"role": "assistant", "content": "did it"}]
 
 
-def test_old_think_cycles_pruned_from_buffer():
+def test_self_work_cycles_all_survive_as_plain_assistant_messages():
+    # hermes-faithful: a chara's self-work turns are first-class assistant
+    # messages, NOT a class pruned to a window. Many consecutive self-work
+    # cycles all stay in the buffer (aged only by trim/compaction), and none
+    # carry a classification tag.
     c = ContextBuffer()
     c.add("user", "please do X")
-    for i in range(THINK_WINDOW + 5):
-        c.add("assistant", f"musing {i}", kind="think")
-    # Old monologues are pruned from the BUFFER itself (they stay in the
-    # transcript), so they neither reach the API nor occupy trim budget —
-    # a chatty daemon can't crowd out the operator's real instruction.
-    thinks = [m for m in c.messages if m.get("kind") == "think"]
-    assert len(thinks) == THINK_WINDOW
-    assert thinks[-1]["content"].endswith(f"musing {THINK_WINDOW + 4}")  # newest kept
+    n = 20
+    for i in range(n):
+        c.add("assistant", f"musing {i}")
+    assistants = [m for m in c.messages if m.get("role") == "assistant"]
+    assert len(assistants) == n  # nothing pruned to a window
+    assert all("kind" not in m for m in assistants)  # plain assistant messages
     assert c.render()[0] == {"role": "user", "content": "please do X"}  # still visible
+    assert c.render()[-1] == {"role": "assistant", "content": f"musing {n - 1}"}
 
 
 def test_render_drops_orphaned_tool_results():
@@ -125,8 +128,10 @@ def test_interrupted_think_cycle_is_committed(agent):
     gen = a.stream_think(s)
     next(gen)
     gen.close()
-    thinks = [m for m in s.context.messages if m.get("kind") == "think"]
-    assert thinks and thinks[-1]["content"].strip()  # partial idle output committed
+    # Self-work output is committed as a plain assistant message (no kind tag).
+    assistants = [m for m in s.context.messages if m.get("role") == "assistant"]
+    assert assistants and assistants[-1]["content"].strip()  # partial idle output committed
+    assert all("kind" not in m for m in assistants)
 
 
 def test_commit_keeps_speech_and_drops_machinery_events(agent, monkeypatch):
