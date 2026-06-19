@@ -305,10 +305,21 @@ zero internal deps; `obs/` imports only `config`.
   hub RPCs), `matte.py` (local background-removal models — download/install/select,
   the `matte.*` hub RPCs; the heavy `rembg`/`onnxruntime` stack is the OPTIONAL
   `visuals` extra, `uv sync --extra visuals`). The web side is the deck card
-  editor's 视觉 tab + the 生图 Settings pane (matte models). The image-gen KEY now
-  lives in Settings · 提供商 (image-gen row → `image_api_key`) and the image MODEL in
-  Settings · 模型 (`image_model`). `tools/builtin/_image_gen.py` is the shared Ark
-  image backend (the chara's `generate_image` tool uses it too).
+  editor's 视觉 tab + the 生图 Settings pane (matte models). IMAGE GEN is
+  MULTI-PROVIDER (2026-06-19): `content/image_providers.py` is the provider
+  catalogue (火山方舟 Ark / 阿里云 DashScope / OpenAI / OpenRouter), and
+  `tools/builtin/_image_gen.py` dispatches to per-provider adapters (ark sync,
+  openai sync b64/url, dashscope async-poll, openrouter chat-modalities). The
+  provider + model are EXACTLY the selection in Settings · 模型 · 生图模型
+  (`image_provider` + `image_model`) — NO inference, NO fallback; a failure is a
+  plain tool error. The KEY is resolved from the SAME unified provider keyring as
+  text (matched by provider id or base_url host) — there is NO separate
+  `image_api_key` field any more. The web `image.catalog` RPC lists providers +
+  models + per-provider key presence (`has_image_key` = the active image provider
+  has a key); OpenRouter's model list is merged live from its `/models`. Hunyuan
+  image is deferred (no OpenAI-compat images endpoint — needs the native TC3 API).
+  The same backend serves both the chara's `generate_image` tool and the visuals
+  pipeline.
 - `session/` — `sessions.py` (named charas under ~/.lunamoth/sessions/<name>/;
   `SessionMeta.env()` is the activation interface), `settings.py`, `cleanup.py`,
   `isolation.py` (stdlib-only OS jail builders — shared by tools/runner and the

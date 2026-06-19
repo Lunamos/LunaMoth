@@ -426,6 +426,32 @@ def test_read_file_image_vision_followup(tmp_path, monkeypatch):
     assert a._image_vision_followup("note.txt") is None  # not an image
 
 
+def test_execute_tool_browser_vision_native_inlines(tmp_path, monkeypatch):
+    """When the tool returns vision_native (main model has native vision), the agent
+    inlines the screenshot pixels on a follow-up user message + keeps the MEDIA path."""
+    import json as _json
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    monkeypatch.setenv("LUNAMOTH_SANDBOX", str(tmp_path / "sandbox"))
+    monkeypatch.setenv("LUNAMOTH_CONFIG_DIR", str(tmp_path / "cfg"))
+    from lunamoth.session.settings import Settings
+    from lunamoth.core.agent import LunaMothAgent
+    a = LunaMothAgent(Settings(character_path="", toolpack="sandbox"))
+    monkeypatch.setattr(a.llm, "vision_supported", lambda: True)
+    shot = tmp_path / "shot.png"
+    shot.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 64)
+    data = _json.dumps({"success": True, "vision_native": True,
+                        "screenshot_path": str(shot), "question": "what is here?"})
+    monkeypatch.setattr(a.tools, "call", lambda name, **kw: {"ok": True, "data": data})
+    monkeypatch.setattr(a.tools, "result_cap", lambda name: 100000)
+    out = a._execute_tool({"function": {"name": "browser_vision", "arguments": "{}"}})
+    assert out["follow_up"]["role"] == "user"
+    parts = out["follow_up"]["content"]
+    assert parts[-1]["type"] == "image_url"
+    assert parts[-1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert parts[0]["text"].endswith("what is here?")     # question rides the inline text
+    assert "MEDIA:" in out["content"]                      # path preserved for surfacing
+
+
 # ---- strip_old_images: keep newest image's pixels, collapse older to text ----
 def test_strip_old_images_keeps_only_the_newest():
     from lunamoth.core.context import ContextBuffer

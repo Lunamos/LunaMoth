@@ -390,8 +390,21 @@ architecture/rationale worth keeping (change only with owner sign-off):
 Frontend owner's session. Touched files (frontend + a little backend); the
 image-backend item below is the main OPEN piece.
 
-### OPEN — multi-provider image generation (NOT done; research captured here)
-`tools/builtin/_image_gen.py` is **Volcano-Ark-only** today: synchronous POST
+### SHIPPED 2026-06-19 — multi-provider image generation
+DONE: `content/image_providers.py` (catalogue) + `tools/builtin/_image_gen.py`
+dispatches 火山方舟 Ark (sync) / 阿里云 DashScope (async-poll) / OpenAI (sync
+b64|url) / OpenRouter (chat-modalities). Provider + model = the EXACT selection in
+Settings · 模型 · 生图模型 (`image_provider`+`image_model`), no inference/fallback;
+key from the UNIFIED provider keyring (no separate `image_api_key`). `image.catalog`
+RPC lists providers+models+key presence, OpenRouter models merged live. Live-verified
+Ark/DashScope/OpenRouter/OpenAI (one image each) + through the chara's generate_image.
+Hunyuan image DEFERRED (no OpenAI-compat images endpoint — 404; native TC3 API needed,
+and the OpenAI-compat key can't sign it). The historical research below is kept for the
+DashScope/Hunyuan API shapes. NOTE: the synchronous-blocking concern (SEC-low above) is
+being addressed separately by the background-job generate_image.
+
+### (historical) original handover — Volcano-Ark-only state
+`tools/builtin/_image_gen.py` was **Volcano-Ark-only**: synchronous POST
 `https://ark.cn-beijing.volces.com/api/v3/images/generations`, body `{model,prompt,
 size,response_format:"url",watermark, image:[refs]}`, Bearer `image_api_key`, returns
 `data[].url`. So **Doubao-Seedream (5.0/4.0) works now** (Ark, just a model id).
