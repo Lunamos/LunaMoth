@@ -162,36 +162,47 @@ def test_handler_empty_prompt_errors(monkeypatch, tmp_path, sandbox):
 
 
 # ---------------------------------------------------------------------------
-# handler — happy path with MOCKED dispatch (no real HTTP)
+# handler — BACKGROUND dispatch (returns "submitted"; the worker pushes a
+# completion event onto the process registry's queue). MOCKED, no real HTTP.
 # ---------------------------------------------------------------------------
 _FAKE_PNG = b"\x89PNG\r\n\x1a\nFAKE"
 
 
 @pytest.fixture
 def mock_network(monkeypatch):
-    # media calls _image_gen.generate_bytes (the multi-provider dispatch). Mock it
-    # to return a valid PNG, no real HTTP. media imports the name into its own ns.
+    # the background worker calls media.generate_bytes (imported into media's ns).
     monkeypatch.setattr(_image_gen, "generate_bytes", lambda *a, **k: _FAKE_PNG)
     monkeypatch.setattr(media, "generate_bytes", lambda *a, **k: _FAKE_PNG)
 
 
-def test_handler_happy_path_default_path(monkeypatch, tmp_path, sandbox, mock_network):
+def _wait_event(ctx, timeout=4):
+    """Block until the background worker pushes its completion event (the test's
+    mocked generate_bytes returns instantly, so the daemon thread finishes fast)."""
+    return ctx.processes.completion_queue.get(timeout=timeout)
+
+
+def test_handler_submits_and_worker_reports_ready(monkeypatch, tmp_path, sandbox, mock_network):
     _key_present(monkeypatch, tmp_path)
     ctx = GenCtx(sandbox, network=True)
     out = json.loads(media.generate_image({"prompt": "a cat"}, ctx))
-    assert out["ok"] is True
-    assert out["path"].startswith("works/")
-    assert out["bytes"] == len(_FAKE_PNG)
-    on_disk = sandbox.workspace_dir / out["path"]
-    assert on_disk.is_file()
-    assert on_disk.read_bytes() == _FAKE_PNG
+    # returns IMMEDIATELY — submitted, with the intended path + a job id
+    assert out["ok"] is True and out["status"] == "submitted"
+    assert out["path"].startswith("works/") and out["job_id"].startswith("img-")
+    # the worker then pushes a ready event + the file lands on disk
+    evt = _wait_event(ctx)
+    assert evt["type"] == "image_gen" and evt["status"] == "ready"
+    assert evt["bytes"] == len(_FAKE_PNG)
+    on_disk = sandbox.workspace_dir / evt["path"]
+    assert on_disk.is_file() and on_disk.read_bytes() == _FAKE_PNG
 
 
-def test_handler_happy_path_custom_path(monkeypatch, tmp_path, sandbox, mock_network):
+def test_handler_custom_path(monkeypatch, tmp_path, sandbox, mock_network):
     _key_present(monkeypatch, tmp_path)
     ctx = GenCtx(sandbox, network=True)
     out = json.loads(media.generate_image({"prompt": "a cat", "path": "works/cat.png"}, ctx))
-    assert out["ok"] is True and out["path"] == "works/cat.png"
+    assert out["status"] == "submitted" and out["path"] == "works/cat.png"
+    evt = _wait_event(ctx)
+    assert evt["status"] == "ready"
     assert (sandbox.workspace_dir / "works" / "cat.png").read_bytes() == _FAKE_PNG
 
 
@@ -202,8 +213,10 @@ def test_traversal_path_stays_in_workspace(monkeypatch, tmp_path, sandbox, mock_
     _key_present(monkeypatch, tmp_path)
     ctx = GenCtx(sandbox, network=True)
     out = json.loads(media.generate_image({"prompt": "x", "path": "../escape.png"}, ctx))
-    # write_bytes (resolve_inside) refuses the traversal → visible error.
-    assert "error" in out
+    assert out["status"] == "submitted"
+    # write_bytes (resolve_inside) refuses the traversal in the worker → failed event
+    evt = _wait_event(ctx)
+    assert evt["status"] == "failed"
     assert not (sandbox.root / "escape.png").exists()
     assert not (sandbox.root.parent / "escape.png").exists()
 
@@ -212,13 +225,13 @@ def test_assets_path_does_not_write_assets(monkeypatch, tmp_path, sandbox, mock_
     _key_present(monkeypatch, tmp_path)
     ctx = GenCtx(sandbox, network=True)
     out = json.loads(media.generate_image({"prompt": "x", "path": "assets/x.png"}, ctx))
+    assert out["status"] == "submitted"
+    evt = _wait_event(ctx)
     # write_bytes anchors to workspace_dir: "assets/x.png" lands UNDER workspace,
     # never in the read-only assets sibling.
-    assert out["ok"] is True
-    saved = sandbox.workspace_dir / out["path"]
-    assert saved.is_file()
-    assert sandbox.workspace_dir in saved.resolve().parents
-    # The real assets sibling is untouched.
+    assert evt["status"] == "ready"
+    saved = sandbox.workspace_dir / evt["path"]
+    assert saved.is_file() and sandbox.workspace_dir in saved.resolve().parents
     assert not (sandbox.assets_dir / "x.png").exists()
 
 
@@ -234,9 +247,9 @@ def test_is_image_bytes_recognizes_formats():
     assert not _image_gen.is_image_bytes(b"")
 
 
-def test_handler_rejects_non_image_body(monkeypatch, tmp_path, sandbox):
+def test_worker_reports_failure_on_non_image_body(monkeypatch, tmp_path, sandbox):
     # generate_bytes validates the body and raises on a non-image response; the
-    # handler surfaces that as a visible error and writes nothing.
+    # worker reports it as a failed event and writes nothing.
     _key_present(monkeypatch, tmp_path)
 
     def _raise(*a, **k):
@@ -245,13 +258,15 @@ def test_handler_rejects_non_image_body(monkeypatch, tmp_path, sandbox):
     monkeypatch.setattr(media, "generate_bytes", _raise)
     ctx = GenCtx(sandbox, network=True)
     out = json.loads(media.generate_image({"prompt": "x"}, ctx))
-    assert "error" in out and "image" in out["error"].lower()
+    assert out["status"] == "submitted"
+    evt = _wait_event(ctx)
+    assert evt["status"] == "failed" and "image" in evt["error"].lower()
     # nothing was written
     works = sandbox.workspace_dir / "works"
     assert not works.exists() or not list(works.glob("*"))
 
 
-def test_handler_empty_result_errors(monkeypatch, tmp_path, sandbox):
+def test_worker_reports_failure_on_empty_result(monkeypatch, tmp_path, sandbox):
     _key_present(monkeypatch, tmp_path)
 
     def _raise(*a, **k):
@@ -260,7 +275,9 @@ def test_handler_empty_result_errors(monkeypatch, tmp_path, sandbox):
     monkeypatch.setattr(media, "generate_bytes", _raise)
     ctx = GenCtx(sandbox, network=True)
     out = json.loads(media.generate_image({"prompt": "x"}, ctx))
-    assert "error" in out and "no result" in out["error"].lower()
+    assert out["status"] == "submitted"
+    evt = _wait_event(ctx)
+    assert evt["status"] == "failed" and "no result" in evt["error"].lower()
 
 
 # ---------------------------------------------------------------------------

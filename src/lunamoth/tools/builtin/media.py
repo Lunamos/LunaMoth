@@ -15,15 +15,36 @@ No failure fallbacks: a generation/download/save error surfaces as a visible
 """
 from __future__ import annotations
 
+import threading
 import time
+import uuid
 
 from ..registry import registry, tool_error, tool_result
 from ._image_gen import generate_bytes, image_key
+from ._process_registry import get_registry
 
 
 def _check_image_key() -> bool:
     """check_fn: the tool is only offered when the active image provider has a key."""
     return bool(image_key())
+
+
+def _run_image_job(reg, ctx, job_id: str, prompt: str, size: str, path: str) -> None:
+    """Background worker: generate + save, then push a completion event onto the
+    process registry's queue (the agent drains it at the next turn boundary). Never
+    raises (it runs on a daemon thread) — a failure is reported, never fabricated."""
+    try:
+        data = generate_bytes(prompt, size)
+        saved = ctx.sandbox.write_bytes(path, data)
+        reg.completion_queue.put({
+            "type": "image_gen", "session_id": job_id, "status": "ready",
+            "path": saved, "bytes": len(data), "prompt": prompt[:120],
+        })
+    except Exception as e:  # noqa: BLE001 — report the real failure via the queue
+        reg.completion_queue.put({
+            "type": "image_gen", "session_id": job_id, "status": "failed",
+            "error": str(e)[:300], "prompt": prompt[:120],
+        })
 
 
 def generate_image(args, ctx) -> str:
@@ -47,25 +68,37 @@ def generate_image(args, ctx) -> str:
     if not path:
         path = f"works/image-{int(time.time())}.png"
 
-    try:
-        # Dispatches to the active provider's adapter; returns validated image
-        # bytes or raises (no result / a non-image body surface as a visible error).
-        data = generate_bytes(prompt, size)
-        saved = ctx.sandbox.write_bytes(path, data)
-    except Exception as e:  # noqa: BLE001 — visible failure, never fake success
-        return tool_error(str(e))
+    # Generation runs in the BACKGROUND (some providers — e.g. async DashScope —
+    # take minutes; a synchronous call would freeze the whole tool loop). Return
+    # immediately; the worker pushes a completion event onto the process registry's
+    # queue, which the agent drains at the next turn boundary and surfaces to the
+    # model (hermes' background-job notification shape).
+    job_id = f"img-{uuid.uuid4().hex[:8]}"
+    reg = get_registry(ctx)
+    threading.Thread(
+        target=_run_image_job, args=(reg, ctx, job_id, prompt, size, path),
+        name=f"imggen-{job_id}", daemon=True,
+    ).start()
 
     return tool_result(
-        ok=True, path=saved, size=size, bytes=len(data),
-        note=f"saved in your workspace — show it to the user by writing a line MEDIA:{saved} in your reply",
+        ok=True, status="submitted", job_id=job_id, path=path, size=size,
+        note=(
+            "Image generation is running in the BACKGROUND (it can take a while — "
+            "some providers are slow). Don't wait on it; continue what you were "
+            "doing. You'll be notified automatically when it's ready or if it fails. "
+            f"Do NOT show it yet — wait for the ready notification before writing MEDIA:{path}."
+        ),
     )
 
 
 SCHEMA = {
     "description": (
         "Generate an image from a text prompt and save it into your workspace "
-        "(under works/ by default, where your user can see it). Returns the saved "
-        "path — to show it to the user, write a line MEDIA:<path> in your reply. "
+        "(under works/ by default, where your user can see it). Runs in the "
+        "BACKGROUND: this returns immediately ('submitted') with the intended path; "
+        "you are notified automatically when the image is ready (or if it failed). "
+        "Don't block waiting — keep working. Once you get the ready notification, "
+        "show it to your user by writing a line MEDIA:<path> in your reply. "
         "Needs the network on and an image key configured."
     ),
     "parameters": {

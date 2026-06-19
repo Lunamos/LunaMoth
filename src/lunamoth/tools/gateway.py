@@ -134,6 +134,22 @@ class ToolGateway:
         except Exception:
             return None
 
+    def background_notices(self) -> "list[str]":
+        """Drain finished background jobs (image gen, background terminal) off the
+        process registry and render them as model-facing lines. The agent injects
+        these at a turn boundary so the chara reacts to a job that finished while it
+        was idle or working. Empty when nothing is pending / no registry yet."""
+        ctx = self._ctx_obj
+        reg = getattr(ctx, "processes", None) if ctx is not None else None
+        if reg is None:
+            return []
+        try:
+            from .builtin._process_registry import format_background_notification
+            events = reg.drain_notifications()
+            return [s for s in (format_background_notification(e) for e in events) if s]
+        except Exception:  # noqa: BLE001 — notifications are best-effort, never fatal
+            return []
+
     def _code_dispatch(self, name: str, args: dict) -> str:
         """The tool surface execute_code exposes to sandboxed Python: same gate +
         guard + audit as a model call, returning the raw JSON string."""

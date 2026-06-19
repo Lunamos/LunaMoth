@@ -682,3 +682,34 @@ def get_registry(ctx) -> ProcessRegistry:
         reg = ProcessRegistry()
         ctx.processes = reg
     return reg
+
+
+def format_background_notification(evt: dict) -> str:
+    """Render one drained queue event as a model-facing line (neutral wording —
+    no brand/VM framing). The agent injects these as a synthetic user message at a
+    turn boundary so the chara reacts to a finished background job. Returns "" for
+    event types with no model-facing form (skipped)."""
+    etype = evt.get("type")
+    if etype == "image_gen":
+        if evt.get("status") == "ready":
+            p = str(evt.get("path") or "")
+            return (f"[Background image generation finished — saved to {p}. "
+                    f"Show it to your user by writing a line MEDIA:{p} in your reply.]")
+        return ("[Background image generation FAILED: "
+                f"{evt.get('error') or 'unknown error'}. Nothing was saved.]")
+    if etype == "completion":
+        sid = str(evt.get("session_id") or "")
+        cmd = str(evt.get("command") or "")
+        code = evt.get("exit_code")
+        out = (str(evt.get("output") or "")).strip()
+        tail = f"\nOutput:\n{out}" if out else ""
+        return (f"[Background process {sid} finished (exit code {code}).\n"
+                f"Command: {cmd}{tail}]")
+    if etype == "watch_match":
+        sid = str(evt.get("session_id") or "")
+        pat = str(evt.get("pattern") or "")
+        out = (str(evt.get("output") or "")).strip()
+        return (f"[Background process {sid} matched watch pattern {pat!r}:\n{out}]")
+    # watch_disabled / release / other types carry a ready-made message field.
+    msg = str(evt.get("message") or "").strip()
+    return f"[{msg}]" if msg else ""

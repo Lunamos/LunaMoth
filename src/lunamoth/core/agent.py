@@ -905,6 +905,9 @@ class LunaMothAgent:
         # After a long real-world silence, note the gap once — the chara should
         # feel time passing without timestamps littering every message.
         self._note_time_gap(session)
+        # Surface any background jobs (image gen, background terminal) that finished
+        # since the last turn, so the chara reacts to them now.
+        self._inject_background_notices(session)
         scan_text = self._scan_text(session, text)
         # Ingest any attachments: small images inline as image_url parts, files
         # and oversized/unsupported images land in workspace/uploads with a note.
@@ -952,6 +955,17 @@ class LunaMothAgent:
     def _now_text(self) -> str:
         return datetime.now().strftime("%Y-%m-%d %H:%M")
 
+    def _inject_background_notices(self, session: Session) -> None:
+        """Drain finished background jobs (image gen, background terminal) and inject
+        them as a synthetic user message so the chara reacts this turn — the
+        turn-boundary drain hermes runs after each loop. Best-effort; never raises."""
+        try:
+            notices = self.tools.background_notices()
+        except Exception:  # noqa: BLE001 — notifications never break a turn
+            return
+        if notices:
+            session.context.add("user", "\n\n".join(notices))
+
     def _note_time_gap(self, session: Session) -> None:
         """One neutral line when a long silence ends — sparse by construction."""
         import time as _time
@@ -981,6 +995,9 @@ class LunaMothAgent:
     def stream_think(self, session: Session):
         session.ticks += 1
         cycle = session.ticks
+        # An idle tick is where a background job that finished while the chara was
+        # resting gets surfaced (drained + injected as a synthetic user message).
+        self._inject_background_notices(session)
         agent_loop = self._agent_loop_active()
         speech: list[str] = []
         committed = False
