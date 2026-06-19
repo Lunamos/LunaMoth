@@ -220,7 +220,9 @@ zero internal deps; `obs/` imports only `config`.
     hermes-style. `agent.py` also writes `sandbox/logs/requests.jsonl` — the
     faithful request log (last 200 turns: exact system+messages+tools sent).
   - `providers.py` — model's REAL context window. `state.py` — `EnvState`
-    (env_status.json: isolation/network/writable/tools/rest_until).
+    (env_status.json: isolation/network/writable/rest_until) + `Permissions`, the
+    ONE typed snapshot (`EnvState.permissions()`) every tool runner reads via
+    `ctx.permissions()` so fg/bg/PTY can't resolve env facts differently.
 - `protocol/` — **the contract layer**; frontends import this and nothing deeper:
   - `events.py` — frozen dataclasses; `TextDelta.channel` say|muse (muse = the
     chara's own life; messaging frontends deliver say only).
@@ -252,8 +254,10 @@ zero internal deps; `obs/` imports only `config`.
     todo/processes/browser). hermes' per-task env → LunaMoth's one-per-chara ctx.
   - `gateway.py` — `ToolGateway` is now a THIN shim over the registry: the SECURITY
     audit trail, the #24 loop guardrails (warn@2/refuse@5/streak-block@8), the
-    3-way gate (registered ∩ state.tool_access ∩ pack.tools), MCP dispatch, and the
-    `{ok,data}` result the agent loop consumes. No tool bodies live here.
+    gate (registered ∩ pack.tools — `tool_access` as a 3rd owner was retired; the
+    toolpack IS the allowlist), MCP dispatch, and the `{ok,data}` result the agent
+    loop consumes. Tool success/failure is judged on the explicit `__tool_error__`
+    sentinel (`tool_error` stamps it), not a JSON-shape guess. No tool bodies live here.
   - `builtin/` — each tool is an island that self-registers at import. The
     general surface mirrors hermes: `file_tools.py` (read_file offset/limit,
     write_file syntax-diff, patch = fuzzy replace + V4A multi-file), `search.py`
@@ -329,7 +333,9 @@ zero internal deps; `obs/` imports only `config`.
   The same backend serves both the chara's `generate_image` tool and the visuals
   pipeline.
 - `session/` — `sessions.py` (named charas under ~/.lunamoth/sessions/<name>/;
-  `SessionMeta.env()` is the activation interface), `settings.py`, `cleanup.py`,
+  `SessionMeta.env()` is the COMPLETE activation interface — it emits
+  `LUNAMOTH_PY_BACKEND` itself via the ONE `isolation_to_backend` map, so callers
+  never re-derive the jail), `settings.py`, `cleanup.py`,
   `isolation.py` (stdlib-only OS jail builders — shared by tools/runner and the
   supervisor's PTY shell; `interactive_shell_argv` never degrades to dir trust).
 - `presence/` — JUST the `/mode live|chat` normalizer now (`prompts.py:
@@ -342,7 +348,13 @@ zero internal deps; `obs/` imports only `config`.
   meeting and detach handoff are gone.
 - `server/` — the remote/desktop gateway (imports protocol+session+content, never
   core/tools directly): `dispatch.py` (per-session JSON-RPC over CharaHandle),
-  `stdio.py`/`ws.py` (transports for `lunamoth serve <name>`), `hub.py`
+  `stdio.py`/`ws.py` (transports for `lunamoth serve <name>`), `hub/` — a PACKAGE
+  since 2026-06-20 (split from the old 2844-line `hub.py` god-module): `config.py`
+  (defaults/keys), `models.py` (provider HTTP/test_key/_complete), `cards.py`
+  (card CRUD/draft/avatars/assets), `sessions.py` (lifecycle/transcript/messaging/
+  wake/export), `dispatch.py` (`HubDispatcher` with a `{method: handler}` table,
+  NOT an if-ladder), `_common.py` (leaf helpers), `__init__.py` (re-exports the
+  full public API, so `from ..server import hub as H` is unchanged)
   (board-level RPC: roster/cards/wake/export/defaults/key-test/transcribe plus
   supervisor child/gateway state; reads session dirs + transcript SQLite directly —
   one process = one activated session, so the hub NEVER hosts an agent.
