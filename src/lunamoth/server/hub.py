@@ -38,7 +38,7 @@ from ..config import ROOT, content_dir
 from ..content.cards import CharacterCard, detect_language, looks_like_world_book, merge_world_into_card
 from ..content import image_providers as image_providers
 from ..content.imaging import CAP_ART, avatar_thumb_data_uri, compress_image_bytes
-from ..content.knobs import normalize_embodiment
+from ..content.knobs import normalize_embodiment, normalize_website
 from ..session import sessions as S
 from ..session.settings import PRESETS, Settings
 from .dispatch import RpcError, error_response, ok_response, _normalize_request
@@ -1843,9 +1843,39 @@ def session_entry(meta: S.SessionMeta, supervisor: Any | None = None) -> dict[st
     }
 
 
+_HOME_SCAFFOLD = (
+    "<!DOCTYPE html>\n"
+    "<html lang=\"en\">\n"
+    "<head>\n"
+    "<meta charset=\"utf-8\">\n"
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+    "<title></title>\n"
+    "</head>\n"
+    "<body>\n"
+    "<!-- This is your homepage. It's yours to shape — replace this freely. -->\n"
+    "</body>\n"
+    "</html>\n"
+)
+
+
+def _write_home_scaffold(meta: "S.SessionMeta") -> None:
+    """Lay down a neutral, character-free home/index.html so the website tab has
+    something to render from the start. Never overwrites an existing homepage."""
+    try:
+        home = meta.sandbox_dir / "workspace" / "home"
+        index = home / "index.html"
+        if index.exists():
+            return
+        home.mkdir(parents=True, exist_ok=True)
+        index.write_text(_HOME_SCAFFOLD, encoding="utf-8")
+    except OSError:
+        pass  # best-effort: a missing scaffold just means an empty website tab
+
+
 def wake(card_path: str, name: str = "", isolation: str = "sandbox",
          model: str = "", toolpack: str = "", embodiment: str = "",
-         key: str = "", card_data: "dict[str, Any] | None" = None) -> dict[str, Any]:
+         website: str = "", key: str = "",
+         card_data: "dict[str, Any] | None" = None) -> dict[str, Any]:
     """Instantiate a card: create the session, freeze a card copy, write config.
 
     The card describes WHO the chara is; this call decides where it lives
@@ -1859,6 +1889,11 @@ def wake(card_path: str, name: str = "", isolation: str = "sandbox",
         stance = normalize_embodiment(embodiment)
         if not stance:
             raise RpcError(-32602, f"invalid embodiment {embodiment!r} — expected literal|actor")
+    web = ""
+    if website:
+        web = normalize_website(website)
+        if not web:
+            raise RpcError(-32602, f"invalid website {website!r} — expected on|off")
     card = CharacterCard.load(card_path)  # validates before any disk writes
     defaults = load_defaults()
     if key:
@@ -1949,12 +1984,51 @@ def wake(card_path: str, name: str = "", isolation: str = "sandbox",
         # Operator's wake-time choice persists as the override; absent, the
         # resolution chain stays card declaration > literal.
         cfg["embodiment_override"] = stance
+    if web:
+        # personal_website module wake-time choice; absent → card declaration > off.
+        cfg["website_override"] = web
+    # Always lay down a neutral homepage scaffold so the website tab has something
+    # to show from the start (the module toggle only controls the prompt guidance).
+    _write_home_scaffold(meta)
     meta.config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     try:
         meta.config_path.chmod(0o600)
     except OSError:
         pass
     return session_entry(meta)
+
+
+def set_modules(meta: S.SessionMeta, force_roleplay: Any = None,
+                website: Any = None) -> dict[str, Any]:
+    """Toggle a chara's optional prompt modules AFTER wake. Like a memory edit,
+    the change is written to the session config and takes effect on the NEXT start
+    (never hot-swapped — a module rides the cache-stable prefix; a live rebuild
+    would throw away the prompt cache). Pass only the modules you want to change.
+
+    force_roleplay → embodiment_override ('actor' when on, 'literal' when off).
+    website        → website_override ('on'/'off'). Either side may be None (leave).
+    """
+    try:
+        cfg = json.loads(meta.config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        cfg = dataclasses.asdict(Settings())
+    if force_roleplay is not None:
+        cfg["embodiment_override"] = "actor" if bool(force_roleplay) else "literal"
+    if website is not None:
+        cfg["website_override"] = "on" if bool(website) else "off"
+        if bool(website):
+            _write_home_scaffold(meta)  # ensure the homepage exists when turned on
+    meta.config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        meta.config_path.chmod(0o600)
+    except OSError:
+        pass
+    return {
+        "ok": True,
+        "force_roleplay": cfg.get("embodiment_override") == "actor",
+        "website": cfg.get("website_override") == "on",
+        "applies": "next_start",
+    }
 
 
 def start_daemon(meta: S.SessionMeta, patience: float | None = None) -> bool:
@@ -2512,8 +2586,15 @@ class HubDispatcher:
                 model=str(p.get("model") or ""),
                 toolpack=str(p.get("toolpack") or ""),
                 embodiment=str(p.get("embodiment") or ""),
+                website=str(p.get("website") or ""),
                 key=str(p.get("key") or ""),
                 card_data=cd if isinstance(cd, dict) else None,
+            )
+        if method == "session.set_modules":
+            return set_modules(
+                self._meta(p),
+                force_roleplay=p.get("force_roleplay"),
+                website=p.get("website"),
             )
         if method == "toolpacks.list":
             return list_toolpacks()

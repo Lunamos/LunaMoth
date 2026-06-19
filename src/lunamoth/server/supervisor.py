@@ -1322,6 +1322,58 @@ class WebHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _serve_home(self, url) -> None:
+        """Serve a chara's personal website from its workspace/home/ tree, read-only.
+
+        Route: /chara/<name>/home[/<rel...>] (rel defaults to index.html). The
+        whole tree under home/ is served (HTML/CSS/JS/media) so a chara can build a
+        real, linkable site. Two security properties:
+          • Confined to that ONE home/ dir (path-traversal resolved + checked), so
+            config.json (the api key), the transcript, other sessions stay off it.
+          • Rendered in a sandboxed iframe (allow-scripts, NO allow-same-origin →
+            opaque origin) and served with a CSP that blocks connect-src and
+            form-action: chara-authored JS cannot reach /rpc or read the app token.
+        """
+        segs = url.path.split("/")  # ['', 'chara', '<name>', 'home', ...]
+        if len(segs) < 4 or segs[3] != "home":
+            self.send_error(404); return
+        meta = S.load_session(unquote(segs[2]))
+        if meta is None:
+            self.send_error(404); return
+        home = (meta.sandbox_dir / "workspace" / "home").resolve()
+        rel = unquote("/".join(segs[4:])) or "index.html"
+        try:
+            target = (home / rel).resolve()
+        except Exception:  # noqa: BLE001
+            self.send_error(404); return
+        if target.is_dir():
+            target = (target / "index.html").resolve()
+        # Confine to the home/ subtree; deny session secrets by name (defense in depth).
+        if not (target == home or home in target.parents):
+            self.send_error(404); return
+        if (target.name in self._ASSET_DENY_NAMES or target.suffix in (".pid", ".log")
+                or not target.is_file()):
+            self.send_error(404); return
+        import mimetypes
+        mime = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+        try:
+            data = target.read_bytes()
+        except OSError:
+            self.send_error(404); return
+        self._skip_no_store = True
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; "
+            "connect-src 'none'; form-action 'none'; frame-ancestors 'self'; base-uri 'none'",
+        )
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self) -> None:  # noqa: N802 - http.server API
         self._skip_no_store = False
         self._pending_set_cookie = ""
@@ -1358,6 +1410,10 @@ class WebHandler(http.server.SimpleHTTPRequestHandler):
             return
         if url.path == "/asset":
             self._serve_asset(url)
+            return
+        segs = url.path.split("/")
+        if len(segs) >= 4 and segs[1] == "chara" and segs[3] == "home":
+            self._serve_home(url)
             return
         super().do_GET()
 

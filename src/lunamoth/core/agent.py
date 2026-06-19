@@ -42,7 +42,7 @@ from ..tools.toolpacks import ToolPack, load_toolpack
 from ..tools.gateway import ToolGateway
 from .transcript import TranscriptStore
 from ..content.worldinfo import apply_macros
-from ..content.knobs import normalize_embodiment, parse_patience
+from ..content.knobs import normalize_embodiment, normalize_website, parse_patience
 
 _log = get_logger("agent")
 
@@ -317,6 +317,21 @@ class LunaMothAgent:
                 return card
         return "literal"
 
+    def website_active(self) -> bool:
+        """personal_website module: operator override > card declaration > off.
+
+        Like embodiment, it's a wake-time choice (editable→next start) so it
+        rides the cache-stable prefix. Resolution mirrors effective_embodiment.
+        """
+        override = normalize_website(getattr(self.settings, "website_override", ""))
+        if override:
+            return override == "on"
+        if self.character is not None:
+            card = normalize_website(self.character.defaults().get("website"))
+            if card:
+                return card == "on"
+        return False
+
     def _freeze_memory(self) -> None:
         """Snapshot memory for the system prompt. Called when a fresh prompt/session
         begins (init, reconfigure, new session, /reset) — NOT per turn, so mid-session
@@ -555,6 +570,11 @@ class LunaMothAgent:
             # dynamic env facts ride the volatile tail.
             msgs.append(apply_macros(rules_layer.capabilities(card_practice), char, user))
             msgs.append(apply_macros(rules_layer.tool_use(card_tooluse), char, user))
+            # Optional personal_website module: a neutral SYSTEM block (the matching
+            # closer fragment rides the post-history slot). Gated on tools + the knob.
+            if self.website_active():
+                card_website = str(card_ext.get("website_prompt", "") or "")
+                msgs.append(apply_macros(rules_layer.website(card_website), char, user))
             if self.toolpack and self.toolpack.note.strip():
                 msgs.append(self.toolpack.note.strip())
             # If the card bundles its own art, stage it into the assets/ sibling
@@ -591,7 +611,9 @@ class LunaMothAgent:
             return ""
         card_ext = self.character.defaults() if self.character else {}
         card_closer = str(card_ext.get("rules_closer", "") or "")
-        return apply_macros(rules_layer.closer(card_closer), char, user)
+        return apply_macros(
+            rules_layer.closer(card_closer, website=self.website_active()), char, user
+        )
 
     def _keyword_world_info_blocks(self, scan_text: str, session: Session) -> list[str]:
         char, user = self.char_name(), self.settings.user_name

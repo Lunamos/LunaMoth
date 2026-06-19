@@ -84,6 +84,7 @@ class StateSnapshot:
     quiet: int               # engagement: silence (s) before it resumes its own work
     patience: float          # effective base seconds between spontaneous cycles
     embodiment: str          # literal | actor
+    website: bool            # personal_website module active (homepage in the website tab)
     context_tokens: int
     context_max: int
     memory_chars: int
@@ -280,6 +281,7 @@ class CharaHandle:
             quiet=int(getattr(a.settings, "quiet", 300)),
             patience=float(a.effective_patience()),
             embodiment=a.effective_embodiment(),
+            website=a.website_active(),
             context_tokens=self._session.context.token_count() if self._session else 0,
             context_max=self._session.context.max_tokens if self._session else a.context_limit(),
             memory_chars=mem.chars("memory") + mem.chars("user"),

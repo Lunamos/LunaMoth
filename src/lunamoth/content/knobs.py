@@ -10,6 +10,28 @@ from typing import Any
 
 EMBODIMENT_STANCES = {"literal", "actor"}
 
+# Optional prompt MODULES (skill-like add-ons, toggled at wake, editable→next start).
+# force_roleplay is the actor embodiment stance (kept on the embodiment axis for
+# back-compat); personal_website is an independent on/off knob.
+WEBSITE_VALUES = {"on", "off"}
+
+MODULE_COPY = {
+    "en": {
+        "force_roleplay": (
+            "Force roleplay: the model embodies the character; tools work backstage so "
+            "the fiction stays whole. Best for characters whose world has no computers."
+        ),
+        "personal_website": (
+            "Personal website: the character keeps its own homepage (home/index.html) "
+            "shown in a website tab — a place to gather and link its work, in its own style."
+        ),
+    },
+    "zh": {
+        "force_roleplay": "强制角色扮演：模型化身为角色，工具在后台运作、戏不破。适合世界观里没有计算机的角色。",
+        "personal_website": "个人主页：角色维护自己的主页（home/index.html），在主页 tab 展示——汇集并串联它的作品，自成一派。",
+    },
+}
+
 EMBODIMENT_COPY = {
     "en": {
         "literal": (
@@ -61,6 +83,22 @@ def normalize_embodiment(value: Any) -> str:
     """Return a valid stance, or '' for unset/invalid."""
     v = str(value or "").strip().lower()
     return v if v in EMBODIMENT_STANCES else ""
+
+
+def normalize_website(value: Any) -> str:
+    """Normalize a personal_website override to 'on' | 'off' | '' (unset).
+
+    Accepts booleans (card hook `extensions.lunamoth.website`) and the strings
+    on/off/true/false/1/0/yes/no. Anything else (incl. unset) → ''.
+    """
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    v = str(value or "").strip().lower()
+    if v in {"on", "true", "1", "yes"}:
+        return "on"
+    if v in {"off", "false", "0", "no"}:
+        return "off"
+    return ""
 
 
 def embodiment_copy(stance: str, lang: str = "en") -> str:

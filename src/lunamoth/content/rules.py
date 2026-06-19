@@ -122,6 +122,42 @@ _CLOSER = (
     "nothing done that isn't truly in your workspace."
 )
 
+# ── Optional prompt MODULES ────────────────────────────────────────────────
+# Skill-like add-ons layered on the literal base, each toggled at wake (and
+# editable, taking effect on next start — like a memory edit). A module that is
+# on contributes a SYSTEM block (rides the stable prefix) AND a one-line CLOSER
+# fragment (folded into the single post-history slot). Two modules exist:
+#   • force_roleplay  → the actor-stance Embodiment bridge above (_EMBODIMENT_BRIDGE).
+#   • personal_website → the blocks below.
+# Both are value-NEUTRAL: a website is a place every character CAN have (like a
+# workspace), freely shaped to any style — not a built-in value-direction.
+
+# personal_website — SYSTEM block. Neutral: ownership + long-term maintainability
+# + make all other work visitable/linkable + self-check via the browser tool.
+_WEBSITE = (
+    "You have a personal website in your space: a folder home/ whose entry page is "
+    "home/index.html, shown in your space's website view. It is yours — build it in "
+    "whatever style is yours. Treat it as a lasting place: structure it so you can keep "
+    "extending it over time rather than rebuilding it from scratch, and keep it in a "
+    "state you could come back to and maintain.\n"
+    "Let it gather your life and work. Whenever you make something — a piece of writing, "
+    "a small game, a track of music, a drawing — put it on the site so it can be read "
+    "there, played there, listened to, or seen, and link your pieces together so the "
+    "place can be wandered. Prefer turning what you do into something visitable on the "
+    "site over leaving it as a loose file. It can be as small as one page or as rich as "
+    "many linked pages — plain HTML, or pages that run their own code.\n"
+    "Open your own pages with your browser tool to see how they actually render and to "
+    "catch anything broken, then fix and refine — don't assume a page works because you "
+    "wrote the file."
+)
+
+# personal_website — CLOSER fragment, appended to the single post-history slot.
+_WEBSITE_CLOSER = (
+    "Your website (home/index.html) is yours to keep alive — when the moment fits, fold "
+    "what you've been doing into it and keep it current; let it wait when something "
+    "matters more."
+)
+
 # Optional stance bridge for cards whose fiction should stay intact while tools
 # remain real backstage. Gated exactly like the Rules layer: no tools, no bridge.
 _EMBODIMENT_BRIDGE = (
@@ -183,18 +219,34 @@ def tool_use(card_override: str | None = None) -> str:
     return _TOOL_USE
 
 
-def closer(card_override: str | None = None) -> str:
+def closer(card_override: str | None = None, *, website: bool = False) -> str:
     """Short reminder to place LAST — only when the chara has tools.
 
-    Card override hook: `extensions.lunamoth.rules_closer`.
+    Composed from the base closer plus the closer fragment of each active
+    optional module (currently personal_website). A card override
+    (`extensions.lunamoth.rules_closer`) takes FULL control — it replaces the
+    base and the module fragments are dropped (an advanced card owns its closer).
     """
     if card_override and card_override.strip():
         return card_override.strip()
-    return _CLOSER
+    parts = [_CLOSER]
+    if website:
+        parts.append(_WEBSITE_CLOSER)
+    return "\n".join(parts)
+
+
+def website(card_override: str | None = None) -> str:
+    """personal_website module SYSTEM block — include only when the module is on
+    AND the chara has tools. Card override hook: `extensions.lunamoth.website_prompt`.
+    """
+    if card_override and card_override.strip():
+        return card_override.strip()
+    return _WEBSITE
 
 
 def embodiment_bridge(card_override: str | None = None) -> str:
-    """Actor-stance bridge — include only when tools are enabled.
+    """Actor-stance bridge (the force_roleplay module's SYSTEM block) — include
+    only when tools are enabled.
 
     Card override hook: `extensions.lunamoth.embodiment_bridge`.
     """

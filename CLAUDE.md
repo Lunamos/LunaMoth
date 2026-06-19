@@ -117,6 +117,14 @@ example) and Quinn 小Q (the default).)
   hard-blocking a foreground long-running command, PTY, parallel delegation) take
   the mature hermes solution directly (see the apple-to-apple RULE above) — a
   "softer" tool is not a chara value. 注意类似于默认卡，presence和角色扮演提醒提示词这种也是中立的，并非需要修改的bug。
+  Optional prompt MODULES (owner, 2026-06-19) are also NEUTRAL, not exceptions:
+  `force_roleplay` (the actor stance) and `personal_website` are skill-like add-ons,
+  toggled at wake (editable→next start). A personal website is a place EVERY chara
+  CAN have — like a workspace or an avatar slot — and is freely shaped to any style;
+  its prompt blocks teach maintainability + "link your work in" + self-check via the
+  browser, never a worldview. So a module's "keep your homepage current" closer is
+  neutral infrastructure guidance, NOT a built-in value-direction — don't scrub it
+  as a neutrality bug.
 - **Language is never a setting** — it's a property of the active card.
 - **The model's real context window is never a setting for KNOWN models**
   (providers.py resolves it from the provider catalogue). The ONE exception
@@ -482,6 +490,22 @@ into the session's card, key stripped.)
   identity-layer switches would rebuild the stable prefix and destroy the
   prompt cache — embodiment is how the chara was brought to life, not a
   runtime mood.
+- **Optional prompt MODULES** (2026-06-19): skill-like add-ons layered on the
+  `literal` base, each contributing a SYSTEM block (stable prefix) + a one-line
+  CLOSER fragment (folded into the single post-history slot), gated on tools. Two
+  exist: **force_roleplay** (= the actor embodiment stance, kept on the embodiment
+  axis) and **personal_website** (`Settings.website_override` "on"|"off"|"",
+  precedence operator > card `extensions.lunamoth.website` > off; card hooks
+  `website`/`website_prompt`). Like embodiment they're WAKE-TIME choices that ride
+  the cache-stable prefix — but editable via `session.set_modules` (writes the
+  override, applies on NEXT start, never hot-swapped). personal_website gives the
+  chara a homepage at `workspace/home/index.html` (a neutral scaffold is laid down
+  at wake, always, so the website tab is never blank); `content/rules.py` carries
+  `_WEBSITE`/`_WEBSITE_CLOSER`; the homepage is served read-only by the supervisor
+  at `/chara/<name>/home/*` (path-confined + hardened CSP: connect-src/form-action
+  'none') and rendered in a sandboxed (`allow-scripts`, no same-origin) iframe tab,
+  so chara-authored JS can't reach the RPC. The chara self-checks its pages with
+  the browser tool. `AttachInfo.website` reports the active state.
 - **Two output registers**: muse (its own life; panoramic frontends only) vs
   say (delivered everywhere — the `speak` tool is how it decides to reach you).
 - **Isolation** per chara: `admin` / `sandbox` (default) — two modes only (the

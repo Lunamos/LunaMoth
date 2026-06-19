@@ -19,7 +19,7 @@ def _snap(**over):
         char_name="Tester", lang="en", mode="live", provider="p", model="m",
         reasoning="medium", reasoning_supported=True, show_thinking=False,
         user_name="op", isolation="sandbox", net_on=False,
-        rest_until=0.0, quiet=300, patience=600.0, embodiment="literal",
+        rest_until=0.0, quiet=300, patience=600.0, embodiment="literal", website=False,
         context_tokens=0, context_max=1000, memory_chars=0, memory_max=1,
         memory_text="", memory_path="/tmp", sandbox_root="/tmp",
         workspace_root="/tmp/workspace",

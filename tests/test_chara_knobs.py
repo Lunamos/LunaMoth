@@ -6,8 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from lunamoth.content.knobs import parse_patience
+from lunamoth.content.knobs import normalize_website, parse_patience
 from lunamoth.session.settings import Settings
+
+_WEB_MARK = "personal website in your space"
+_WEB_CLOSER_MARK = "keep it current"
 
 
 def _write_card(path: Path, lunamoth: dict | None = None) -> Path:
@@ -194,6 +197,57 @@ def test_embodiment_is_wake_time_only_no_hot_swap_command(agent_factory, tmp_pat
     assert agent_factory(card=card).effective_embodiment() == "actor"
     assert agent_factory(card=card, embodiment_override="literal").effective_embodiment() == "literal"
     assert agent_factory().effective_embodiment() == "literal"
+
+
+# ── personal_website module ────────────────────────────────────────────────
+
+def test_normalize_website_values():
+    assert normalize_website(True) == "on"
+    assert normalize_website(False) == "off"
+    assert normalize_website("on") == "on"
+    assert normalize_website("OFF") == "off"
+    assert normalize_website("yes") == "on"
+    assert normalize_website("0") == "off"
+    assert normalize_website("") == ""
+    assert normalize_website("maybe") == ""
+    assert normalize_website(None) == ""
+
+
+def test_website_module_in_prefix_and_closer_when_on(agent_factory, tmp_path):
+    card = _write_card(tmp_path / "web.json", {"toolpack": "sandbox", "website": True})
+    a = agent_factory(card=card)
+    assert a.website_active() is True
+    assert _WEB_MARK in _blob(a._stable_prefix())
+    closer = a._post_history_slot()
+    assert _WEB_CLOSER_MARK in closer
+    # The base closer still rides alongside the module fragment.
+    assert "stay fully in character" in closer
+
+
+def test_website_absent_when_off_by_default(agent_factory, tmp_path):
+    card = _write_card(tmp_path / "plain.json", {"toolpack": "sandbox"})
+    a = agent_factory(card=card)
+    assert a.website_active() is False
+    assert _WEB_MARK not in _blob(a._stable_prefix())
+    assert _WEB_CLOSER_MARK not in a._post_history_slot()
+
+
+def test_website_resolution_precedence(agent_factory, tmp_path):
+    on_card = _write_card(tmp_path / "on.json", {"toolpack": "sandbox", "website": True})
+    # override beats card: card on, override off → off.
+    assert agent_factory(card=on_card, website_override="off").website_active() is False
+    # override on with no card declaration → on.
+    plain = _write_card(tmp_path / "p.json", {"toolpack": "sandbox"})
+    assert agent_factory(card=plain, website_override="on").website_active() is True
+    # card on, no override → on.
+    assert agent_factory(card=on_card).website_active() is True
+
+
+def test_website_gated_on_tools(agent_factory, tmp_path):
+    card = _write_card(tmp_path / "web.json", {"toolpack": "sandbox", "website": True})
+    no_tools = agent_factory(card=card, toolpack="")
+    no_tools.tools.set_enabled(None)
+    assert _WEB_MARK not in _blob(no_tools._stable_prefix())
 
 
 def test_hub_daemon_launch_does_not_hardcode_tiny_patience(monkeypatch, tmp_path):

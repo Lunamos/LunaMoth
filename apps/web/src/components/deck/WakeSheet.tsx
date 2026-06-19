@@ -39,7 +39,8 @@ export function WakeSheet({ card, onClose }: { card: DeckCard; onClose: () => vo
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [name, setName] = useState(card.name);
   const [model, setModel] = useState(String(defaults.model || ""));
-  const [emb, setEmb] = useState<"literal" | "actor">(card.embodiment === "actor" ? "actor" : "literal");
+  const [forceRoleplay, setForceRoleplay] = useState(card.embodiment === "actor");
+  const [personalSite, setPersonalSite] = useState(card.website === true || card.website === "on");
   const [iso, setIso] = useState("sandbox");
   const [wantNet, setWantNet] = useState(true); // ON by default at wake (matches runtime default)
   const [waking, setWaking] = useState(false);
@@ -68,7 +69,8 @@ export function WakeSheet({ card, onClose }: { card: DeckCard; onClose: () => vo
           isolation: iso,
           model: model.trim(),
           toolpack: "sandbox",
-          embodiment: emb,
+          embodiment: forceRoleplay ? "actor" : "literal",
+          website: personalSite ? "on" : "off",
           // No card_data: wake freezes the SOURCE card as-is. Editing the persona
           // is the card editor's job; waking can never blank it.
         },
@@ -124,14 +126,23 @@ export function WakeSheet({ card, onClose }: { card: DeckCard; onClose: () => vo
             {modelInfo && modelInfo.tools === false && <div className="amber-note">{t("wake-no-tools")}</div>}
           </div>
           <div className="field-row">
-            <label>{t("wake-emb")}</label>
-            <div className="embodiment-grid">
-              {(["literal", "actor"] as const).map((mode) => (
-                <div key={mode} className={"emb-option" + (emb === mode ? " on" : "")} onClick={() => setEmb(mode)}>
-                  <b>{mode}</b>
-                  <span>{t("emb-" + mode)}</span>
-                </div>
-              ))}
+            <div className="switch-row" style={{ fontSize: "12.5px" }}>
+              <b style={{ fontWeight: 550 }}>{t("mod-roleplay")}</b>
+              <small>{t("mod-roleplay-hint")}</small>
+              <button
+                className={"switch" + (forceRoleplay ? " on" : "")}
+                onClick={() => setForceRoleplay((v) => !v)}
+              />
+            </div>
+          </div>
+          <div className="field-row">
+            <div className="switch-row" style={{ fontSize: "12.5px" }}>
+              <b style={{ fontWeight: 550 }}>{t("mod-website")}</b>
+              <small>{t("mod-website-hint")}</small>
+              <button
+                className={"switch" + (personalSite ? " on" : "")}
+                onClick={() => setPersonalSite((v) => !v)}
+              />
             </div>
           </div>
           <div className="field-row">

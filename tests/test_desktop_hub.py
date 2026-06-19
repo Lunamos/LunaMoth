@@ -189,6 +189,57 @@ def test_wake_embodiment_is_a_wake_time_choice_persisted_in_config():
     assert plain_cfg.get("embodiment_override", "") == ""
 
 
+def test_wake_lays_down_neutral_home_scaffold():
+    set_defaults()
+    entry = result("session.wake", {"card": luna_card_path()})
+    meta = S.load_session(entry["name"])
+    index = meta.sandbox_dir / "workspace" / "home" / "index.html"
+    assert index.exists()
+    html = index.read_text(encoding="utf-8")
+    assert "<!DOCTYPE html>" in html
+    # Neutral: a model-facing comment, zero character flavor / user-visible text.
+    assert "your homepage" in html
+    assert "<title></title>" in html
+
+
+def test_wake_website_module_choice_persisted_in_config():
+    set_defaults()
+    entry = result("session.wake", {"card": luna_card_path(), "website": "on"})
+    cfg = json.loads(S.load_session(entry["name"]).config_path.read_text(encoding="utf-8"))
+    assert cfg["website_override"] == "on"
+    # Absent param → no override (chain stays card > off).
+    plain = result("session.wake", {"card": luna_card_path()})
+    plain_cfg = json.loads(S.load_session(plain["name"]).config_path.read_text(encoding="utf-8"))
+    assert plain_cfg.get("website_override", "") == ""
+
+
+def test_wake_invalid_website_is_clean_rpc_error():
+    set_defaults()
+    before = {m.name for m in S.list_sessions()}
+    err = rpc_error("session.wake", {"card": luna_card_path(), "website": "sometimes"})
+    assert err["code"] == -32602
+    assert "website" in err["message"] and "on|off" in err["message"]
+    assert {m.name for m in S.list_sessions()} == before
+
+
+def test_set_modules_edits_config_for_next_start():
+    set_defaults()
+    entry = result("session.wake", {"card": luna_card_path()})
+    name = entry["name"]
+    r = result("session.set_modules", {"name": name, "website": True, "force_roleplay": True})
+    assert r["website"] is True and r["force_roleplay"] is True and r["applies"] == "next_start"
+    cfg = json.loads(S.load_session(name).config_path.read_text(encoding="utf-8"))
+    assert cfg["website_override"] == "on"
+    assert cfg["embodiment_override"] == "actor"
+    # Turning website on ensured the scaffold exists.
+    assert (S.load_session(name).sandbox_dir / "workspace" / "home" / "index.html").exists()
+    # A second call changing only one module leaves the other intact.
+    result("session.set_modules", {"name": name, "website": False})
+    cfg2 = json.loads(S.load_session(name).config_path.read_text(encoding="utf-8"))
+    assert cfg2["website_override"] == "off"
+    assert cfg2["embodiment_override"] == "actor"  # untouched
+
+
 def test_wake_invalid_embodiment_is_clean_rpc_error_and_creates_nothing():
     set_defaults()
     before = {m.name for m in S.list_sessions()}

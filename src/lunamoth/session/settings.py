@@ -155,6 +155,10 @@ class Settings:
     # Embodiment stance override. Empty means respect the card, then literal.
     # literal = tools are the chara's own hands; actor = tools are backstage.
     embodiment_override: str = ""
+    # personal_website module override: "on" | "off" | "" (respect card, then off).
+    # The chara keeps a homepage (home/index.html) shown in the website tab; the
+    # module adds neutral prompt guidance. Set at wake, editable→next start.
+    website_override: str = ""
 
     def is_live(self) -> bool:
         return self.provider.strip().lower() in LIVE_PROVIDERS and bool(self.base_url.strip())
@@ -222,6 +226,7 @@ _ENV_MAP: dict[str, tuple[str, ...]] = {
     "vision_model": ("LLM_VISION_MODEL",),
     "patience": ("LUNAMOTH_PATIENCE",),
     "embodiment_override": ("LUNAMOTH_EMBODIMENT",),
+    "website_override": ("LUNAMOTH_WEBSITE",),
 }
 
 _INT_FIELDS = {"max_tokens", "memory_chars", "user_chars", "quiet", "max_tool_steps"}
@@ -250,6 +255,9 @@ def _coerce(name: str, raw: Any) -> Any:
     if name == "embodiment_override":
         v = str(raw).strip().lower()
         return v if v in {"literal", "actor"} else ""
+    if name == "website_override":
+        v = str(raw).strip().lower()
+        return v if v in {"on", "off"} else ""
     return str(raw)
 
 

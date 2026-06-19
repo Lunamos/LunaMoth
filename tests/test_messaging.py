@@ -68,6 +68,7 @@ class FakeHandle:
             quiet=self.quiet,
             patience=600.0,
             embodiment="literal",
+            website=False,
             context_tokens=0,
             context_max=1,
             memory_chars=0,

@@ -38,6 +38,7 @@ export interface WorkState {
 export interface Snapshot {
   model?: string;
   net_on?: boolean;
+  website?: boolean;
   rest_until?: number;
   sandbox_root?: string;
   workspace_root?: string;

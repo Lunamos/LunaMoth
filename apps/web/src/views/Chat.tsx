@@ -21,6 +21,7 @@ import { Composer } from "../components/chat/Composer";
 import { ChatPanel } from "../components/chat/ChatPanel";
 import { ChatWorks } from "../components/chat/ChatWorks";
 import { ChatTerminal } from "../components/chat/ChatTerminal";
+import Homepage from "../components/chat/Homepage";
 
 export function Chat({ name, sub }: { name: string; sub: ChatSub }) {
   const t = useT();
@@ -90,6 +91,12 @@ export function Chat({ name, sub }: { name: string; sub: ChatSub }) {
               >
                 {t("tab-terminal")}
               </span>
+              <span
+                className={sub === "home" ? "on" : ""}
+                onClick={() => nav(`#/chara/${encodeURIComponent(name)}/home`)}
+              >
+                {t("tab-home")}
+              </span>
             </div>
             <div className="grow" />
             {netOff && (
@@ -110,6 +117,7 @@ export function Chat({ name, sub }: { name: string; sub: ChatSub }) {
             {sub === "chat" && <ChatStreamPage stream={stream} avatarUri={avatarUri} snap={snap} />}
             {sub === "works" && <ChatWorks name={name} sandboxRoot={sandboxRoot} />}
             {sub === "term" && <ChatTerminal name={name} sandboxRoot={sandboxRoot} />}
+            {sub === "home" && <Homepage name={name} />}
           </div>
         </div>
         {panelOpen && (

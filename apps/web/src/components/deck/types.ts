@@ -27,6 +27,7 @@ export interface DeckCard {
   keyvisual_url?: string;
   stickers_urls?: string[];
   embodiment?: string;
+  website?: boolean | string;
   [k: string]: unknown;
 }
 
@@ -34,6 +35,7 @@ export interface DeckCard {
 export interface CardExtLunamoth {
   tagline?: string;
   embodiment?: string;
+  website?: boolean | string;
   toolpack?: string;
   user_name?: string;
   user_persona?: string;

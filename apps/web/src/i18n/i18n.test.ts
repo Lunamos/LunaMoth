@@ -32,8 +32,11 @@ describe("I18N strings map", () => {
   // existed; the OpenAI provider preset reuses it.) Then unifying the image key on
   // the provider keyring (no legacy single image_api_key input) dropped 2
   // (prov-image-ark-note, image-key-ph) → 553.
-  it("preserves the full key set from the source dict (553 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(553);
+  // The personal-website feature (homepage tab + the two wake/create module
+  // toggles replacing the embodiment grid) added 6 (tab-home, home-iframe-title,
+  // mod-roleplay, mod-roleplay-hint, mod-website, mod-website-hint) → 559.
+  it("preserves the full key set from the source dict (559 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(559);
   });
 
   it("every value is a [zh, en] string tuple", () => {

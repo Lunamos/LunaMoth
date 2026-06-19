@@ -361,6 +361,13 @@ function SettingsPane({ stream }: { stream: CharaStream }) {
           <span className="fact-hint">{t("emb-fact-hint")}</span>
         </div>
       </div>
+      <div className="pfield" style={{ marginTop: 16 }}>
+        <label>{t("mod-website")}</label>
+        <div className="why">{t("mod-website-hint")}</div>
+        <div className="ctl">
+          <span className="fact">{snap.website ? "on" : "off"}</span>
+        </div>
+      </div>
       <div className="pgroup" style={{ marginTop: 22 }}>
         <div
           className={"prow danger click" + (resetting ? " busy" : "")}

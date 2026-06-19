@@ -274,7 +274,8 @@ function ShapeStep({
   hub: ReturnType<typeof useHub>["hub"];
 }) {
   const [originOpen, setOriginOpen] = useState(false);
-  const [emb, setEmb] = useState<"literal" | "actor">(draft.embodiment === "actor" ? "actor" : "literal");
+  const [forceRoleplay, setForceRoleplay] = useState(draft.embodiment === "actor");
+  const [personalSite, setPersonalSite] = useState(!!draft.website);
   const [savingDraft, setSavingDraft] = useState(false);
   const [landing, setLanding] = useState(false);
   const [landed, setLanded] = useState<{ path: string; name: string } | null>(null);
@@ -297,7 +298,8 @@ function ShapeStep({
       const text = secRefs.current[key].current?.value() ?? "";
       putSection(data, key, text);
     }
-    data.embodiment = emb;
+    data.embodiment = forceRoleplay ? "actor" : "literal";
+    data.website = personalSite;
     return data;
   };
 
@@ -389,13 +391,21 @@ function ShapeStep({
 
         <div className="sec embodiment-sec">
           <h3>{t("sec-embodiment")}</h3>
-          <div className="embodiment-grid">
-            {(["literal", "actor"] as const).map((mode) => (
-              <div key={mode} className={"emb-option" + (emb === mode ? " on" : "")} onClick={() => setEmb(mode)}>
-                <b>{mode}</b>
-                <span>{t("emb-" + mode)}</span>
-              </div>
-            ))}
+          <div className="switch-row" style={{ fontSize: "12.5px" }}>
+            <b style={{ fontWeight: 550 }}>{t("mod-roleplay")}</b>
+            <small>{t("mod-roleplay-hint")}</small>
+            <button
+              className={"switch" + (forceRoleplay ? " on" : "")}
+              onClick={() => setForceRoleplay((v) => !v)}
+            />
+          </div>
+          <div className="switch-row" style={{ fontSize: "12.5px" }}>
+            <b style={{ fontWeight: 550 }}>{t("mod-website")}</b>
+            <small>{t("mod-website-hint")}</small>
+            <button
+              className={"switch" + (personalSite ? " on" : "")}
+              onClick={() => setPersonalSite((v) => !v)}
+            />
           </div>
         </div>
       </div>

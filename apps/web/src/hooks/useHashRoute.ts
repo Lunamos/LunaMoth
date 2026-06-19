@@ -5,7 +5,7 @@ import { useSyncExternalStore, useCallback } from "react";
    free of any SPA-fallback list and survives any mount path. */
 
 export type ViewName = "board" | "deck" | "gateways" | "settings" | "chat";
-export type ChatSub = "chat" | "works" | "term";
+export type ChatSub = "chat" | "works" | "term" | "home";
 
 export interface Route {
   view: ViewName;
@@ -13,7 +13,7 @@ export interface Route {
   sub: ChatSub;
 }
 
-const CHARA_RE = /^#\/chara\/([^/]+)(?:\/(works|term))?$/;
+const CHARA_RE = /^#\/chara\/([^/]+)(?:\/(works|term|home))?$/;
 
 export function parseHash(hash: string): Route {
   const m = CHARA_RE.exec(hash);

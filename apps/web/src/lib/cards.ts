@@ -44,6 +44,7 @@ export interface RawDraft {
   avatar_svg?: string;
   pending_avatar?: unknown;
   embodiment?: string;
+  website?: boolean | string;
   [k: string]: unknown;
 }
 
@@ -61,6 +62,7 @@ export interface NormalizedDraft {
   avatar_svg: string;
   pending_avatar: unknown;
   embodiment: "literal" | "actor";
+  website: boolean;
   [k: string]: unknown;
 }
 
@@ -102,6 +104,7 @@ export function normalizeDraft(d: RawDraft | null | undefined): NormalizedDraft 
   draft.avatar_svg = String(draft.avatar_svg || "");
   draft.pending_avatar = draft.pending_avatar || null;
   draft.embodiment = draft.embodiment === "actor" ? "actor" : "literal";
+  draft.website = draft.website === true || draft.website === "on";
   return draft as NormalizedDraft;
 }
 
