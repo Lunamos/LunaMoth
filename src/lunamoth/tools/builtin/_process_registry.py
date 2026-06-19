@@ -27,6 +27,7 @@ notes" requirement).
 """
 from __future__ import annotations
 
+import atexit
 import queue as _queue_mod
 import subprocess
 import threading
@@ -130,6 +131,14 @@ class ProcessRegistry:
         self._lock = threading.Lock()
         self.completion_queue: _queue_mod.Queue = _queue_mod.Queue()
         self._completion_consumed: set = set()
+        # Reap the chara's background process GROUPS when this PROCESS exits — i.e.
+        # only at session teardown (the serve child is stopped, a `run` one-shot
+        # ends, a TUI quits). atexit never fires while the session is alive, so a
+        # chara's background servers (its personal website, a dev server) stay up
+        # for the whole session INCLUDING autonomous running — they're only reaped
+        # when the session itself closes, never mid-life. (A SIGTERM'd serve child
+        # reaches atexit via the SIGTERM→clean-exit handler in server/stdio.py.)
+        atexit.register(self.kill_all)
         # global watch breaker state
         self._global_watch_lock = threading.Lock()
         self._global_watch_window_start: float = 0.0
@@ -614,6 +623,25 @@ class ProcessRegistry:
             return {"status": "killed", "session_id": session.id}
         except Exception as e:  # noqa: BLE001
             return {"status": "error", "error": str(e)}
+
+    def kill_all(self) -> int:
+        """Kill every still-RUNNING background process GROUP. Called ONLY at session
+        teardown (via the atexit hook — i.e. when this process is exiting), so a
+        chara's background servers don't outlive the session as orphans. A no-op
+        while the session is alive. Returns the count killed; never raises (it runs
+        at interpreter shutdown, where exceptions must not escape)."""
+        with self._lock:
+            running = list(self._running.values())
+        killed = 0
+        for session in running:
+            try:
+                if session.process is not None and not session.exited:
+                    _kill_group(session.process)  # SIGTERM→grace→SIGKILL, whole group
+                    session.exited = True
+                    killed += 1
+            except Exception:  # noqa: BLE001 — best-effort reap at shutdown
+                pass
+        return killed
 
     def write_stdin(self, session_id: str, data: str) -> dict:
         session = self.get(session_id)

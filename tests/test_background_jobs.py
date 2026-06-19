@@ -75,3 +75,29 @@ def test_no_notices_no_injection(agent):
     before = len(s.context.messages)
     agent._inject_background_notices(s)  # nothing pending
     assert len(s.context.messages) == before
+
+
+# ---- kill_all: reap a chara's background process groups at session teardown -----
+
+def test_kill_all_reaps_running_groups_and_is_noop_when_empty():
+    import subprocess
+    import time
+    from lunamoth.tools.builtin._process_registry import ProcessRegistry, ProcessSession
+
+    reg = ProcessRegistry()
+    assert reg.kill_all() == 0  # nothing running → no-op (the session-alive case)
+
+    # a real DETACHED background process (its own session/group, exactly how the
+    # registry spawns servers) — stands in for a chara's http.server.
+    p = subprocess.Popen(["sleep", "30"], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    reg._running["t1"] = ProcessSession(id="t1", command="sleep 30", pid=p.pid, process=p)
+    assert p.poll() is None  # running
+
+    assert reg.kill_all() == 1  # reaped at teardown
+    for _ in range(50):
+        if p.poll() is not None:
+            break
+        time.sleep(0.1)
+    assert p.poll() is not None  # the process group is gone
+    assert reg.kill_all() == 0  # idempotent — already exited

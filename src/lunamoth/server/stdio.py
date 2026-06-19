@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import signal
 import sys
 import threading
 from typing import Any, TextIO
@@ -27,6 +28,15 @@ class _StdoutFrames:
 
 def serve() -> int:
     """Serve JSON-RPC on stdin/stdout until EOF, detach, or a broken pipe."""
+
+    # Turn the supervisor's `stop` (SIGTERM) into a CLEAN exit so the `finally`
+    # cleanup + atexit hooks run — in particular the ProcessRegistry reaps the
+    # chara's background process groups (its servers) instead of orphaning them.
+    # Best-effort: only installable from the main thread.
+    try:
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    except (ValueError, OSError):
+        pass
 
     protocol_stdout = sys.stdout
     # Reserve stdout for JSON frames. Any accidental print from imported code is
