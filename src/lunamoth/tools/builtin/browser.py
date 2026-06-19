@@ -23,10 +23,14 @@ carry ``@eN`` ref ids. Flow = snapshot → act-by-ref (``browser_click("@e5")``)
 handlers auto-prefix ``@``. browser_navigate auto-returns a compact snapshot so
 the model can act immediately.
 
-OS-JAIL: a real Chromium will NOT launch under LunaMoth's default sandbox-exec /
-bwrap isolation — the browser toolpack needs ``admin`` isolation +
-``--no-sandbox`` (the driver injects the latter when root/AppArmor). See
-``_browser_driver`` for the full flag.
+OS-JAIL: Chromium runs UNDER the default ``sandbox`` isolation on all three
+platforms (macOS sandbox-exec / Linux bwrap / Linux Docker→Landlock), validated
+end-to-end 2026-06-19. ``build_jail_command(browser=True)`` is a Chromium-capable
+jail (writes confined to workspace+temp, secret home unreadable) and the driver
+auto-injects ``--no-sandbox`` whenever isolation != admin (Chromium's own sandbox
+can't nest inside the outer jail). Docker/Landlock also needs ``--rw /proc`` +
+the crashpad ``--database`` shim (``_browser_driver.ensure_crashpad_db_fix``).
+``admin`` isolation also works. See ``_browser_driver`` / docs/OPEN-WORK.md.
 
 NOTE on toolset: per the porting brief all 12 share the ``"browser"`` toolset
 and the single ``is_browser_available`` gate. (hermes split browser_cdp /
