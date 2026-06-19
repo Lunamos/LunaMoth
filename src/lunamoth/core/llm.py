@@ -628,11 +628,22 @@ class LLMClient:
     def _max_tokens_param(self) -> dict:
         """OpenAI's newer models on the DIRECT endpoint require
         max_completion_tokens; OpenRouter/local/older routes use max_tokens
-        (copied from hermes-agent's _max_tokens_param)."""
+        (copied from hermes-agent's _max_tokens_param).
+
+        The VALUE follows the model — `providers.max_output_tokens` resolves the
+        model's real output cap (OpenRouter's `max_completion_tokens`), defaulting
+        to 8192, with the operator's `LLM_MAX_TOKENS` (>0) as an explicit override.
+        Replaces the old flat 4096, which cut large `write_file`/`patch` tool-call
+        arguments mid-argument (~12KB)."""
+        from . import providers
+        n = providers.max_output_tokens(
+            self.cfg.provider, self.cfg.base_url, self.cfg.model, self.cfg.api_key,
+            override=int(self.cfg.max_tokens or 0),
+        )
         base = (self.cfg.base_url or "").lower()
         if "api.openai.com" in base or "openai.azure.com" in base:
-            return {"max_completion_tokens": self.cfg.max_tokens}
-        return {"max_tokens": self.cfg.max_tokens}
+            return {"max_completion_tokens": n}
+        return {"max_tokens": n}
 
     # Transient failures worth retrying at the connection phase. Everything else
     # (auth errors, bad requests) surfaces immediately — a failed request is a

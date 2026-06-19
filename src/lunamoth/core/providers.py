@@ -28,6 +28,12 @@ DEFAULT_WINDOW = 32768
 # unknown/offline model that falls back to DEFAULT_WINDOW is never refused.
 MINIMUM_CONTEXT_LENGTH = 64_000
 
+# Default max OUTPUT (completion) tokens when the model's cap is unknown —
+# apple-to-apple with hermes (models_dev.py max_output_tokens default 8192). The
+# request "follows the model" (OpenRouter's reported max_completion_tokens) and
+# falls back to this only when the provider doesn't report one.
+DEFAULT_MAX_OUTPUT = 8192
+
 _OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 _DISK_TTL_SECONDS = 86400  # refetch the OpenRouter catalogue at most once a day
 
@@ -39,19 +45,31 @@ def _home() -> Path:
 
 
 def _openrouter_catalogue(api_key: str = "") -> dict[str, int]:
-    """{model_id: context_length} from OpenRouter, cached in-process and on disk."""
+    """{model_id: context_length} from OpenRouter, cached in-process and on disk.
+
+    Also populates the PARALLEL output-token map ``_memo['openrouter_out']``
+    ({model_id: max_completion_tokens}) from the SAME payload, so the max-output
+    resolver below needs no second fetch. The two are always set together."""
     if "openrouter" in _memo:
         return _memo["openrouter"]
     cache = _home() / "openrouter_models.json"
+    out_cache = _home() / "openrouter_output.json"
     try:
         if cache.exists() and time.time() - cache.stat().st_mtime < _DISK_TTL_SECONDS:
             data = {k: int(v) for k, v in json.loads(cache.read_text(encoding="utf-8")).items()}
             _memo["openrouter"] = data
+            try:
+                _memo["openrouter_out"] = {
+                    k: int(v) for k, v in json.loads(out_cache.read_text(encoding="utf-8")).items()
+                }
+            except (OSError, ValueError, json.JSONDecodeError):
+                _memo["openrouter_out"] = {}
             return data
     except (OSError, ValueError, json.JSONDecodeError):
         pass
 
     catalogue: dict[str, int] = {}
+    out_catalogue: dict[str, int] = {}
     try:
         headers = {"User-Agent": "lunamoth"}
         if api_key:
@@ -63,16 +81,28 @@ def _openrouter_catalogue(api_key: str = "") -> dict[str, int]:
             mid, ctx = item.get("id"), item.get("context_length")
             if mid and isinstance(ctx, (int, float)) and ctx > 0:
                 catalogue[str(mid)] = int(ctx)
+            # Output cap: OpenRouter reports it under top_provider.max_completion_tokens
+            # (sometimes top-level). Often null → the model has no declared output
+            # cap and we fall back to DEFAULT_MAX_OUTPUT at resolve time.
+            tp = item.get("top_provider") or {}
+            out = tp.get("max_completion_tokens")
+            if out is None:
+                out = item.get("max_completion_tokens")
+            if mid and isinstance(out, (int, float)) and out > 0:
+                out_catalogue[str(mid)] = int(out)
         if catalogue:
             try:
                 cache.parent.mkdir(parents=True, exist_ok=True)
                 cache.write_text(json.dumps(catalogue), encoding="utf-8")
+                out_cache.write_text(json.dumps(out_catalogue), encoding="utf-8")
             except OSError:
                 pass
     except Exception:
         catalogue = {}  # offline / rate-limited: degrade to the default, never raise
+        out_catalogue = {}
 
     _memo["openrouter"] = catalogue
+    _memo["openrouter_out"] = out_catalogue
     return catalogue
 
 
@@ -105,3 +135,22 @@ def context_window(provider: str, base_url: str, model: str, api_key: str = "",
                    override: int = 0) -> int:
     """Best guess at the model's real context window. Never raises."""
     return context_window_resolved(provider, base_url, model, api_key, override)[0]
+
+
+def max_output_tokens(provider: str, base_url: str, model: str, api_key: str = "",
+                      override: int = 0) -> int:
+    """The model's max OUTPUT (completion) tokens. Like hermes: FOLLOW THE MODEL
+    (OpenRouter reports ``max_completion_tokens`` per model), defaulting to
+    ``DEFAULT_MAX_OUTPUT`` (8192) when the provider declares no cap or is
+    unknown/offline. ``override`` (>0) is an explicit operator cap (``LLM_MAX_TOKENS``)
+    that wins outright. Never raises — there is no fabricated fallback beyond the
+    documented 8192 default."""
+    if override and override > 0:
+        return int(override)
+    is_openrouter = provider == "openrouter" or "openrouter.ai" in (base_url or "")
+    if is_openrouter and model:
+        _openrouter_catalogue(api_key)  # populates _memo['openrouter_out'] alongside ctx
+        out = _memo.get("openrouter_out", {}).get(model)
+        if out and out > 0:
+            return int(out)
+    return DEFAULT_MAX_OUTPUT

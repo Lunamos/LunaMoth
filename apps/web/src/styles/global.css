@@ -613,11 +613,9 @@ body.dark .drop-overlay{background:color-mix(in srgb, var(--accent) 22%, transpa
     padding:8px 14px; gap:4px; border-bottom:1px solid var(--hairline-2)}
   .settings-nav button{white-space:nowrap; flex:none}
   .settings-body{max-width:none; padding:16px 16px 26px}
-  /* 统一密钥行：窄屏让字段标签上置、输入满宽、动作可换行 */
-  .keys-form,.image-form{max-width:none}
+  /* 统一密钥行：窄屏让字段标签上置、输入满宽 */
   .key-field{flex-direction:column; align-items:stretch; gap:5px}
   .key-field>span{width:auto}
-  .key-row{flex-wrap:wrap}
 
   /* 工具栏：窄屏让标题/搜索/按钮换行而非横向溢出 */
   .toolbar{flex-wrap:wrap; gap:8px 10px}
@@ -1716,6 +1714,11 @@ body.dark .sel-item:hover{background:rgba(91,159,212,.16)}
 .aux-acts{display:flex; gap:6px; flex:none}
 .aux-edit{flex:1; min-width:0; display:flex; flex-direction:column; gap:8px}
 .aux-edit .acts{display:flex; gap:8px}
+/* image-gen row: provider tag on the current value + the no-key hint/warn */
+.img-prov-tag{display:inline-block; margin-right:6px; padding:1px 6px; border-radius:4px; background:var(--hairline-2); color:var(--text-2); font-size:10.5px}
+.img-nokey-warn{margin-left:6px; color:var(--danger, #c0392b); font-size:10.5px}
+.img-prov-hint{font-size:10.5px; color:var(--danger, #c0392b)}
+.prov-image-legacy{margin-top:10px}
 
 /* 提供商 (Providers) — one row per provider, one key per provider */
 .prov-pane{max-width:720px}
@@ -1774,36 +1777,20 @@ body.dark .prov-input{background:#1C2228}
 .settings-pane .muted.small{font-size:11.5px}
 .settings-pane .okline{font-size:13px; font-weight:550; color:var(--green)}
 .settings-pane .okline.bad{color:var(--red)}
-.keys-block{margin-top:26px; border-top:1px solid var(--hairline-2); padding-top:20px}
-/* #5 — the unified Keys surface: a second section header gets the same rhythm as
-   a fresh pane top, with a hairline separating the text keys from the image key. */
-.keys-unified h2.keys-section{margin-top:30px; padding-top:22px; border-top:1px solid var(--hairline-2)}
-.keys-list{display:flex; flex-direction:column; gap:8px; margin:12px 0}
-.key-row{display:flex; align-items:center; gap:12px; padding:9px 12px; border:1px solid var(--hairline-2);
-  border-radius:10px; font-size:13px}
-.key-row.on{border-color:var(--accent); background:var(--accent-soft)}
 .key-meta{flex:1; min-width:0; display:flex; align-items:center; gap:9px; flex-wrap:wrap}
 .key-meta b{font-weight:600}
 .key-acts{display:flex; gap:6px; align-items:center; flex:none}
-.keys-add-btn{margin-top:4px}
 .key-badge{font-size:11px; padding:2px 9px; border-radius:99px; background:rgba(20,40,60,.07); color:var(--text-2)}
 .key-badge.on{background:var(--accent-soft); color:var(--accent-deep); font-weight:600}
 .key-badge.warn{background:rgba(180,120,40,.14); color:#9a6a14}
-.keys-add{margin-top:6px}
-.keys-add summary{cursor:pointer; font-size:12.5px; color:var(--accent-deep); user-select:none}
-.keys-form,.image-form{display:flex; flex-direction:column; gap:10px; margin-top:14px; max-width:440px}
 .key-field{display:flex; align-items:center; gap:12px; font-size:13px}
 .key-field>span{flex:none; width:96px; color:var(--text-2)}
 .key-field>input{flex:1; min-width:0; padding:7px 11px; border:1px solid var(--hairline); border-radius:8px;
   background:var(--panel); color:var(--text); font:inherit; font-size:13px}
 .key-field>input.mono{font-family:var(--mono); font-size:12px}
 .key-field>input:focus{border-color:var(--accent); outline:none}
-.keys-form .acts,.image-form .acts{display:flex; gap:12px; align-items:center; margin-top:4px}
 body.dark .key-field>input{background:#1C2228; border-color:var(--hairline)}
 body.dark .key-badge{background:rgba(255,255,255,.08)}
-.matte-deps{font-size:12.5px; color:var(--text-2); margin-bottom:12px; line-height:1.7}
-.matte-deps code{background:rgba(20,40,60,.07); padding:2px 7px; border-radius:6px; font-size:12px}
-body.dark .matte-deps code{background:rgba(255,255,255,.08)}
 .matte-prog{display:flex; align-items:center; gap:9px; margin-top:6px}
 .matte-bar{flex:1; height:6px; background:var(--hairline-2); border-radius:99px; overflow:hidden; max-width:220px}
 .matte-fill{height:100%; background:var(--accent-deep); border-radius:99px; transition:width .3s ease}

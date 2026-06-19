@@ -166,11 +166,10 @@ _FAKE_PNG = b"\x89PNG\r\n\x1a\nFAKE"
 
 @pytest.fixture
 def mock_network(monkeypatch):
-    monkeypatch.setattr(_image_gen, "ark_generate", lambda *a, **k: ["http://x/img.png"])
-    monkeypatch.setattr(_image_gen, "download_bytes", lambda *a, **k: _FAKE_PNG)
-    # media imports the names into its own module namespace.
-    monkeypatch.setattr(media, "ark_generate", lambda *a, **k: ["http://x/img.png"])
-    monkeypatch.setattr(media, "download_bytes", lambda *a, **k: _FAKE_PNG)
+    # media calls _image_gen.generate_bytes (the multi-provider dispatch). Mock it
+    # to return a valid PNG, no real HTTP. media imports the name into its own ns.
+    monkeypatch.setattr(_image_gen, "generate_bytes", lambda *a, **k: _FAKE_PNG)
+    monkeypatch.setattr(media, "generate_bytes", lambda *a, **k: _FAKE_PNG)
 
 
 def test_handler_happy_path_default_path(monkeypatch, sandbox, mock_network):
@@ -233,9 +232,14 @@ def test_is_image_bytes_recognizes_formats():
 
 
 def test_handler_rejects_non_image_body(monkeypatch, sandbox):
+    # generate_bytes validates the body and raises on a non-image response; the
+    # handler surfaces that as a visible error and writes nothing.
     _key_present(monkeypatch)
-    monkeypatch.setattr(media, "ark_generate", lambda *a, **k: ["http://x/err.html"])
-    monkeypatch.setattr(media, "download_bytes", lambda *a, **k: b"<html>error</html>")
+
+    def _raise(*a, **k):
+        raise RuntimeError("the generation endpoint did not return an image")
+
+    monkeypatch.setattr(media, "generate_bytes", _raise)
     ctx = GenCtx(sandbox, network=True)
     out = json.loads(media.generate_image({"prompt": "x"}, ctx))
     assert "error" in out and "image" in out["error"].lower()
@@ -246,7 +250,11 @@ def test_handler_rejects_non_image_body(monkeypatch, sandbox):
 
 def test_handler_empty_result_errors(monkeypatch, sandbox):
     _key_present(monkeypatch)
-    monkeypatch.setattr(media, "ark_generate", lambda *a, **k: [])
+
+    def _raise(*a, **k):
+        raise RuntimeError("image generation returned no result")
+
+    monkeypatch.setattr(media, "generate_bytes", _raise)
     ctx = GenCtx(sandbox, network=True)
     out = json.loads(media.generate_image({"prompt": "x"}, ctx))
     assert "error" in out and "no result" in out["error"].lower()

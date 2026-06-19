@@ -218,8 +218,14 @@ def run_terminal(
     writable_paths: "list[str] | tuple[str, ...]" = (),
     timeout: int = DEFAULT_TIMEOUT,
     workdir: str | None = None,
+    browser: bool = False,
 ) -> str:
-    """Execute *command* in a shell under the active isolation mechanism."""
+    """Execute *command* in a shell under the active isolation mechanism.
+
+    ``browser=True`` selects the browser-specific jail (a real Chromium needs
+    more latitude than the deny-default shell profile; the jail keeps writes
+    confined to the workspace+temp and the secret home unreadable). See
+    ``session.isolation.build_jail_command``."""
     workspace = workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=True)
     isolation = (isolation or backend()).lower()
@@ -247,6 +253,7 @@ def run_terminal(
     try:
         cmd, jail_cwd, jail_note = build_jail_command(
             command, workspace, isolation, allow_network=allow_network, writable=writable,
+            browser=browser,
         )
     except JailUnavailableError as e:
         # NEVER degrade to directory trust — under it the chara could read the

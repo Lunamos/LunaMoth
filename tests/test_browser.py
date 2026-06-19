@@ -29,9 +29,12 @@ class FakeCtx:
         self.llm = None
         self._terminal_calls = []
 
-    def run_terminal(self, command, *, timeout=None, workdir=None):
+    def run_terminal(self, command, *, timeout=None, workdir=None, browser=False):
         self._terminal_calls.append((command, timeout))
         return ""
+
+    def isolation(self):
+        return "sandbox"
 
 
 class DriverStub:
@@ -485,7 +488,7 @@ def test_run_browser_command_uses_temp_files_not_pipes(ctx, monkeypatch, tmp_pat
 
     captured = {}
 
-    def fake_run_terminal(command, *, timeout=None, workdir=None):
+    def fake_run_terminal(command, *, timeout=None, workdir=None, browser=False):
         captured["command"] = command
         # Emulate agent-browser writing JSON to the redirected stdout file.
         # Parse the `> <path>` target out of the command and write to it.
@@ -513,7 +516,7 @@ def test_run_browser_command_uses_temp_files_not_pipes(ctx, monkeypatch, tmp_pat
 def test_run_browser_command_empty_output_is_failure(ctx, monkeypatch, tmp_path):
     monkeypatch.setattr(drv, "_socket_safe_tmpdir", lambda: str(tmp_path))
 
-    def fake_run_terminal(command, *, timeout=None, workdir=None):
+    def fake_run_terminal(command, *, timeout=None, workdir=None, browser=False):
         return ""  # no stdout file written → empty
 
     ctx.run_terminal = fake_run_terminal
@@ -524,7 +527,7 @@ def test_run_browser_command_empty_output_is_failure(ctx, monkeypatch, tmp_path)
 
 def test_run_browser_command_close_empty_ok(ctx, monkeypatch, tmp_path):
     monkeypatch.setattr(drv, "_socket_safe_tmpdir", lambda: str(tmp_path))
-    ctx.run_terminal = lambda command, *, timeout=None, workdir=None: ""
+    ctx.run_terminal = lambda command, *, timeout=None, workdir=None, browser=False: ""
     result = drv.run_browser_command(ctx, "default", "close", [], timeout=5)
     assert result["success"] is True
 

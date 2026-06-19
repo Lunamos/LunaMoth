@@ -31,6 +31,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Sequence
 
@@ -90,6 +91,14 @@ def _lunamoth_home() -> Path:
     return Path(os.environ.get("LUNAMOTH_HOME", str(Path.home() / ".lunamoth"))).expanduser()
 
 
+def _darwin_user_temp() -> str:
+    """The macOS per-user temp dir (``/private/var/folders/<id>/T``). Chromium's
+    ProcessSingleton socket dir and agent-browser's Chrome user-data-dir land
+    here (NOT in $TMPDIR), so the browser jail must allow writes to it. Resolved
+    (``/var`` → ``/private/var``) because Seatbelt matches the real path."""
+    return os.path.realpath(tempfile.gettempdir())
+
+
 def _base_env(workspace: Path) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if k not in _ENV_BLOCKLIST}
     env["TMPDIR"] = str(workspace)  # keep temp files inside the writable jail
@@ -97,7 +106,35 @@ def _base_env(workspace: Path) -> dict[str, str]:
     return env
 
 
-def _macos_profile(workspace: Path, allow_network: bool, writable: list[Path], *, interactive: bool = False) -> str:
+def _macos_profile(workspace: Path, allow_network: bool, writable: list[Path], *,
+                   interactive: bool = False, browser: bool = False) -> str:
+    home = _lunamoth_home()
+    assets = workspace.parent / "assets"
+    if browser:
+        # A real Chromium needs latitude the deny-default shell profile doesn't
+        # grant (iokit-open, posix-shm, extra mach services). Enumerating every
+        # Chromium need is fragile, so INVERT the profile: allow by default, then
+        # keep ONLY the two properties that actually matter for a jailed chara —
+        # (1) writes confined to the workspace (+ the temp dirs the browser
+        # scratches in: the per-user Darwin temp holds Chrome's user-data-dir and
+        # the ProcessSingleton socket; /private/tmp holds agent-browser's socket),
+        # and (2) the secret home (global key / other sessions) unreadable.
+        # Verified end-to-end on macOS 2026-06-19 (agent-browser + system Chrome).
+        b_writes = "\n".join(
+            f'(allow file-write* (subpath "{p}"))'
+            for p in [workspace, *writable, Path(_darwin_user_temp()), Path("/private/tmp")]
+        )
+        b_net = "" if allow_network else "(deny network*)"  # AF_UNIX (local socket) is unaffected
+        return f'''
+(version 1)
+(allow default)
+(deny file-read* (subpath "{home}"))
+(allow file-read* (subpath "{workspace}"))
+(allow file-read* (subpath "{assets}"))
+(deny file-write*)
+{b_writes}
+(allow file-write* (literal "/dev/null") (literal "/dev/tty") (literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/dtracehelper"))
+{b_net}'''
     writes = "\n".join(f'(allow file-write* (subpath "{p}"))' for p in [workspace, *writable])
     net = "(allow network*)" if allow_network else "(deny network*)"
     # Tighten reads: a shell needs to read system libs/binaries, so we keep the
@@ -136,12 +173,51 @@ def _macos_profile(workspace: Path, allow_network: bool, writable: list[Path], *
 {tty}'''
 
 
-def _macos_jail(command: str, workspace: Path, allow_network: bool, writable: list[Path]) -> list[str]:
-    return ["sandbox-exec", "-p", _macos_profile(workspace, allow_network, writable), "/bin/bash", "-c", command]
+def _macos_jail(command: str, workspace: Path, allow_network: bool, writable: list[Path],
+                *, browser: bool = False) -> list[str]:
+    return ["sandbox-exec", "-p", _macos_profile(workspace, allow_network, writable, browser=browser),
+            "/bin/bash", "-c", command]
 
 
-def _linux_jail_argv(inner: list[str], workspace: Path, allow_network: bool, writable: list[Path]) -> list[str]:
+def _linux_jail_argv(inner: list[str], workspace: Path, allow_network: bool, writable: list[Path],
+                     *, browser: bool = False) -> list[str]:
     ws = str(workspace)
+    if browser:
+        # The browser jail, VALIDATED end-to-end on a real Linux host (Ubuntu
+        # 22.04, kernel 5.15, bwrap 0.6.1) 2026-06-19. Two hard constraints learned
+        # there, both different from the shell jail:
+        #  1. NO PID-namespace unshare. agent-browser's Chromium runs as a DETACHED
+        #     daemon that must outlive the per-call bwrap (the next browser_* call
+        #     reconnects to the live page via the /tmp socket). Under --unshare-pid
+        #     the launcher is PID 1, and when it returns the namespace is torn down
+        #     and "Chrome exited early without DevToolsActivePort". So we unshare
+        #     user/ipc/uts/cgroup but KEEP the host PID namespace (also no
+        #     --die-with-parent). Trade-off: host /proc is visible to the browser
+        #     process — acceptable because only Chromium runs here (it won't read
+        #     /proc/<pid>/environ), the SHELL terminal keeps full --unshare-all, and
+        #     the secret home is still hidden below.
+        #  2. Chromium + node + agent-browser + its Chrome live all over the host
+        #     (/usr, ~/.agent-browser/browsers), so bind the WHOLE root read-only,
+        #     then re-confine writes: an empty tmpfs hides the secret home (global
+        #     key / other sessions), the workspace/assets are re-exposed over it,
+        #     and /tmp is shared rw (agent-browser's socket + Chrome's user-data-dir
+        #     land there and must persist + be shared across calls). Chromium also
+        #     needs a real /dev/shm (--dev's minimal /dev omits it).
+        cmd = ["bwrap", "--unshare-user-try", "--unshare-ipc",
+               "--unshare-uts", "--unshare-cgroup-try"]
+        if not allow_network:
+            cmd += ["--unshare-net"]  # net ON = shared (no unshare); OFF = isolate
+        cmd += ["--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/dev/shm"]
+        cmd += ["--tmpfs", str(_lunamoth_home())]          # hide global key + other sessions
+        cmd += ["--bind", ws, ws]                           # re-expose this chara's workspace rw
+        assets = workspace.parent / "assets"
+        if assets.is_dir():
+            cmd += ["--ro-bind-try", str(assets), str(assets)]
+        cmd += ["--bind", "/tmp", "/tmp"]                   # shared rw temp (socket + profile)
+        for p in writable:
+            cmd += ["--bind", str(p), str(p)]
+        cmd += ["--chdir", ws, *inner]
+        return cmd
     cmd = ["bwrap", "--die-with-parent", "--unshare-all"]
     if allow_network:
         cmd += ["--share-net", "--ro-bind-try", "/etc/resolv.conf", "/etc/resolv.conf"]
@@ -161,11 +237,13 @@ def _linux_jail_argv(inner: list[str], workspace: Path, allow_network: bool, wri
     return cmd
 
 
-def _linux_jail(command: str, workspace: Path, allow_network: bool, writable: list[Path]) -> list[str]:
-    return _linux_jail_argv(["/bin/bash", "-c", command], workspace, allow_network, writable)
+def _linux_jail(command: str, workspace: Path, allow_network: bool, writable: list[Path],
+                *, browser: bool = False) -> list[str]:
+    return _linux_jail_argv(["/bin/bash", "-c", command], workspace, allow_network, writable, browser=browser)
 
 
-def _linux_landlock_argv(inner: list[str], workspace: Path, allow_network: bool, writable: list[Path]) -> list[str]:
+def _linux_landlock_argv(inner: list[str], workspace: Path, allow_network: bool, writable: list[Path],
+                         *, browser: bool = False) -> list[str]:
     """Run *inner* behind a Landlock allow-list — the no-userns Linux tier.
 
     Same read/write surface as the bwrap jail (system paths + assets read-only,
@@ -178,6 +256,23 @@ def _linux_landlock_argv(inner: list[str], workspace: Path, allow_network: bool,
     args = [sys.executable, "-m", "lunamoth.session.landlock"]
     for ro in ("/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", sys.prefix):
         args += ["--ro", ro]
+    if browser:
+        # Landlock is allow-list only (ABI v1 has no deny-carve-out), so we can't
+        # bind "/" ro and subtract the secret like bwrap does. Instead add the
+        # specific extra reads Chromium/node/agent-browser need (their install
+        # roots) + shared rw /tmp (socket + Chrome profile). ~/.lunamoth is simply
+        # never added, so it stays unreadable. VALIDATED end-to-end inside Docker
+        # (Landlock tier) 2026-06-19 — Chrome's renderer needs FULL /proc (it
+        # opendir's /proc/self/fd + reads /proc/self/maps; --ro is not enough →
+        # FATAL proc_util.cc), plus /sys and /dev/shm. Pairs with the crashpad
+        # --database shim (see _browser_driver.ensure_crashpad_db_fix).
+        home = Path.home()
+        for ro in (home / ".agent-browser", home / ".nvm", home / ".cache",
+                   home / ".npm-global", "/opt", "/Applications", "/usr/local",
+                   os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "")):
+            if ro and os.path.isdir(str(ro)):
+                args += ["--ro", str(ro)]
+        args += ["--rw", "/tmp", "--rw", "/proc", "--rw", "/sys", "--rw", "/dev/shm", "--rw", "/dev"]
     assets = workspace.parent / "assets"
     if assets.is_dir():
         args += ["--ro", str(assets)]
@@ -188,8 +283,9 @@ def _linux_landlock_argv(inner: list[str], workspace: Path, allow_network: bool,
     return args
 
 
-def _linux_landlock_jail(command: str, workspace: Path, allow_network: bool, writable: list[Path]) -> list[str]:
-    return _linux_landlock_argv(["/bin/bash", "-c", command], workspace, allow_network, writable)
+def _linux_landlock_jail(command: str, workspace: Path, allow_network: bool, writable: list[Path],
+                         *, browser: bool = False) -> list[str]:
+    return _linux_landlock_argv(["/bin/bash", "-c", command], workspace, allow_network, writable, browser=browser)
 
 
 def build_jail_command(
@@ -199,6 +295,7 @@ def build_jail_command(
     *,
     allow_network: bool = False,
     writable: Sequence[Path] = (),
+    browser: bool = False,
 ) -> tuple[list[str], str | None, str]:
     """The ONE isolation-ladder selector for a non-interactive ``bash -c`` run.
 
@@ -233,12 +330,12 @@ def build_jail_command(
         # Isolation ladder: native OS jail (bwrap/seatbelt) → Landlock → refuse.
         if os_sandbox_available():
             cmd = (_macos_jail if sys.platform == "darwin" else _linux_jail)(
-                command, workspace, allow_network, writable_list
+                command, workspace, allow_network, writable_list, browser=browser
             )
             run_cwd = str(workspace) if sys.platform == "darwin" else None
             return cmd, run_cwd, ""
         if landlock_available():
-            cmd = _linux_landlock_jail(command, workspace, allow_network, writable_list)
+            cmd = _linux_landlock_jail(command, workspace, allow_network, writable_list, browser=browser)
             note = ""
             if not allow_network:
                 # Honest: Landlock ABI v1 confines the filesystem only — it cannot

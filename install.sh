@@ -38,6 +38,33 @@ done
 say()  { printf '\033[1;36m[lunamoth]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m[lunamoth]\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Browser tools are a LunaMoth environment requirement (owner 2026-06-19): the
+# Node `agent-browser` CLI + its own Chromium back the browser_* tools, which now
+# run under the default `sandbox` isolation too. Best-effort + non-fatal: a failed
+# browser setup never blocks the core install. On Linux+apt we bootstrap Node 20
+# (NodeSource) if missing; on macOS we point at `brew install node`.
+browser_setup() {
+  say "setting up browser tools (agent-browser + Chromium) ..."
+  if ! command -v npm >/dev/null 2>&1; then
+    if [ "$(uname -s)" = "Linux" ] && command -v apt-get >/dev/null 2>&1; then
+      say "  Node.js not found — installing Node 20 (NodeSource) ..."
+      curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1 \
+        && apt-get install -y nodejs >/dev/null 2>&1 || true
+    fi
+  fi
+  if command -v npm >/dev/null 2>&1; then
+    if npm install -g agent-browser >/dev/null 2>&1 \
+       && agent-browser install --with-deps >/dev/null 2>&1; then
+      say "  browser tools ready (agent-browser + Chromium)"
+    else
+      say "  NOTE: browser setup incomplete — finish later with: lunamoth setup browser"
+    fi
+  else
+    say "  NOTE: Node.js (node+npm) not found — the browser_* tools need it."
+    say "        Install Node 18+ ($([ "$(uname -s)" = Darwin ] && echo 'brew install node' || echo 'your package manager')), then: lunamoth setup browser"
+  fi
+}
+
 case "$(uname -s)" in
   Darwin|Linux) ;;
   *) fail "unsupported platform $(uname -s) (macOS and Linux only for now)" ;;
@@ -92,6 +119,7 @@ EOF
     *) say "NOTE: $LINK_DIR is not on your PATH. Add this to your shell profile:"
        say "  export PATH=\"$LINK_DIR:\$PATH\"" ;;
   esac
+  browser_setup
   say "done (dev channel). run: lunamoth"
   exit 0
 fi
@@ -150,4 +178,5 @@ if [ -n "$UV_BIN" ]; then
   esac
 fi
 
+browser_setup
 say "done. run: lunamoth"

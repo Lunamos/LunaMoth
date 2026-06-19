@@ -200,15 +200,20 @@ def generate(
 
     brief = brief if brief is not None else build_brief(card, llm_call)
     prompt = prompt_for(kind, brief)
-    gen = ark_generate or _image_gen.ark_generate
-    dl = download_bytes or _image_gen.download_bytes
 
-    urls = gen(prompt, KINDS[kind]["size"], refs=refs)
-    if not urls:
-        raise RuntimeError("image generation returned no result")
-    data = dl(urls[0])
-    if not _image_gen.is_image_bytes(data):
-        raise RuntimeError("the generation endpoint did not return an image; nothing was saved")
+    if ark_generate is not None or download_bytes is not None:
+        # Test / explicit-injection path: the old URL-then-download Ark shape.
+        gen = ark_generate or _image_gen.ark_generate
+        dl = download_bytes or _image_gen.download_bytes
+        urls = gen(prompt, KINDS[kind]["size"], refs=refs)
+        if not urls:
+            raise RuntimeError("image generation returned no result")
+        data = dl(urls[0])
+        if not _image_gen.is_image_bytes(data):
+            raise RuntimeError("the generation endpoint did not return an image; nothing was saved")
+    else:
+        # Real path: dispatch to the active provider's adapter (validates bytes).
+        data = _image_gen.generate_bytes(prompt, KINDS[kind]["size"], refs=refs)
 
     matted = False
     note = ""

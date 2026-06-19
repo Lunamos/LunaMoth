@@ -17,7 +17,7 @@ import { useNavigate } from "../../hooks/useHashRoute";
 import { errText, rpcErrText } from "../../lib/status";
 import { deckToast } from "../ui/deckToast";
 import { Select, type SelectOption } from "./Select";
-import { TaskModels } from "./TaskModels";
+import { TaskModels, type ImageProvider } from "./TaskModels";
 import { MatteSection } from "./MattePane";
 import type { TKey } from "../../i18n";
 import type { ModelInfo } from "../deck/types";
@@ -27,6 +27,7 @@ interface Defaults {
   base_url?: string;
   model?: string;
   reasoning?: string;
+  image_provider?: string;
   image_model?: string;
   vision_model?: string;
   model_context?: number | string;
@@ -51,6 +52,7 @@ export function ModelPane() {
 
   const [keys, setKeys] = useState<KeyRow[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [imageCatalog, setImageCatalog] = useState<ImageProvider[]>([]);
   const [busy, setBusy] = useState(false);
   const [savedTick, setSavedTick] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -68,6 +70,15 @@ export function ModelPane() {
     hub.call<ModelInfo[]>("models.list", {}, 30000).then((m) => on && setModels(Array.isArray(m) ? m : [])).catch(() => {});
     return () => { on = false; };
   }, [hub, defaults.base_url]);
+  // image-gen provider catalogue (providers + their models + key presence).
+  // Refetch when the active image provider or the key set changes.
+  useEffect(() => {
+    let on = true;
+    hub.call<{ providers: ImageProvider[] }>("image.catalog", {}, 15000)
+      .then((r) => on && setImageCatalog(Array.isArray(r?.providers) ? r.providers : []))
+      .catch(() => {});
+    return () => { on = false; };
+  }, [hub, defaults.image_provider, keys]);
 
   const activeProvider = keys.find((k) => k.active)?.label || defaults.provider || "";
   const model = defaults.model || "";
@@ -168,7 +179,9 @@ export function ModelPane() {
       <TaskModels
         values={defaults as unknown as Record<string, string | undefined>}
         catalog={modelOptions}
+        imageCatalog={imageCatalog}
         onApply={(field, v) => void persist({ [field]: v })}
+        onApplyImage={(provider, model) => void persist({ image_provider: provider, image_model: model })}
       />
 
       <div className="model-save-state">

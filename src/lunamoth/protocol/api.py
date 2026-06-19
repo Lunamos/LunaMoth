@@ -121,6 +121,15 @@ def browser_driver_status() -> tuple[str | None, bool]:
     return drv.find_agent_browser(), drv.chromium_installed()
 
 
+def apply_browser_runtime_fixups() -> bool:
+    """Apply post-install fixes the browser driver needs to run under the OS jail
+    (currently the crashpad ``--database`` shim). Called by `lunamoth setup
+    browser`. Frontends reach this only through protocol/ (architecture rule)."""
+    from ..tools.builtin import _browser_driver as drv
+
+    return drv.ensure_crashpad_db_fix()
+
+
 class CharaHandle:
     """In-process implementation: wraps one LunaMothAgent + its session."""
 

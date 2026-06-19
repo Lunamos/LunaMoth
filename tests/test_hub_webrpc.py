@@ -677,3 +677,28 @@ def test_session_card_is_writable_else_refused(tmp_path):
     bogus.write_text("{}", encoding="utf-8")
     with pytest.raises(Exception):
         H._writable_card_path(str(bogus))
+
+
+def test_image_catalog_lists_providers_and_key_presence():
+    """image.catalog enumerates every image provider with its models and whether a
+    usable key is set (reusing the named provider keyring), marking the active one."""
+    # save a DashScope provider key in the named keyring + select DashScope
+    H.save_key("阿里云", provider="dashscope",
+               base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", api_key="sk-ali")
+    H.save_defaults({"image_provider": "dashscope", "image_model": "wan2.6-image"})
+
+    cat = result("image.catalog")["providers"]
+    by_id = {c["id"]: c for c in cat}
+    assert set(by_id) == {"volcano", "dashscope", "openai", "openrouter"}
+    assert by_id["dashscope"]["active"] is True
+    assert by_id["dashscope"]["has_key"] is True          # from the keyring
+    assert by_id["openai"]["has_key"] is False
+    assert by_id["dashscope"]["models"]                    # has selectable models
+
+
+def test_defaults_persist_image_provider_and_model():
+    H.save_defaults({"image_provider": "openrouter",
+                     "image_model": "google/gemini-2.5-flash-image-preview"})
+    got = result("defaults.get")
+    assert got["image_provider"] == "openrouter"
+    assert got["image_model"] == "google/gemini-2.5-flash-image-preview"

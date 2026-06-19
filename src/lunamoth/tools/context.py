@@ -71,15 +71,19 @@ class ToolContext:
     def isolation(self) -> str:
         return str(self.state.load().get("isolation", "sandbox"))
 
-    def run_terminal(self, command: str, *, timeout: int, workdir: Path | None = None) -> str:
+    def run_terminal(self, command: str, *, timeout: int, workdir: Path | None = None,
+                     browser: bool = False) -> str:
         """Run a shell command under the chara's isolation (sandbox/admin).
-        Thin pass-through to tools.runner.run_terminal with the live env facts."""
+        Thin pass-through to tools.runner.run_terminal with the live env facts.
+        ``browser=True`` selects the browser-specific jail (Chromium-capable)."""
         from .runner import run_terminal as _run
         status = self.state.load()
         return _run(
             command,
             workdir or self.workspace,
+            isolation=str(status.get("isolation") or "") or None,
             allow_network=bool(status.get("network_access", False)),
             writable_paths=status.get("writable_paths", []),
             timeout=timeout,
+            browser=browser,
         )

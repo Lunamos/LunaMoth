@@ -48,11 +48,16 @@ with, not a clone on disk.)
   `system_and_3` breakpoint placement), (4) **reasoning replay**
   (reasoning_content padding + `reasoning_details`/signature round-trip + the
   per-provider echo tiers). The ONLY edit allowed while porting these is
-  de-branding the MODEL-FACING text: no literal "hermes"/"Hermes"/"the VM"/
-  "Linux environment" may appear in any string the model sees — system prompts,
-  tool descriptions, skill bodies, summary instructions (use neutral wording —
-  "this runtime", "your environment"). Source-code COMMENTS may still cite the
-  hermes counterpart as provenance (the codebase already does this everywhere).
+  de-branding the MODEL-FACING text: no literal "hermes"/"Hermes"/"the VM"
+  may appear in any string the model sees — system prompts, tool descriptions,
+  skill bodies, summary instructions (use neutral wording — "this runtime",
+  "your environment"). OS NAMES ARE NEUTRAL, NOT BRAND (owner, 2026-06-19):
+  "Linux", "macOS", etc. are plain factual content and may appear in
+  model-facing text — they need NOT be scrubbed (e.g. a terminal tool
+  description saying "shell commands on a Linux environment" is fine). Only
+  the hermes brand / "the VM" framing is off-limits. Source-code COMMENTS may
+  still cite the hermes counterpart as provenance (the codebase already does
+  this everywhere).
   The good general prompts (task-completion discipline, tool-use enforcement,
   the SKILLS guidance) are migrated into `content/rules.py` the same way:
   port the wording, strip the brand.
@@ -229,9 +234,20 @@ zero internal deps; `obs/` imports only `config`.
     `delegate_task.py`, `browser.py` (12 browser_*, check_fn-gated on the
     agent-browser driver). LunaMoth's OWN chara-life tools: `chara_life.py` —
     speak, rest, wish (the renamed goal — distinct from todo).
-    DROPPED (owner, 2026-06-18): **web_search / web_extract are gone** — a web
-    round-trip burns extra tokens for a search backend we don't run; the chara
-    browses via `terminal` + `/net on` or an MCP fetch server instead. **The
+    SHELVED, NOT DELETED (owner, 2026-06-18; revised 2026-06-19): **web_search /
+    web_extract are kept in `web.py` but NOT registered** (`_WEB_TOOLS_ENABLED =
+    False`, and the `registry.register` calls sit inside that `if`, so the AST
+    discovery never even imports the module). Rationale: with no search backend
+    of our own a web round-trip just burns tokens, and — more importantly —
+    NOT offering the tools makes the chara do less fruitless trial-and-error, so
+    the current off state is GOOD. The chara browses via `terminal` + `/net on`,
+    `browser_*`, or an MCP fetch server instead. FUTURE (deferred, LOW priority,
+    settled — future agents need not re-litigate): now that the provider/key
+    library exists, re-enable them as OPT-IN behind a user-supplied web key (port
+    hermes's `tools/web_tools.py` design); the web-key UI slot belongs in
+    Settings · 模型, **below the other multimodal models and above 背景去除**. The
+    one hard requirement when re-enabled: a failed web call must surface a real
+    `tool_error`, never the silent empty-`{}` fallback the old path had. **The
     standalone `send_file` tool is gone too** — like hermes, the chara surfaces
     a file by writing a line `MEDIA:<workspace path>` in its reply; the agent's
     streaming `_media_filter` (core/agent.py) extracts that line, strips it from
@@ -247,8 +263,16 @@ zero internal deps; `obs/` imports only `config`.
     terminal/process/search/execute_code via ctx.run_terminal), `sandbox.py` (ONE
     working dir `workspace/`), `mcp.py` (stdio JSON-RPC; `schema_sanitizer.py`),
     `memory.py`/`skills.py`/`goals.py` stores (hermes-shaped, per-chara), `toolpacks.py`.
-    Network is ON by default (`/net off` to disable); browser tools also need
-    admin isolation + the installed driver.
+    Network is ON by default (`/net off` to disable). Browser tools need the
+    installed driver (agent-browser CLI + Chromium; check_fn-gated; a deploy
+    requirement now — install.sh / Dockerfile / `lunamoth setup browser`) and run
+    UNDER `sandbox` isolation on ALL THREE platforms — `build_jail_command(browser=True)`
+    is a Chromium-capable jail (writes confined to workspace+temp, secret home
+    unreadable, `--no-sandbox` auto-injected). VALIDATED end-to-end 2026-06-19 with
+    product code: macOS/sandbox-exec, Linux/bwrap (the deployed production path), and
+    Linux/Docker (Landlock — needs `--rw /proc` for Chrome's renderer + a crashpad
+    `--database` shim, `_browser_driver.ensure_crashpad_db_fix`). Details + the
+    per-platform jail recipes in docs/OPEN-WORK.md. `admin` isolation also works.
 - `obs/` — diagnostics (leaf infra): `log.py` (rotating sandbox/logs/lunamoth.log
   + errors.log, credential redaction, session tag, `--debug`), `broker.py`
   (in-memory ring → `/panel log`), `audit.py` (the SECURITY trail — separate
@@ -391,18 +415,21 @@ into the session's card, key stripped.)
   starts/stops the resident child (off saves tokens); the in-chat switch flips
   mode via `chara.set_autonomy` without killing the chat you're in. The board's
   `paused` field = `mode != live`. Never reintroduce a second autonomy concept.
-- **The autonomous lifecycle (mode=live):** startup → greeting (first meeting)
-  → CONVERSATION mode (present + spoke within `quiet` → "waiting · back to its
-  own work in N min"); on detach / the engagement window lapsing → SELF-WORK
-  mode. In self-work the chara's non-`speak` output is `muse` (panoramic only),
-  only `speak`/superchat reaches the user/gateway, and it picks its own next
-  wake. Self-work alternates working ↔ the idle gap (the "beat of its own
-  life", `patience`). Entering/leaving the room does NOT change a self-working
-  chara — only SPEAKING returns it to conversation (a neutral "[operator
-  entered]" is injected before that first message; leaving conversation after
-  speaking injects "[operator left]" and it returns to self-work).
-- A **chara** is persistent: daemon via `start`/`start-all`, attach/detach.
-  Presence is a fact (`user_present`).
+- **The autonomous lifecycle (mode=live):** startup → the card's `first_mes`
+  (shown once on an empty transcript epoch — see `presence/` below) →
+  CONVERSATION mode (it just spoke or was spoken to within `quiet` → "waiting ·
+  back to its own work in N min"); when the engagement (`quiet`) window lapses →
+  SELF-WORK mode. In self-work the chara's non-`speak` output is `muse`
+  (panoramic only), only `speak`/superchat reaches the user/gateway, and it
+  picks its own next wake. Self-work alternates working ↔ the idle gap (the
+  "beat of its own life", `patience`). The chara's context is INDEPENDENT of
+  attach/detach: NO enter/leave marker is injected — the `[operator entered]`/
+  `[operator left]` text and the `user_present` fact were DELETED 2026-06-18.
+  Speaking is what moves it into conversation; the speech-driven `quiet` timer
+  lapsing returns it to self-work.
+- A **chara** is persistent: daemon via `start`/`start-all`, attach/detach
+  (connection events only — they do NOT enter the chara's context; presence was
+  deleted 2026-06-18).
 - **Its own pace**: `patience` (seconds between spontaneous cycles —
   `Settings.patience`, default 600, card hook `extensions.lunamoth.patience`,
   `/patience`; precedence operator > card > default. NEVER reintroduce tiny
@@ -410,7 +437,7 @@ into the session's card, key stripped.)
   `/quiet` (engagement:
   it sets work aside while you talk, resumes after N s of silence), the `rest`
   tool (it chooses its next wake, 1–120min; your message always wakes it —
-  but ATTACH never does: entering the room is a presence fact, not a wake). Idle ticks are user messages carrying ONLY a
+  but ATTACH never does: attaching is a connection event, not a wake). Idle ticks are user messages carrying ONLY a
   wall-clock timestamp (ephemeral, in_context=False — the rules layer
   documents the convention); long silences get one gap note; day-level date
   rides the env facts.
@@ -467,17 +494,15 @@ into the session's card, key stripped.)
    existing `stream_event` channel to make charas aware of a living world.
 
 **C. For developers / agent users**
-1. **hermes apple-to-apple parity** (ACTIVE, owner 2026-06-18): the four
-   context subsystems are being driven to IDENTICAL with hermes — compaction
-   trigger, the structured summary template, `system_and_3` cache_control,
-   and reasoning_details/signature replay — each verified by a code-comparison
-   agent every pass (see `docs/OPEN-WORK.md`, "Loop 2026-06-18 cont."). Then the
-   remaining P2 batches (llm robustness, runner output hygiene, tool-loop
-   guardrails, messaging dedup, chara auto-restart). Multi-key management RPC
-   rides this track too.
-2. Declarative tool registry (hermes-style `tools/registry.py`, builtin/ split).
-3. Messaging: live-test WeChat/QQ with real credentials (budget a fix
+1. Messaging: live-test WeChat/QQ with real credentials (budget a fix
    round — iLink endpoints shifted once already); then Telegram (long-poll,
    trivial after qq.py). (Enterprise WeChat/WeCom was dropped 2026-06-14 —
    the deck never surfaced it; personal WeChat is the WeChat path we keep.)
-4. Remote TUI client over the gateway (`--connect`).
+2. Remote TUI client over the gateway (`--connect`).
+
+(SHIPPED, moved out of the roadmap per "OPEN work only": the hermes apple-to-apple
+parity — the four context subsystems are IDENTICAL and the full P1–P3 hardening
+backlog landed, verified by two audits 2026-06-19; keep the apple-to-apple +
+de-brand INVARIANT at the top of this file on every future port — and the
+declarative tool registry (`tools/registry.py` + `builtin/` islands). Detail in
+the module map + git history.)

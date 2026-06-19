@@ -133,7 +133,7 @@ def _normalize_url(url: str) -> str:
 # ---------------------------------------------------------------------------
 
 NAVIGATE_SCHEMA = {
-    "description": "Navigate to a URL in the browser. Initializes the session and loads the page. Must be called before other browser tools. For simple information retrieval, prefer web_search or web_extract (faster, cheaper). For plain-text endpoints — URLs ending in .md, .txt, .json, .yaml, .yml, .csv, .xml, raw.githubusercontent.com, or any documented API endpoint — prefer curl via the terminal tool or web_extract; the browser stack is overkill and much slower for these. Use browser tools when you need to interact with a page (click, fill forms, dynamic content). Returns a compact page snapshot with interactive elements and ref IDs — no need to call browser_snapshot separately after navigating.",
+    "description": "Navigate to a URL in the browser. Initializes the session and loads the page. Must be called before other browser tools. For plain-text endpoints — URLs ending in .md, .txt, .json, .yaml, .yml, .csv, .xml, raw.githubusercontent.com, or any documented API endpoint — prefer curl via the terminal tool; the browser stack is overkill and much slower for these. Use browser tools when you need to interact with a page (click, fill forms, dynamic content). Returns a compact page snapshot with interactive elements and ref IDs — no need to call browser_snapshot separately after navigating.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -284,8 +284,8 @@ CDP_SCHEMA = {
         "Firecrawl) — those expose CDP per session but live-session routing is "
         "a follow-up. Camofox is REST-only and will never support CDP. If the "
         "tool is in your toolset at all, a CDP endpoint is already reachable.\n\n"
-        f"**CDP method reference:** {CDP_DOCS_URL} — use web_extract on a "
-        "method's URL (e.g. '/tot/Page/#method-handleJavaScriptDialog') "
+        f"**CDP method reference:** {CDP_DOCS_URL} — use curl via the terminal "
+        "tool on a method's URL (e.g. '/tot/Page/#method-handleJavaScriptDialog') "
         "to look up parameters and return shape.\n\n"
         "**Common patterns:**\n"
         "- List tabs: method='Target.getTargets', params={}\n"

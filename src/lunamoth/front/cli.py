@@ -650,50 +650,75 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 def cmd_setup_browser(args: argparse.Namespace) -> int:
     """Install the Node `agent-browser` CLI + its Chromium so the browser_*
-    tools can be enabled. Honest about prerequisites; never pretends to succeed.
+    tools work. Actually installs (idempotent); `--check` only reports.
 
     The 12 browser tools stay hidden (check_fn-gated) until BOTH the CLI and a
-    Chromium build are present. A real Chromium will NOT launch under the default
-    `sandbox` isolation (sandbox-exec/bwrap block namespaces, /dev/shm, sockets)
-    — the browser toolpack needs `admin` isolation, plus --no-sandbox
-    (the driver injects that automatically as root / under AppArmor userns)."""
+    Chromium build are present. They run under the default `sandbox` isolation as
+    well as `admin` — `session.isolation.build_jail_command(browser=True)` uses a
+    Chromium-capable jail (writes confined to workspace+temp, secret home hidden,
+    --no-sandbox auto-injected). Validated macOS + Linux/bwrap 2026-06-19."""
     from ..protocol.api import browser_driver_status
 
     check = bool(getattr(args, "check", False))
     cli, chromium = browser_driver_status()
 
-    print("lunamoth setup browser — the optional browser_* tool driver\n")
+    print("lunamoth setup browser — the browser_* tool driver\n")
     print(f"  {'✓' if cli else '✗'} agent-browser CLI" + (f" — {cli}" if cli else " — not found"))
     print(f"  {'✓' if chromium else '✗'} Chromium build" + ("" if chromium else " — not found"))
 
     if cli and chromium:
-        print("\nBrowser driver is ready. Enable the browser toolpack on a chara")
-        print("running under `admin` isolation (a real Chromium will not")
-        print("launch under the default `sandbox` isolation).")
+        print("\nBrowser driver is ready — the browser_* tools work under both")
+        print("`sandbox` and `admin` isolation.")
         return 0
-
-    node = shutil.which("node")
-    npm = shutil.which("npm")
-    if not (node and npm):
-        print("\n✗ Node.js is required (node + npm) and was not found.")
-        print("  Install Node 18+ first: https://nodejs.org  (or `brew install node`).")
-        print("  Then re-run: lunamoth setup browser")
-        return 1
-
-    print(f"\n  node: {node}")
-    print(f"  npm:  {npm}")
-    print("\nTo install the driver:")
-    print("  1. npm install -g agent-browser     # the automation CLI")
-    print("  2. agent-browser install            # downloads its Chromium")
-    print("\nIsolation caveat: enable the browser toolpack only on a chara running")
-    print("under `admin` isolation, with --no-sandbox (Chromium will not")
-    print("start under the default sandbox-exec/bwrap jail).")
-
     if check:
+        print("\nNot installed. Run `lunamoth setup browser` (no --check) to install.")
         return 1
-    print("\n(Re-run with the steps above, or pass nothing to see this guidance again.)")
-    print("This command does not install automatically — run the two npm steps yourself,")
-    print("then `lunamoth setup browser` confirms the driver is ready.")
+
+    npm = shutil.which("npm")
+    if not npm:
+        print("\n✗ Node.js (node + npm) is required and was not found.")
+        print("  Install Node 18+ first, then re-run `lunamoth setup browser`:")
+        print("    Linux:  curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs")
+        print("    macOS:  brew install node")
+        return 1
+
+    print(f"\n  npm: {npm}\n")
+
+    def _run(cmd: list) -> int:
+        """Run an install step, treating a missing/unrunnable binary as failure
+        rather than crashing the command."""
+        try:
+            return subprocess.run(cmd).returncode
+        except (OSError, ValueError) as e:
+            print(f"  ({' '.join(cmd)} could not run: {e})")
+            return 1
+
+    if not cli:
+        print("→ npm install -g agent-browser ...")
+        if _run([npm, "install", "-g", "agent-browser"]) != 0:
+            print("\n✗ `npm install -g agent-browser` failed.", file=sys.stderr)
+            return 1
+    # agent-browser install --with-deps downloads its own Chrome (+ system libs
+    # on Linux). Re-resolve the CLI after the npm step so we can call it.
+    ab = shutil.which("agent-browser") or "agent-browser"
+    print("→ agent-browser install --with-deps  (downloads Chromium) ...")
+    if _run([ab, "install", "--with-deps"]) != 0:
+        # --with-deps needs root on Linux for the apt step; retry plain.
+        print("  (--with-deps failed; retrying `agent-browser install` without system deps)")
+        if _run([ab, "install"]) != 0:
+            print("\n✗ Chromium download failed.", file=sys.stderr)
+            return 1
+
+    # Shim the crashpad handler so Chrome survives under the OS jail (Landlock).
+    from ..protocol.api import apply_browser_runtime_fixups
+    apply_browser_runtime_fixups()
+    cli, chromium = browser_driver_status()  # re-probes (resets the driver cache)
+    print(f"\n  {'✓' if cli else '✗'} agent-browser CLI")
+    print(f"  {'✓' if chromium else '✗'} Chromium build")
+    if cli and chromium:
+        print("\n✓ Browser driver ready — browser_* tools work under sandbox + admin.")
+        return 0
+    print("\n✗ Driver still not detected; see output above.", file=sys.stderr)
     return 1
 
 

@@ -41,18 +41,30 @@ def test_setup_browser_reports_ready_when_driver_present(monkeypatch, capsys):
     assert "ready" in out.lower()
 
 
-def test_setup_browser_guides_when_node_present_driver_absent(monkeypatch, capsys):
+def test_setup_browser_attempts_install_when_node_present(monkeypatch, capsys):
+    # Node present, driver absent → the command ACTUALLY attempts the install
+    # (npm i -g agent-browser, then agent-browser install). subprocess is mocked
+    # so no real install runs; the driver stays absent, so it reports not-ready.
     monkeypatch.setattr(drv, "find_agent_browser", lambda: None)
     monkeypatch.setattr(drv, "chromium_installed", lambda: False)
     monkeypatch.setattr(cli.shutil, "which",
-                        lambda name: f"/usr/bin/{name}" if name in ("node", "npm") else None)
+                        lambda name: f"/usr/bin/{name}" if name in ("node", "npm", "agent-browser") else None)
+    monkeypatch.setattr(drv, "_reset_caches_for_test", lambda: None)
+    calls = []
+
+    class _R:
+        returncode = 0
+
+    def _fake_run(cmd, *a, **k):
+        calls.append(list(cmd))
+        return _R()
+
+    monkeypatch.setattr(cli.subprocess, "run", _fake_run)
     rc = cli.cmd_setup(_args())
-    out = capsys.readouterr().out
+    # It attempted the npm install step (no longer just printed guidance).
+    assert any("npm" in str(c[0]) and "agent-browser" in c for c in calls)
+    # Driver still absent after (mocked), so it honestly reports not-ready.
     assert rc == 1
-    assert "npm install -g agent-browser" in out
-    assert "agent-browser install" in out
-    # Honest about the isolation caveat.
-    assert "admin" in out
 
 
 def test_setup_browser_honest_when_node_missing(monkeypatch, capsys):

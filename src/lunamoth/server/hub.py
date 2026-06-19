@@ -36,6 +36,7 @@ from typing import Any, Callable
 from .. import __version__
 from ..config import ROOT, content_dir
 from ..content.cards import CharacterCard, detect_language, looks_like_world_book, merge_world_into_card
+from ..content import image_providers as image_providers
 from ..content.imaging import CAP_ART, avatar_thumb_data_uri, compress_image_bytes
 from ..content.knobs import normalize_embodiment
 from ..session import sessions as S
@@ -89,7 +90,8 @@ def user_worlds_dir() -> Path:
 # matte_model: the active local matting (抠像) model id, set in Settings·生图 and
 # read by lunamoth.visuals.matte.selected_model(). Not a secret.
 _DEFAULT_FIELDS = ("provider", "base_url", "api_key", "model", "ui_lang", "ui_theme",
-                   "image_api_key", "image_model", "matte_model", "reasoning", "vision_model",
+                   "image_api_key", "image_provider", "image_model", "matte_model",
+                   "reasoning", "vision_model",
                    "card_model", "image_prompt_model", "model_context")
 # Default fields whose value is a secret: stripped from every public payload,
 # surfaced only as a has_<field> presence flag.
@@ -2678,6 +2680,23 @@ class HubDispatcher:
             )
         if method == "defaults.get":
             return _public_defaults(load_defaults())
+        if method == "image.catalog":
+            # The image-gen provider catalogue for Settings · 模型 / 提供商: each
+            # provider with its selectable models + whether a usable key is set
+            # (reusing the named provider keyring), and which one is active.
+            # OpenRouter additionally gets its LIVE image-output models grafted on
+            # top of the curated picks (its /models lists 9 image models — though
+            # not grok-imagine, which is why curated picks stay).
+            def _image_models(pid: str, base: str, key: str) -> list[dict]:
+                if pid != "openrouter":
+                    return []
+                out = []
+                for m in _catalogue(base, key):
+                    arch = m.get("architecture") or {}
+                    if "image" in (arch.get("output_modalities") or []):
+                        out.append({"id": m.get("id"), "label": m.get("name") or m.get("id")})
+                return out
+            return {"providers": image_providers.catalogue(_read_desktop_raw(), _image_models)}
         if method == "defaults.set":
             updates = {k: v for k, v in p.items() if k in _DEFAULT_FIELDS and isinstance(v, str)}
             before = load_defaults()

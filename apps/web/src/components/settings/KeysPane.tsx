@@ -22,10 +22,13 @@ interface ImageDefaults { has_image_key?: boolean; image_model?: string }
    base_url is editable later via a custom endpoint if a region/path differs. */
 const PRESETS: ReadonlyArray<{ label: string; provider: string; base_url: string; descKey: string }> = [
   { label: "OpenRouter", provider: "openrouter", base_url: "https://openrouter.ai/api/v1", descKey: "prov-openrouter-desc" },
+  { label: "OpenAI", provider: "openai", base_url: "https://api.openai.com/v1", descKey: "prov-openai-desc" },
   { label: "火山引擎", provider: "volcano", base_url: "https://ark.cn-beijing.volces.com/api/v3", descKey: "prov-volcano-desc" },
   { label: "混元", provider: "hunyuan", base_url: "https://api.hunyuan.cloud.tencent.com/v1", descKey: "prov-hunyuan-desc" },
   { label: "阿里云", provider: "dashscope", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", descKey: "prov-aliyun-desc" },
 ];
+
+interface ImageProviderRow { id: string; label: string; has_key: boolean; active: boolean }
 
 export function KeysPane() {
   const t = useT();
@@ -35,11 +38,20 @@ export function KeysPane() {
   const [addingCustom, setAddingCustom] = useState(false);
   const [cust, setCust] = useState({ name: "", base_url: "", key: "" });
   const [imgHas, setImgHas] = useState(false);
+  const [imgProviders, setImgProviders] = useState<ImageProviderRow[]>([]);
+
+  const refreshImage = useCallback(async () => {
+    try {
+      const r = await hub.call<{ providers: ImageProviderRow[] }>("image.catalog", {}, 15000);
+      setImgProviders(Array.isArray(r?.providers) ? r.providers : []);
+    } catch { /* status list is best-effort */ }
+  }, [hub]);
 
   const refresh = useCallback(async () => {
     try { setRows(await hub.call<KeyRowData[]>("keys.list", {}, 15000)); }
     catch (e) { deckToast(rpcErrText(t, e as { message?: string }), true); }
-  }, [hub, t]);
+    void refreshImage();
+  }, [hub, t, refreshImage]);
 
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
@@ -125,9 +137,27 @@ export function KeysPane() {
       <h2 className="prov-section">{t("prov-image-section")}</h2>
       <div className="sub">{t("prov-image-desc")}</div>
       <div className="prov-list">
-        <ImageRow has={imgHas} onSave={async (k) => {
-          setBusy("__img"); try { const d = await hub.call<ImageDefaults>("defaults.set", { image_api_key: k }, 15000); setImgHas(Boolean(d?.has_image_key)); deckToast(t("saved")); } catch (e) { deckToast(rpcErrText(t, e as { message?: string }), true); } finally { setBusy(""); }
-        }} busy={busy === "__img"} />
+        {imgProviders.map((p) => (
+          <div key={p.id} className={"prov-row" + (p.active ? " active" : "")}>
+            <span className={"prov-dot" + (p.active ? " on" : p.has_key ? " set" : "")} />
+            <div className="prov-meta">
+              <div className="prov-name">{p.label}{p.active && <span className="prov-badge">{t("img-active")}</span>}</div>
+              <div className="prov-desc">{p.has_key ? t("img-key-ready") : t("img-key-missing-row")}</div>
+            </div>
+            <div className="prov-key">
+              <span className={"okline" + (p.has_key ? "" : " bad")}>{p.has_key ? "✓" : "✗"}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="prov-image-legacy">
+        <div className="sub">{t("prov-image-ark-note")}</div>
+        <div className="prov-list">
+          <ImageRow has={imgHas} onSave={async (k) => {
+            setBusy("__img"); try { const d = await hub.call<ImageDefaults>("defaults.set", { image_api_key: k }, 15000); setImgHas(Boolean(d?.has_image_key)); await refreshImage(); deckToast(t("saved")); } catch (e) { deckToast(rpcErrText(t, e as { message?: string }), true); } finally { setBusy(""); }
+          }} busy={busy === "__img"} />
+        </div>
       </div>
     </div>
   );

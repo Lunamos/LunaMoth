@@ -26,6 +26,10 @@ describe("I18N strings map", () => {
   // 模型 pane = picker) added 5 (model-pane-sub, model-other, model-other-note,
   // model-other-ph, model-no-key) → 509; the picker redesign added 2 note keys
   // (model-note-flash, model-note-pro) → 511.
+  // Multi-provider image generation (Ark / DashScope / OpenAI / OpenRouter) added 7
+  // (img-active, img-key-ready, img-key-missing-row, prov-image-ark-note,
+  // img-unset, img-key-missing, img-prov-hint) → 555. (prov-openai-desc already
+  // existed; the OpenAI provider preset reuses it.)
   it("preserves the full key set from the source dict (555 keys)", () => {
     expect(Object.keys(I18N).length).toBe(555);
   });

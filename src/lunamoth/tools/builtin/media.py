@@ -18,11 +18,11 @@ from __future__ import annotations
 import time
 
 from ..registry import registry, tool_error, tool_result
-from ._image_gen import ark_generate, download_bytes, image_key, is_image_bytes
+from ._image_gen import generate_bytes, image_key
 
 
 def _check_image_key() -> bool:
-    """check_fn: the tool is only offered when an Ark image key is configured."""
+    """check_fn: the tool is only offered when the active image provider has a key."""
     return bool(image_key())
 
 
@@ -34,8 +34,8 @@ def generate_image(args, ctx) -> str:
         )
     if not image_key():
         return tool_error(
-            "no image key configured — set ARK_API_KEY (env) or "
-            "~/.lunamoth/ark_api_key before generating images."
+            "no image key configured — set an image provider key in Settings·提供商 "
+            "(or set ARK_API_KEY) before generating images."
         )
 
     prompt = str(args.get("prompt") or "").strip()
@@ -48,17 +48,9 @@ def generate_image(args, ctx) -> str:
         path = f"works/image-{int(time.time())}.png"
 
     try:
-        urls = ark_generate(prompt, size)
-        if not urls:
-            return tool_error("image generation returned no result")
-        data = download_bytes(urls[0])
-        # Don't save a non-image body (e.g. an error page returned at HTTP 200)
-        # as a fake ".png" and report success — reject it as a visible failure.
-        if not is_image_bytes(data):
-            return tool_error(
-                "the generation endpoint did not return an image "
-                "(got a non-image response); nothing was saved"
-            )
+        # Dispatches to the active provider's adapter; returns validated image
+        # bytes or raises (no result / a non-image body surface as a visible error).
+        data = generate_bytes(prompt, size)
         saved = ctx.sandbox.write_bytes(path, data)
     except Exception as e:  # noqa: BLE001 — visible failure, never fake success
         return tool_error(str(e))

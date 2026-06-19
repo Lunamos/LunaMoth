@@ -17,14 +17,19 @@ THE #1 FOOT-GUN (replicated here): capture stdout/stderr to TEMP FILES, never
 pipes. agent-browser spawns a background daemon that inherits fds; with pipes
 ``communicate()`` never sees EOF and hangs to timeout every call.
 
-OS-JAIL WARNING (flagged loudly): a real Chromium will almost certainly NOT
-launch under LunaMoth's default ``sandbox`` isolation (macOS sandbox-exec /
-Linux bwrap) — namespace creation, /dev/shm, socket dirs, and process spawn are
-blocked. The browser toolpack realistically needs ``admin``
-isolation plus ``--no-sandbox`` (this module injects
-``AGENT_BROWSER_ARGS=--no-sandbox,--disable-dev-shm-usage`` when running as root
-or under AppArmor userns restrictions). Treat "browser under sandbox-exec/bwrap"
-as open R&D, not a given.
+BROWSER UNDER THE SANDBOX (the browser is a first-class tool even when jailed —
+owner 2026-06-19): a real Chromium DOES run under LunaMoth's default ``sandbox``
+isolation, via a browser-specific jail (``session.isolation`` ``browser=True``).
+The trick: Chromium can't nest its own sandbox inside our OS jail, so we pass
+``--no-sandbox`` (auto-injected below whenever isolation != admin) and let the
+OUTER jail be the only boundary — an inverted profile that allows by default but
+confines writes to the workspace + the temp dirs Chrome scratches in (its
+user-data-dir + ProcessSingleton socket land in the per-user Darwin temp; the
+agent-browser socket in /tmp) and keeps the secret home unreadable. The macOS
+path is validated end-to-end (2026-06-19); the Linux bwrap/Landlock variants are
+implemented on the same principle but still want validation on a real Linux host
+(see docs/OPEN-WORK.md). ``admin`` isolation also works (no jail; --no-sandbox
+only when root/AppArmor).
 
 LunaMoth adaptation: hermes reaches a global subprocess layer keyed by task_id;
 LunaMoth is one-process-one-chara, so the *session manager* is an ephemeral
@@ -149,6 +154,18 @@ def chromium_installed() -> bool:
         _cached_chromium_installed = True
         return True
 
+    # agent-browser's OWN managed browser (`agent-browser install` puts a
+    # chrome-<version>/chrome under ~/.agent-browser/browsers — NOT a Playwright
+    # cache). This is the install path the deploy requirements set up.
+    ab_browsers = Path.home() / ".agent-browser" / "browsers"
+    try:
+        for entry in ab_browsers.iterdir():
+            if entry.name.startswith(("chrome-", "chromium-", "chrome_", "chromium_")):
+                _cached_chromium_installed = True
+                return True
+    except OSError:
+        pass
+
     for root in _chromium_search_roots():
         if not root or not os.path.isdir(root):
             continue
@@ -163,6 +180,53 @@ def chromium_installed() -> bool:
 
     _cached_chromium_installed = False
     return False
+
+
+def ensure_crashpad_db_fix() -> bool:
+    """Shim agent-browser's bundled ``chrome_crashpad_handler`` so it can't kill
+    Chrome under our OS jail.
+
+    Chrome-for-Testing headless sometimes spawns the crashpad handler WITHOUT a
+    ``--database`` argument; the handler then prints "--database is required" and
+    EXITS, Chrome treats the handler death as fatal and exits early ("Chrome
+    exited early without DevToolsActivePort"). Seen under the Linux **Landlock**
+    tier (Docker). We replace the handler with a tiny shim that injects a writable
+    ``--database`` when Chrome omits one (and passes through otherwise — so on
+    bwrap/macOS, where Chrome supplies its own, nothing changes).
+
+    Idempotent (keeps the real handler as ``*.real``); safe to call on every
+    ``setup browser``. Returns True if a shim is in place after the call."""
+    done = False
+    try:
+        # rglob: the handler is top-level on Linux but nested inside the .app
+        # bundle on macOS (…/Google Chrome for Testing.app/Contents/Frameworks/
+        # …/Helpers/chrome_crashpad_handler).
+        handlers = [h for h in (Path.home() / ".agent-browser" / "browsers").rglob("chrome_crashpad_handler")
+                    if not h.name.endswith(".real")]
+    except OSError:
+        return False
+    for h in handlers:
+        real = h.with_suffix(h.suffix + ".real") if h.suffix else Path(str(h) + ".real")
+        try:
+            if real.exists():
+                done = True  # already shimmed
+                continue
+            h.rename(real)
+            shim = (
+                "#!/bin/bash\n"
+                "# LunaMoth shim: inject a writable --database when Chrome omits it\n"
+                "# (Chrome-for-Testing headless does, which kills Chrome under the jail).\n"
+                'case "$*" in\n'
+                f'  *--database=*) exec "{real}" "$@" ;;\n'
+                f'  *) mkdir -p /tmp/lunamoth-crashpad 2>/dev/null; exec "{real}" --database=/tmp/lunamoth-crashpad "$@" ;;\n'
+                "esac\n"
+            )
+            h.write_text(shim, encoding="utf-8")
+            h.chmod(0o755)
+            done = True
+        except OSError:
+            pass
+    return done
 
 
 def is_browser_available() -> bool:
@@ -262,7 +326,7 @@ def _needs_sandbox_bypass() -> bool:
 
 
 def _build_command_string(cli: str, session_name: str, command: str,
-                          args: list[str], socket_dir: str) -> str:
+                          args: list[str], socket_dir: str, isolation: str = "sandbox") -> str:
     """Build the shell command string for ctx.run_terminal. Env facts the
     daemon needs are exported inline (run_terminal takes one shell string, so
     we can't pass an env dict). Everything is shell-quoted."""
@@ -278,10 +342,15 @@ def _build_command_string(cli: str, session_name: str, command: str,
         f"AGENT_BROWSER_SOCKET_DIR={shlex.quote(socket_dir)}",
         f"AGENT_BROWSER_IDLE_TIMEOUT_MS={_BROWSER_IDLE_TIMEOUT_SECONDS * 1000}",
     ]
+    # Chromium can't nest its own sandbox inside our OS jail (bwrap/seatbelt), so
+    # under `sandbox` isolation we MUST pass --no-sandbox — the outer jail is the
+    # real boundary (writes confined to workspace+temp, secret home unreadable;
+    # verified macOS 2026-06-19). Under `admin` only root/AppArmor needs it.
+    needs_bypass = (isolation or "sandbox").lower() != "admin" or _needs_sandbox_bypass()
     if (not os.environ.get("AGENT_BROWSER_ARGS")
             and not os.environ.get("AGENT_BROWSER_CHROME_FLAGS")
-            and _needs_sandbox_bypass()):
-        env_exports.append("AGENT_BROWSER_ARGS=--no-sandbox,--disable-dev-shm-usage")
+            and needs_bypass):
+        env_exports.append("AGENT_BROWSER_ARGS=--no-sandbox,--disable-dev-shm-usage,--disable-gpu")
 
     return " ".join(env_exports) + " " + cmd
 
@@ -330,7 +399,11 @@ def run_browser_command(ctx, task_id: str, command: str,
     stdout_path = os.path.join(socket_dir, f"_stdout_{command}")
     stderr_path = os.path.join(socket_dir, f"_stderr_{command}")
 
-    base_cmd = _build_command_string(cli, session_name, command, args, socket_dir)
+    try:
+        isolation = ctx.isolation()
+    except Exception:  # noqa: BLE001 — defensive: fall back to the jailed default
+        isolation = "sandbox"
+    base_cmd = _build_command_string(cli, session_name, command, args, socket_dir, isolation)
     # Redirect to temp files; do not pipe. </dev/null detaches stdin so an
     # inherited daemon fd can't keep the parent shell open.
     full_cmd = (
@@ -339,7 +412,8 @@ def run_browser_command(ctx, task_id: str, command: str,
     )
 
     try:
-        ctx.run_terminal(full_cmd, timeout=timeout)
+        # browser=True selects the Chromium-capable jail (see session.isolation).
+        ctx.run_terminal(full_cmd, timeout=timeout, browser=True)
     except Exception as e:  # noqa: BLE001 — surface as a tool failure, never raise
         logger.warning("browser '%s' run_terminal error: %s", command, e)
         return {"success": False, "error": f"Command failed: {e}"}
