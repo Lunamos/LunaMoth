@@ -58,6 +58,7 @@ export const I18N = {
   "tab-terminal": ["终端", "Terminal"],
   "tab-home": ["主页", "Homepage"],
   "home-iframe-title": ["个人主页", "Personal website"],
+  "home-open-full": ["打开完整页面", "Open full page"],
   "st-creating": ["创作中", "Creating"],
   "st-resting": ["休息", "Resting"],
   "st-connecting": ["连接中…", "Connecting…"],

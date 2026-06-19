@@ -12,6 +12,12 @@
  * iframe's opaque origin can't read it, so the cookie path is the safe one. By
  * the time any chara tab is reachable the app has booted and the cookie is set,
  * so there is no mint race.
+ *
+ * A top-right button opens the homepage full in a NEW TAB, with
+ * "noopener,noreferrer" so the opened (same-origin, NOT sandboxed) page gets no
+ * window.opener handle back into the app. Chara JS still can't reach the RPC
+ * there because the route's CSP (connect-src/form-action 'none') applies
+ * top-level too, and the auth cookie is HttpOnly.
  */
 
 import { useT } from "../../i18n";
@@ -20,7 +26,15 @@ export default function Homepage({ name }: { name: string }) {
   const t = useT();
   const src = `/chara/${encodeURIComponent(name)}/home/index.html`;
   return (
-    <div className="chat-page on" id="page-home">
+    <div className="chat-page on" id="page-home" style={{ position: "relative" }}>
+      <button
+        type="button"
+        className="home-open-full"
+        title={t("home-open-full")}
+        onClick={() => window.open(src, "_blank", "noopener,noreferrer")}
+      >
+        {t("home-open-full")} ↗
+      </button>
       <iframe
         src={src}
         title={t("home-iframe-title")}

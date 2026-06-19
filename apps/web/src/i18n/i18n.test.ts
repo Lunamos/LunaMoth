@@ -34,9 +34,10 @@ describe("I18N strings map", () => {
   // (prov-image-ark-note, image-key-ph) → 553.
   // The personal-website feature (homepage tab + the two wake/create module
   // toggles replacing the embodiment grid) added 6 (tab-home, home-iframe-title,
-  // mod-roleplay, mod-roleplay-hint, mod-website, mod-website-hint) → 559.
-  it("preserves the full key set from the source dict (559 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(559);
+  // mod-roleplay, mod-roleplay-hint, mod-website, mod-website-hint), then the
+  // homepage "open full page" button added home-open-full → 560.
+  it("preserves the full key set from the source dict (560 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(560);
   });
 
   it("every value is a [zh, en] string tuple", () => {
