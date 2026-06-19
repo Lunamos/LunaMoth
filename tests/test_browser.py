@@ -65,6 +65,10 @@ def _always_available(monkeypatch):
     # and run_browser_command's pre-checks pass when not otherwise mocked.
     monkeypatch.setattr(drv, "find_agent_browser", lambda: "/usr/local/bin/agent-browser")
     monkeypatch.setattr(drv, "chromium_installed", lambda: True)
+    # Treat every http(s) host as a public, safe target so navigate's SSRF guard
+    # never touches real DNS in these tests. Dedicated SSRF/scheme coverage lives
+    # in test_browser_url_guard.py.
+    monkeypatch.setattr(browser, "is_safe_url", lambda url: True)
 
 
 # ---------------------------------------------------------------------------

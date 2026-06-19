@@ -108,6 +108,10 @@ class TranscriptStore:
     def __init__(self, path: Path):
         self.path = path
         self.available = True
+        # Cached current epoch — read once from disk and reused on every message
+        # write (epoch() is called twice per persisted message). None = not yet
+        # loaded; reset() (the one epoch-mutation point) refreshes it.
+        self._epoch_cache: int | None = None
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self._connect() as conn:
@@ -131,12 +135,16 @@ class TranscriptStore:
     def epoch(self) -> int:
         if not self.available:
             return 0
+        if self._epoch_cache is not None:
+            return self._epoch_cache
         try:
             with self._connect() as conn:
                 row = conn.execute("SELECT value FROM meta WHERE key='epoch'").fetchone()
-            return int(row[0]) if row else 0
+            self._epoch_cache = int(row[0]) if row else 0
         except (sqlite3.Error, OSError, ValueError):
+            # Don't cache a failed read — retry next call (transient lock etc.).
             return 0
+        return self._epoch_cache
 
     def reset(self) -> int:
         """Start a new epoch. Old messages stay on disk but are no longer loaded."""
@@ -150,8 +158,13 @@ class TranscriptStore:
                     "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                     (str(new),),
                 )
+            self._epoch_cache = new  # the one epoch-mutation point keeps the cache live
             return new
         except (sqlite3.Error, OSError):
+            # Write failed → the on-disk epoch is unchanged. Invalidate the cache
+            # so the next epoch() re-reads the true value rather than trusting a
+            # value we never managed to persist.
+            self._epoch_cache = None
             return new
 
     # ---- messages -------------------------------------------------------------------

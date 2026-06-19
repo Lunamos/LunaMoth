@@ -117,3 +117,11 @@ def test_error_null_is_not_a_failure():
     assert _is_error_json(json.dumps({"output": "started", "pid": 1, "error": None})) is False
     assert _is_error_json(json.dumps({"error": ""})) is False
     assert _is_error_json(json.dumps({"error": "real failure"})) is True
+    # Edges the classifier must hold (success/failure inferred from JSON shape):
+    assert _is_error_json(json.dumps({"ok": True, "data": 1})) is False  # no error key → success
+    assert _is_error_json("plain non-json string") is False             # not JSON → success
+    assert _is_error_json(json.dumps(["a", "b"])) is False              # JSON but not a dict
+    assert _is_error_json(json.dumps({"data": {"error": "nested"}})) is False  # only TOP-level error counts
+    # And the canonical helpers round-trip through the classifier correctly:
+    assert _is_error_json(tool_error("boom")) is True
+    assert _is_error_json(tool_result(ok=True, value=1)) is False

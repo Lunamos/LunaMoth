@@ -33,6 +33,17 @@ def _run_image_job(reg, ctx, job_id: str, prompt: str, size: str, path: str) -> 
     """Background worker: generate + save, then push a completion event onto the
     process registry's queue (the agent drains it at the next turn boundary). Never
     raises (it runs on a daemon thread) — a failure is reported, never fabricated."""
+    # Re-check the network at run time: the operator may have run /net off between
+    # submit and this (possibly minutes-later) call. Never make the HTTP request
+    # if the network is now off — report a failure instead.
+    if not ctx.network_on():
+        reg.completion_queue.put({
+            "type": "image_gen", "session_id": job_id, "status": "failed",
+            "error": "network turned off before generation ran (ask the operator "
+                     "for /net on, then retry)",
+            "prompt": prompt[:120],
+        })
+        return
     try:
         data = generate_bytes(prompt, size)
         saved = ctx.sandbox.write_bytes(path, data)

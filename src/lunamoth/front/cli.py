@@ -84,13 +84,10 @@ def _live_daemon_rpc(method: str, params: dict | None = None, timeout: float = 1
         return resp
     return None
 
-# session isolation level -> python tool execution backend
-_ISOLATION_TO_BACKEND = {"sandbox": "sandbox", "admin": "admin"}
-
-
 def _activate(meta: S.SessionMeta) -> None:
+    # meta.env() now carries LUNAMOTH_PY_BACKEND (derived from the session's
+    # isolation), so the jail backend is never re-derived here.
     os.environ.update(meta.env())
-    os.environ.setdefault("LUNAMOTH_PY_BACKEND", _ISOLATION_TO_BACKEND.get(meta.isolation, "sandbox"))
 
 
 def _needs_setup(meta: S.SessionMeta) -> bool:
@@ -108,8 +105,7 @@ def _start_daemon(meta: S.SessionMeta, patience: float | None = None) -> bool:
         return True
     if not meta.is_configured():
         return False
-    env = {**os.environ, **meta.env()}
-    env.setdefault("LUNAMOTH_PY_BACKEND", _ISOLATION_TO_BACKEND.get(meta.isolation, "sandbox"))
+    env = {**os.environ, **meta.env()}  # meta.env() carries LUNAMOTH_PY_BACKEND
     log = meta.daemon_log.open("ab")
     argv = [sys.executable, "-m", "lunamoth.front.terminal"]
     if patience is not None:

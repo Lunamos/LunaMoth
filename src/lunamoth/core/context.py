@@ -66,6 +66,18 @@ class ContextBuffer:
     # Called for every NEW message (not for restored history); the transcript
     # store hooks in here. Trimming only narrows the in-memory window.
     persist: "Callable[[dict], None] | None" = None
+    # Per-message token-estimate memo, keyed by id(msg). token_count() flattening
+    # + json.dumps(tool_calls) of every message on every call was O(n) work
+    # repeated inside trim()'s pop loop (→ O(K·n)) and again by compaction every
+    # turn. We cache the per-message estimate and rebuild the memo to EXACTLY the
+    # current messages on each token_count(), so:
+    #   * a message kept across the call reuses its cached estimate (the win);
+    #   * any externally-mutated/new message (compaction's `ctx.messages = …` and
+    #     `msgs[i] = {…}`, agent.py's `.messages.append`, commands.py's `.clear`)
+    #     is an id() miss and gets recomputed — no path can leave a stale value;
+    #   * an id() freed by a pop and reused by a fresh dict cannot return the old
+    #     estimate, because the memo is pruned to the current id set every call.
+    _tok_memo: "dict[int, int]" = field(default_factory=dict, repr=False, compare=False)
 
     def add(self, role: str, content: str, kind: str = "") -> None:
         msg: dict[str, Any] = {"role": role, "content": content}
@@ -134,12 +146,39 @@ class ContextBuffer:
             out.append(api_msg)
         return out
 
+    def _msg_tokens(self, msg: dict) -> int:
+        """Cached per-message estimate (the +2 envelope cost is included).
+
+        Keyed by id(msg): a hit means this exact dict object was counted before
+        and hasn't been replaced (compaction swaps in NEW dicts, which miss).
+        The estimate FORMULA is unchanged — only its recomputation is avoided.
+        """
+        key = id(msg)
+        val = self._tok_memo.get(key)
+        if val is None:
+            val = estimate_tokens(_msg_text(msg)) + 2
+            self._tok_memo[key] = val
+        return val
+
     def token_count(self) -> int:
-        return sum(estimate_tokens(_msg_text(m)) + 2 for m in self.messages)
+        total = 0
+        live: dict[int, int] = {}
+        for m in self.messages:
+            key = id(m)
+            v = live.get(key)
+            if v is None:
+                v = self._msg_tokens(m)
+                live[key] = v
+            total += v
+        # Prune the memo down to exactly the messages present right now so a
+        # later dict reusing a freed id() can never read a stale estimate.
+        self._tok_memo = live
+        return total
 
     def trim(self) -> None:
         target = max(0, self.max_tokens - self.trim_buffer_tokens)
-        while self.messages and self.token_count() > target:
+        total = self.token_count()  # also resyncs the memo to current messages
+        while self.messages and total > target:
             # After compaction messages[0] IS the kind="summary" row holding the
             # entire compressed past — trimming it would delete everything old
             # in one pop. Start at the first non-summary message; if only the
@@ -151,8 +190,16 @@ class ContextBuffer:
             if start >= len(self.messages):
                 break
             dropped = self.messages.pop(start)
+            total -= self._msg_tokens(dropped)  # subtract instead of full recount
             # Never strand tool results without the assistant call that made
             # them — the API rejects orphaned role:"tool" messages.
             if dropped.get("tool_calls"):
                 while start < len(self.messages) and self.messages[start].get("tool_call_id"):
-                    self.messages.pop(start)
+                    total -= self._msg_tokens(self.messages.pop(start))
+        # Drop freed ids accumulated by the pop loop so the memo can't grow with
+        # stale keys between full counts.
+        if self.messages:
+            live_ids = {id(m) for m in self.messages}
+            self._tok_memo = {k: v for k, v in self._tok_memo.items() if k in live_ids}
+        else:
+            self._tok_memo = {}

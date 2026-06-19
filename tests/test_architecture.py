@@ -116,6 +116,18 @@ def test_messaging_is_isolated_from_core_and_tools():
         assert not bad, f"{path} imports {bad} — messaging/ stays decoupled from core/tools/front"
 
 
+def test_server_imports_only_protocol_session_content():
+    """server/ (hub + supervisor + dispatch + transports) drives charas through
+    protocol/ (CharaHandle) and reads session/content data — it must NEVER import
+    core/ or tools/ directly (one process = one activated session; the hub never
+    hosts an agent). front/ is off-limits too (backend mustn't know the frontends)."""
+    for package, path in _modules():
+        if package != "server":
+            continue
+        bad = sorted(set(_internal_imports(path, package)) & {"core", "tools", "front"})
+        assert not bad, f"{path} imports {bad} — server/ goes through protocol/session/content only"
+
+
 def test_messaging_adapters_are_decoupled_from_each_other():
     """Each platform adapter is an island: it may share base/access/filters/text,
     but must not import a sibling adapter. gateway.py is the ONE composition root

@@ -132,4 +132,58 @@ def test_input_is_not_mutated():
     before = copy.deepcopy(msgs)
     out = apply_cache_control(msgs)
     assert msgs == before        # caller's list untouched
-    assert out is not msgs       # distinct deep copy
+    assert out is not msgs       # distinct list
+
+
+def test_marked_messages_are_copies_unmarked_are_shared():
+    # Copy-on-write contract: a message we annotate must be a deep copy (so the
+    # caller's original — including nested content lists — is never mutated), but
+    # an UNmarked message may be returned by reference (the perf win).
+    big = "x" * 50_000
+    msgs = [
+        {"role": "system", "content": "S"},
+        {"role": "user", "content": [{"type": "text", "text": "old"}]},  # unmarked (oldest)
+        {"role": "user", "content": "u1"},
+        {"role": "user", "content": "u2"},
+        {"role": "user", "content": [{"type": "text", "text": big}]},     # marked (last)
+    ]
+    before = copy.deepcopy(msgs)
+    out = apply_cache_control(msgs)
+    assert msgs == before                 # caller untouched, nested lists intact
+    # the oldest non-system message is unmarked → shared by reference (no copy)
+    assert out[1] is msgs[1]
+    # marked messages are fresh copies, not the caller's objects
+    assert out[0] is not msgs[0]
+    assert out[4] is not msgs[4]
+    assert out[4]["content"] is not msgs[4]["content"]
+
+
+def test_output_byte_identical_to_full_deepcopy_path():
+    # The optimized COW output must equal what the old `copy.deepcopy(whole list)`
+    # path produced — same markers in the same places.
+    msgs = [
+        {"role": "system", "content": "stable"},
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": [{"type": "text", "text": "u2a"},
+                                     {"type": "text", "text": "u2b"}]},
+        {"role": "system", "content": "env volatile"},
+    ]
+
+    def reference(api_messages, ttl="5m", native=False):
+        from lunamoth.core.cache import _apply_marker, _build_marker
+        m = copy.deepcopy(api_messages)
+        marker = _build_marker(ttl)
+        used = 0
+        if m and m[0].get("role") == "system":
+            _apply_marker(m[0], marker, native)
+            used += 1
+        non_sys = [i for i in range(len(m)) if m[i].get("role") != "system"]
+        for idx in non_sys[-(4 - used):]:
+            _apply_marker(m[idx], marker, native)
+        return m
+
+    for native in (False, True):
+        for ttl in ("5m", "1h"):
+            assert apply_cache_control(copy.deepcopy(msgs), ttl=ttl, native=native) \
+                == reference(msgs, ttl=ttl, native=native)

@@ -48,6 +48,12 @@ from typing import Any, Optional
 
 from ..registry import registry, tool_error
 from . import _browser_driver as drv
+from ._url_safety import is_safe_url
+
+# URL schemes a browser navigation may use. Everything else (file:, ftp:,
+# data:, chrome:, view-source:, …) is rejected — file:// in particular would
+# read host secrets, since the OS jail binds the whole host root read-only.
+_ALLOWED_SCHEMES = frozenset({"http", "https", "about"})
 
 # Secret-exfil guard regex — ported from hermes agent/redact._PREFIX_RE /
 # _PREFIX_PATTERNS. A prompt injection could trick the chara into navigating to
@@ -127,9 +133,45 @@ def _is_always_blocked_url(url: str) -> bool:
 
 def _normalize_url(url: str) -> str:
     url = (url or "").strip()
-    if url and not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", url) and not url.startswith("about:"):
+    # Prepend https:// only to a bare host (no scheme at all). A URL that already
+    # carries a scheme — even a schemeless-`//` one like ``data:`` or
+    # ``view-source:`` — is left intact so the scheme guard sees its real scheme
+    # (prefixing https:// would mask ``data:``/``view-source:`` as https).
+    if url and not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", url):
         url = "https://" + url
     return url
+
+
+def _scheme_of(url: str) -> str:
+    try:
+        return (urllib.parse.urlparse(url).scheme or "").lower()
+    except ValueError:
+        return ""
+
+
+def _url_guard_error(url: str) -> Optional[str]:
+    """Return a tool-error reason if *url* must not be navigated to, else None.
+
+    Two gates: (1) a scheme allow-list (http/https/about only) — rejects
+    file:, ftp:, data:, chrome:, etc. which could read host secrets or escape
+    the web sandbox; (2) the SSRF/private-range check (``is_safe_url``) which
+    resolves DNS and blocks loopback, private, link-local, and cloud-metadata
+    targets. ``about:`` URLs (e.g. about:blank) skip the network check."""
+    scheme = _scheme_of(url)
+    if scheme == "about":
+        return None
+    if scheme not in _ALLOWED_SCHEMES:
+        return (
+            f"Blocked: URL scheme '{scheme or '(none)'}' is not allowed. Only "
+            "http, https, and about: URLs may be opened in the browser."
+        )
+    if not is_safe_url(url):
+        return (
+            "Blocked: URL target resolves to a private, loopback, link-local, "
+            "or internal address (or could not be resolved). Only public "
+            "addresses may be reached."
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +492,12 @@ def browser_navigate(args: dict, ctx) -> str:
         return _dumps({"success": False,
                        "error": "Blocked: URL targets a cloud metadata endpoint"})
 
+    # Scheme allow-list (reject file:/ftp:/data:/chrome:/…) + SSRF/private-range
+    # guard (DNS-resolves and blocks loopback/private/link-local/metadata).
+    guard = _url_guard_error(url)
+    if guard:
+        return _dumps({"success": False, "error": guard})
+
     info = drv._ctx_sessions(ctx).get_or_create(_TASK_ID)
     is_first_nav = info.get("first_nav", True)
     info["first_nav"] = False
@@ -469,6 +517,15 @@ def browser_navigate(args: dict, ctx) -> str:
         drv.run_browser_command(ctx, _TASK_ID, "open", ["about:blank"], timeout=10)
         return _dumps({"success": False,
                        "error": "Blocked: redirect landed on a cloud metadata endpoint"})
+
+    # Post-redirect scheme + SSRF re-check: a redirect could land on file:// or a
+    # private/internal address that the pre-flight check never saw.
+    if final_url and final_url != url:
+        guard = _url_guard_error(final_url)
+        if guard:
+            drv.run_browser_command(ctx, _TASK_ID, "open", ["about:blank"], timeout=10)
+            return _dumps({"success": False,
+                           "error": f"Blocked: redirect target rejected. {guard}"})
 
     response: dict[str, Any] = {"success": True, "url": final_url, "title": title}
 
@@ -758,6 +815,26 @@ def browser_cdp(args: dict, ctx) -> str:
     params = args.get("params") or {}
     if not isinstance(params, dict):
         return tool_error(f"'params' must be an object/dict, got {type(params).__name__}")
+
+    # Raw CDP can navigate (Page.navigate / Page.open), bypassing browser_navigate's
+    # scheme + SSRF guard. Screen any navigation verb's url param through the same
+    # checks so file:// / private-range targets can't sneak in via CDP.
+    if method.lower() in {"page.navigate", "page.open"}:
+        cdp_url = _normalize_url(str(params.get("url") or ""))
+        if not cdp_url:
+            return tool_error(
+                f"'{method}' requires a 'url' in params; use browser_navigate "
+                "for normal navigation (it is the guarded path)."
+            )
+        if _has_secret(cdp_url) or _is_always_blocked_url(cdp_url):
+            return tool_error(
+                "Blocked: CDP navigation URL contains a secret or targets a "
+                "cloud metadata endpoint. Use browser_navigate instead."
+            )
+        guard = _url_guard_error(cdp_url)
+        if guard:
+            return tool_error(f"{guard} Use browser_navigate for guarded navigation.")
+
     target_id = args.get("target_id")
     frame_id = args.get("frame_id")
     try:

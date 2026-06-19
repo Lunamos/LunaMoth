@@ -30,6 +30,32 @@ def test_reset_starts_new_epoch_but_keeps_history(tmp_path):
     assert total == 2
 
 
+def test_epoch_is_cached_and_invalidated_on_reset(tmp_path):
+    """epoch() is hit twice per persisted message; it must be cached (one disk
+    read), stay stable across many writes, and update correctly after reset()."""
+    t = TranscriptStore(tmp_path / "t.db")
+    e0 = t.epoch()
+    # Stable across many message writes — the value never drifts mid-epoch.
+    for i in range(50):
+        t.append("user", f"m{i}")
+        assert t.epoch() == e0
+    # The cache is actually populated (not re-querying every call).
+    assert t._epoch_cache == e0
+
+    # reset() advances the epoch AND keeps the cache live (no stale value).
+    new = t.reset()
+    assert new == e0 + 1
+    assert t.epoch() == new
+    assert t._epoch_cache == new
+
+    # The cached value matches what a fresh store reads from disk (correctness).
+    fresh = TranscriptStore(t.path)
+    assert fresh.epoch() == new
+    # And the post-reset epoch is the one writes land in.
+    t.append("user", "after reset")
+    assert TranscriptStore(t.path).load() == [{"role": "user", "content": "after reset"}]
+
+
 def test_structured_messages_roundtrip(tmp_path):
     t = TranscriptStore(tmp_path / "t.db")
     call = {"role": "assistant", "content": None, "tool_calls": [

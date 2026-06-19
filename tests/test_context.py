@@ -93,6 +93,82 @@ def test_trim_after_summary_never_strands_tool_results():
     assert all(not m.get("tool_call_id") for m in c.messages)
 
 
+# ---- token_count memoization (perf optimization, must stay byte-exact) --------
+
+from lunamoth.core.context import _msg_text, estimate_tokens  # noqa: E402
+
+
+def _fresh_count(messages):
+    """The original from-scratch formula — the memoized count must always match."""
+    return sum(estimate_tokens(_msg_text(m)) + 2 for m in messages)
+
+
+def test_token_count_matches_fresh_recompute_across_mutations():
+    c = ContextBuffer(max_tokens=10**9, trim_buffer_tokens=0)  # never trims
+    c.add("user", "hello world")
+    assert c.token_count() == _fresh_count(c.messages)
+
+    # add more
+    for i in range(5):
+        c.add("assistant", f"reply {i} " + "z" * 50)
+    assert c.token_count() == _fresh_count(c.messages)
+
+    # tool_calls message (json.dumps path)
+    c.add_message({"role": "assistant", "content": "",
+                   "tool_calls": [{"id": "c1", "type": "function",
+                                   "function": {"name": "terminal", "arguments": "{}"}}]})
+    c.add_message({"role": "tool", "tool_call_id": "c1", "content": "x" * 200})
+    assert c.token_count() == _fresh_count(c.messages)
+
+
+def test_token_count_consistent_after_trim_pops():
+    c = ContextBuffer(max_tokens=60, trim_buffer_tokens=0)
+    for i in range(30):
+        c.add("user" if i % 2 == 0 else "assistant", f"msg {i} " + "w" * 40)
+    # after add-driven trims, the memoized count equals a fresh recompute
+    assert c.token_count() == _fresh_count(c.messages)
+    # an explicit extra trim is a no-op on the count's correctness
+    c.trim()
+    assert c.token_count() == _fresh_count(c.messages)
+
+
+def test_token_count_consistent_after_external_message_swap():
+    # compaction does `ctx.messages = [...]` and `msgs[i] = {...}` outside the
+    # class — a NEW dict at a possibly-reused id() must be recounted, never read
+    # stale from the memo.
+    c = ContextBuffer(max_tokens=10**9, trim_buffer_tokens=0)
+    for i in range(4):
+        c.add("assistant", f"long {i} " + "q" * 100)
+    c.token_count()  # warm the memo
+    # swap one message for a much shorter one (mimics prune_live_tool_outputs)
+    c.messages[1] = {"role": "assistant", "content": "tiny"}
+    assert c.token_count() == _fresh_count(c.messages)
+    # full reassignment (mimics compaction's summary + tail rewrite)
+    c.messages = [{"role": "system", "content": "summary", "kind": "summary"},
+                  {"role": "user", "content": "fresh tail"}]
+    assert c.token_count() == _fresh_count(c.messages)
+
+
+def test_token_count_consistent_after_clear_and_append():
+    # commands.py clears in place; agent.py appends in place.
+    c = ContextBuffer(max_tokens=10**9, trim_buffer_tokens=0)
+    c.add("user", "one")
+    c.token_count()
+    c.messages.clear()
+    assert c.token_count() == 0 == _fresh_count(c.messages)
+    c.messages.append({"role": "system", "content": "volatile env", "kind": "todo"})
+    assert c.token_count() == _fresh_count(c.messages)
+
+
+def test_token_count_restore_resets_memo():
+    c = ContextBuffer(max_tokens=10**9, trim_buffer_tokens=0)
+    c.add("user", "throwaway " + "v" * 300)
+    c.token_count()
+    c.restore([{"role": "user", "content": "restored"},
+               {"role": "assistant", "content": "ok " + "p" * 80}])
+    assert c.token_count() == _fresh_count(c.messages)
+
+
 @pytest.fixture
 def agent(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "mock")

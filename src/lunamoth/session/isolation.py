@@ -28,12 +28,17 @@ it was born with; re-open the shell to pick up changes.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import sys
 import tempfile
 from pathlib import Path
 from typing import Sequence
+
+# Warn the operator at most once per process when /net off can't actually be
+# enforced under the Landlock tier (below) — the note alone only reaches the model.
+_LANDLOCK_NETOFF_WARNED = False
 
 # Don't hand the agent our own provider/credentials through the environment.
 # Applies to EVERY child we spawn — one-shot commands and interactive shells.
@@ -360,6 +365,18 @@ def build_jail_command(
                 # Honest: Landlock ABI v1 confines the filesystem only — it cannot
                 # gate the network, so `/net off` is NOT enforced under this tier.
                 note = "\n[lunamoth: Landlock jail — filesystem confined, but network not gated (ABI v1)]"
+                # The note above only reaches the MODEL. Surface it to the OPERATOR
+                # too (once per process) — they set /net off believing the agent is
+                # offline, but under this tier it is still network-capable.
+                global _LANDLOCK_NETOFF_WARNED
+                if not _LANDLOCK_NETOFF_WARNED:
+                    _LANDLOCK_NETOFF_WARNED = True
+                    logging.getLogger("lunamoth.isolation").warning(
+                        "isolation=sandbox is using the Landlock tier, which (ABI v1) "
+                        "cannot gate the network: '/net off' is NOT enforced and this "
+                        "chara remains network-capable. Run on a bwrap-capable host to "
+                        "enforce network-off."
+                    )
             return cmd, str(workspace), note
         raise JailUnavailableError(
             "sandbox isolation requested but no jail is available "

@@ -117,21 +117,35 @@ def apply_cache_control(
     mutated — only the returned copy carries markers. Trailing volatile-tail
     ``system`` messages are skipped by the non-system filter, so the 3
     conversational breakpoints land on real user/assistant/tool turns.
+
+    Copy-on-write: we shallow-copy the LIST, then deep-copy ONLY the ≤4 messages
+    we actually annotate. A tool result can be 100KB+, so deep-copying the whole
+    list every tool step (the old ``copy.deepcopy``) was wasteful — and needless,
+    since the other messages are returned by reference unchanged. The output is
+    byte-identical to before; the caller's messages (and any nested object they
+    contain) are still never mutated, because every message _apply_marker touches
+    is a fresh deep copy.
     """
-    messages = copy.deepcopy(api_messages)
-    if not messages:
-        return messages
+    if not api_messages:
+        return []
 
     marker = _build_marker(ttl)
+
+    # Indices we will mark: the leading system prefix + the last (4 - used)
+    # non-system messages. Compute first so we deep-copy ONLY those.
+    to_mark: list[int] = []
     used = 0
-
-    if messages[0].get("role") == "system":
-        _apply_marker(messages[0], marker, native)
+    if api_messages[0].get("role") == "system":
+        to_mark.append(0)
         used += 1
-
     remaining = 4 - used
-    non_sys = [i for i in range(len(messages)) if messages[i].get("role") != "system"]
-    for idx in non_sys[-remaining:]:
-        _apply_marker(messages[idx], marker, native)
+    non_sys = [i for i in range(len(api_messages)) if api_messages[i].get("role") != "system"]
+    to_mark.extend(non_sys[-remaining:])
+
+    messages = list(api_messages)  # shallow: unmarked messages stay by reference
+    for idx in to_mark:
+        msg = copy.deepcopy(messages[idx])  # deep-copy only what we mutate
+        _apply_marker(msg, marker, native)
+        messages[idx] = msg
 
     return messages

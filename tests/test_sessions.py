@@ -71,6 +71,17 @@ def test_env_points_at_session():
     assert env["LUNAMOTH_SANDBOX"].endswith("sessions/envy/sandbox")
 
 
+def test_env_carries_py_backend_so_callers_never_rederive_the_jail():
+    """The isolation→backend map has ONE owner now (sessions); env() is the
+    complete activation interface and emits LUNAMOTH_PY_BACKEND itself, so a
+    caller can never drift by forgetting to set the jail."""
+    assert S.isolation_to_backend("sandbox") == "sandbox"
+    assert S.isolation_to_backend("admin") == "admin"
+    assert S.isolation_to_backend("anything-unknown") == "sandbox"  # safe default = jailed
+    assert S.create_session("jailed", isolation="sandbox").env()["LUNAMOTH_PY_BACKEND"] == "sandbox"
+    assert S.create_session("trusted", isolation="admin").env()["LUNAMOTH_PY_BACKEND"] == "admin"
+
+
 def test_cli_new_ls_rm(temp_home):
     def run(*argv):
         return subprocess.run(

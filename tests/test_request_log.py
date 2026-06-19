@@ -61,6 +61,9 @@ def test_request_log_caps_at_200_lines(agent):
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         path.unlink()
+    # The trim is amortized (every _REQUEST_LOG_TRIM_EVERY appends); start the
+    # counter at the cusp so the very next batch crossing the cap trims to 200.
+    agent_mod._request_log_appends = 0
     for i in range(250):
         agent_mod._append_request_log("send", [f"sys{i}"], [{"role": "user", "content": str(i)}], [], "m")
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -77,3 +80,66 @@ def test_request_log_never_raises(agent, monkeypatch):
 
     # A non-serializable payload must be swallowed, not raised.
     agent_mod._append_request_log("send", ["sys"], [{"role": "user", "content": object()}], [], "m")
+
+
+def test_request_log_redacts_secrets(agent):
+    """A secret flowing through context (this file is bundled into the export
+    ZIP) must be masked before it ever lands on disk — never cleartext."""
+    from lunamoth.core import agent as agent_mod
+
+    path = _requests_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+    secret = "sk-ant-SUPERSECRETKEY0123456789abcdef"
+    agent_mod._append_request_log(
+        "send", ["use this key"],
+        [{"role": "user", "content": f"my api key is {secret}"}], [], "m")
+    raw = path.read_text(encoding="utf-8")
+    assert secret not in raw  # the literal key never appears
+    # The record is still valid JSON with the surrounding structure intact.
+    rec = json.loads(raw.splitlines()[-1])
+    assert rec["kind"] == "send"
+    assert "my api key is" in str(rec["messages"][0]["content"])
+
+
+def test_request_log_stays_bounded_after_many_appends(agent):
+    """Many appends keep the file bounded near the cap (no unbounded growth),
+    and the file is never corrupted (every line parses) under repeated writes."""
+    from lunamoth.core import agent as agent_mod
+
+    path = _requests_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+    agent_mod._request_log_appends = 0  # deterministic counter start
+    for i in range(1000):
+        agent_mod._append_request_log(
+            "send", [f"sys{i}"], [{"role": "user", "content": str(i)}], [], "m")
+    lines = path.read_text(encoding="utf-8").splitlines()
+    # Bounded near the cap: never grows without limit. The amortized trim allows
+    # up to cap + trim-interval before the next sweep.
+    assert len(lines) <= agent_mod._REQUEST_LOG_MAX_LINES + agent_mod._REQUEST_LOG_TRIM_EVERY
+    assert len(lines) >= agent_mod._REQUEST_LOG_MAX_LINES
+    # No corruption: every line is valid JSON, and the newest record survived.
+    parsed = [json.loads(ln) for ln in lines]
+    assert parsed[-1]["messages"][0]["content"] == "999"
+    # Records are strictly increasing (the atomic os.replace never scrambles order).
+    nums = [int(p["messages"][0]["content"]) for p in parsed]
+    assert nums == sorted(nums)
+
+
+def test_request_log_no_temp_files_left_behind(agent):
+    """The atomic trim must not leave .tmp scratch files in the logs dir."""
+    from lunamoth.core import agent as agent_mod
+
+    path = _requests_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+    agent_mod._request_log_appends = 0
+    for i in range(600):
+        agent_mod._append_request_log(
+            "send", ["s"], [{"role": "user", "content": str(i)}], [], "m")
+    leftovers = [p.name for p in path.parent.glob("requests.jsonl.tmp*")]
+    assert leftovers == []

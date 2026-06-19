@@ -30,6 +30,16 @@ from pathlib import Path
 
 ISOLATION_LEVELS = ("sandbox", "admin")  # sandbox (OS jail) | admin (no jail, trusted operator)
 
+# The ONE owner of the isolation→python-backend mapping (which jail a chara's
+# tools run under). Previously hand-copied in supervisor.py, hub.py and cli.py —
+# a safety-relevant fact that drifts if one copy is missed. Resolve it HERE and
+# expose it through SessionMeta.env() so callers never re-derive it.
+ISOLATION_TO_BACKEND = {"sandbox": "sandbox", "admin": "admin"}
+
+
+def isolation_to_backend(isolation: str) -> str:
+    return ISOLATION_TO_BACKEND.get(isolation, "sandbox")
+
 # Legacy isolation values mapped on read so old session configs keep working.
 _LEGACY_ISOLATION = {"dir": "admin", "local": "admin", "docker": "admin"}
 
@@ -109,11 +119,15 @@ class SessionMeta:
         self.meta_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def env(self) -> dict[str, str]:
-        """Environment that points the runtime at this session."""
+        """Environment that points the runtime at this session — the COMPLETE
+        activation interface, including the python-backend (jail) derived from
+        this session's isolation. Callers use this verbatim; they must not
+        re-derive LUNAMOTH_PY_BACKEND themselves (that drift is a safety bug)."""
         return {
             "LUNAMOTH_CONFIG_DIR": str(self.root),
             "LUNAMOTH_SANDBOX": str(self.sandbox_dir),
             "LUNAMOTH_SESSION": self.name,
+            "LUNAMOTH_PY_BACKEND": isolation_to_backend(self.isolation),
         }
 
     def running_pid(self) -> int | None:

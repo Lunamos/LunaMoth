@@ -417,6 +417,18 @@ class JsonRpcDispatcher:
         if superseding is not None and superseding is not threading.current_thread():
             superseding.join(timeout=10.0)
         with self._lock:
+            # TOCTOU guard: we dropped the lock to join, so another superseder
+            # (the transport thread vs. this messaging-relay thread) may have
+            # claimed the slot meanwhile. Claim only if the slot is free, or if
+            # the idle turn we interrupted is still the holder (join timed out —
+            # we force the takeover). Anyone ELSE holding it is a real two-turn
+            # collision; refuse rather than run two turns on one shared agent.
+            if self._closed:
+                raise RpcError(-32002, "session is closing")
+            if (self._is_streaming_locked()
+                    and self._stream_thread is not superseding
+                    and self._stream_thread is not threading.current_thread()):
+                raise RpcError(-32011, "a stream is already in flight")
             self._stream_interrupt.clear()
             self._stream_thread = threading.current_thread()
             self._stream_kind = kind
@@ -475,6 +487,12 @@ class JsonRpcDispatcher:
         if superseding is not None:
             superseding.join(timeout=10.0)  # let the idle turn wind down + clear
         with self._lock:
+            # TOCTOU guard (see run_stream_sync): re-check after the unlocked join.
+            # Claim only if the slot is free or still held by the idle turn we
+            # interrupted (timed-out takeover); otherwise another turn won the slot.
+            if (self._is_streaming_locked()
+                    and self._stream_thread is not superseding):
+                raise RpcError(-32011, "a stream is already in flight")
             self._stream_interrupt.clear()
             thread = threading.Thread(
                 target=self._stream_worker,

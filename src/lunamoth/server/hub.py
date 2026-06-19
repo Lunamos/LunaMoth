@@ -45,9 +45,6 @@ from .dispatch import RpcError, error_response, ok_response, _normalize_request
 
 _log = logging.getLogger("lunamoth.server.hub")
 
-# session isolation level -> python tool execution backend (mirror of front/cli.py)
-_ISOLATION_TO_BACKEND = {"sandbox": "sandbox", "admin": "admin"}
-
 # Models with a reputation for prose ("书写 ★"); heuristic, substring match.
 _WRITING_STAR = ("claude", "deepseek-v4", "gpt-5", "gemini-2", "kimi", "grok-4", "qwen3-max")
 
@@ -1973,7 +1970,7 @@ def wake(card_path: str, name: str = "", isolation: str = "sandbox",
         "reasoning": str(defaults.get("reasoning") or cfg["reasoning"]),
         "vision_model": str(defaults.get("vision_model") or ""),
         "character_path": str(frozen),
-        "py_backend": _ISOLATION_TO_BACKEND.get(meta.isolation, "sandbox"),
+        "py_backend": S.isolation_to_backend(meta.isolation),
     })
     cfg.pop("api_key", None)
     if toolpack:
@@ -2039,8 +2036,7 @@ def start_daemon(meta: S.SessionMeta, patience: float | None = None) -> bool:
         return True
     if not meta.is_configured():
         return False
-    env = {**os.environ, **meta.env()}
-    env.setdefault("LUNAMOTH_PY_BACKEND", _ISOLATION_TO_BACKEND.get(meta.isolation, "sandbox"))
+    env = {**os.environ, **meta.env()}  # meta.env() carries LUNAMOTH_PY_BACKEND
     log = meta.daemon_log.open("ab")
     argv = [sys.executable, "-m", "lunamoth.front.terminal"]
     if patience is not None:

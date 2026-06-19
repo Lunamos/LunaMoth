@@ -56,7 +56,6 @@ _PREAUTH_PREFIXES = ("/assets/",)
 
 def _is_preauth_path(path: str) -> bool:
     return path in _PREAUTH_EXACT or any(path.startswith(p) for p in _PREAUTH_PREFIXES)
-ISOLATION_TO_BACKEND = {"sandbox": "sandbox", "admin": "admin"}
 
 # Whole-frame resize escape consumed server-side by the PTY endpoint
 # (hermes shape): \x1b[RESIZE:<cols>;<rows>] — full-match only.
@@ -591,8 +590,7 @@ class CharaChild:
                 self.state, self.detail = "error", f"legacy daemon is running (pid {daemon})"
                 self._emit_life(LifeState("backoff", detail=self.detail))
                 return self.status()
-            env = {**os.environ, **meta.env()}
-            env.setdefault("LUNAMOTH_PY_BACKEND", ISOLATION_TO_BACKEND.get(meta.isolation, "sandbox"))
+            env = {**os.environ, **meta.env()}  # meta.env() carries LUNAMOTH_PY_BACKEND
             log_path = meta.root / "supervisor.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             log = log_path.open("ab")
@@ -778,7 +776,14 @@ class CharaChild:
         raw = json.dumps({"jsonrpc": "2.0", "id": rid, "method": method, "params": params or {}}, ensure_ascii=False)
         proc.stdin.write(raw.encode("utf-8") + b"\n")
         await proc.stdin.drain()
-        return await asyncio.wait_for(fut, timeout=timeout)
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        finally:
+            # Always reclaim the slot. _read_stdout only pops on a matching
+            # response, which never arrives for a timed-out/cancelled call — so
+            # without this the _pending dict (and the orphaned future) leak one
+            # entry per slow call for the child's whole lifetime.
+            self._pending.pop(rid, None)
 
     async def attach_background(self) -> None:
         if self._attached:
