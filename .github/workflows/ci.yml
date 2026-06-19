@@ -1,0 +1,55 @@
+name: CI
+
+# Runs the quality gates the project already relies on but previously only ran
+# by hand: the Python suite, ruff (the pyflakes-class checks), the AST-enforced
+# architecture boundaries (tests/test_architecture.py runs as part of pytest),
+# and the frontend typecheck + vitest. This matters most because the layering is
+# enforced by a TEST — without CI, a multi-author repo can break a boundary and
+# never notice until someone runs pytest locally.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Python (ruff + pytest + architecture)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Sync (dev + server extras)
+        run: uv sync --extra dev --extra server
+      - name: Ruff (pyflakes-class checks)
+        run: uvx ruff check --select F src/lunamoth tests
+      - name: Pytest (incl. test_architecture.py boundary guard)
+        run: uv run python -m pytest -q
+
+  frontend:
+    name: Web (tsc + vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install deps
+        run: npm ci
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+      - name: Unit tests (vitest)
+        run: npm run test

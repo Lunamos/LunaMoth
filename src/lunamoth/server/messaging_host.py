@@ -366,6 +366,9 @@ class MessagingHost:
                             "messaging adapter %s send failed (%s: %s) — one retry in %gs",
                             adapter.name, type(e).__name__, e, _SEND_RETRY_DELAY,
                         )
-                        time.sleep(_SEND_RETRY_DELAY)
+                        # Interruptible wait: a pending retry must not delay a
+                        # clean shutdown (stop() sets self._stop). Returns early
+                        # if stop fires — we then make the second attempt at once.
+                        self._stop.wait(_SEND_RETRY_DELAY)
                         continue
                     _log.error("dropping outbound %s message after retry", adapter.name)

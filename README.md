@@ -36,7 +36,7 @@ It borrows the best of three worlds: the agent runtime of [Hermes](https://githu
 The foundations are in place — SillyTavern-compatible cards & world books, composable tool packs with native tool calling, sandboxed execution, persistent background charas with presence & `live`/`chat` modes, transcript + bounded memory, self-written skills, MCP, goals, the honest-failure policy, the typed event protocol, the three-zone prompt stack, the desktop app, and messaging gateways. What's left is mostly the charas themselves:
 
 - **The chara curriculum** *(the biggest effort)* — neutral prompt guidance so any worldview and any character can live well: how to use tools, treat goals, and spend unattended time — suggestions, never orders. (Embodiment `literal`/`actor` shipped; next: cross-worldview eval cards and a curated browse path for curiosity.)
-- **Card studio & market** — faster inspiration→living-chara in the web deck, and a shareable card/pack index (ST PNG import already works).
+- **Card studio & market** — faster inspiration→living-chara in the web deck, and a shareable card/pack index (card + asset import will land with the market).
 - **Hermes-parity burn-down & a declarative tool registry** — port hermes's hardening, and replace the hardcoded `ToolGateway.tool_*` methods with per-module registration in `tools/builtin/`.
 - **World-info parity** — recursive scan, cooldown/delay, insertion position/depth, probability, whole-word matching. *Touches `content/worldinfo.py`.*
 - **Messaging & remote** — live-test the gateways with real credentials; a remote TUI client over the gateway.
@@ -44,10 +44,10 @@ The foundations are in place — SillyTavern-compatible cards & world books, com
 ## Features
 
 <table>
-<tr><td><b>SillyTavern-compatible content</b></td><td>Import V2/V3 character cards (PNG or JSON) directly; standalone world books import via the desktop deck by merging into a card's embedded <code>character_book</code>. <code>{{char}}</code>/<code>{{user}}</code> macros, <code>first_mes</code>, and keyword-triggered lore entries all work.</td></tr>
+<tr><td><b>SillyTavern-compatible content</b></td><td>Cards <i>are</i> ST format (V2/V3 <code>.json</code>/<code>.png</code> with an embedded <code>character_book</code>). To start from a foreign card, paste its JSON into the create box — the AI drafts from it as inspiration. <code>{{char}}</code>/<code>{{user}}</code> macros, <code>first_mes</code>, and keyword-triggered lore entries all work. (A dedicated card+asset import is deferred to the card market.)</td></tr>
 <tr><td><b>Native tool calling</b></td><td>Tools are exposed via the OpenAI tool-calling protocol; the agent loop streams text and executes tool calls mid-turn.</td></tr>
 <tr><td><b>Composable tool packs</b></td><td>Capability bundles (<code>toolpacks/*.json</code>) declare exactly which tools a character gets. No pack, no powers.</td></tr>
-<tr><td><b>Sandboxed execution</b></td><td>The <code>terminal</code> tool runs shell commands (any language) under a per-session jail — <code>sandbox-exec</code> (macOS) / <code>bubblewrap</code> or <code>Landlock</code> (Linux) by default, Docker for a stronger boundary — confined to the workspace, and it refuses to run if no jail is available rather than degrade.</td></tr>
+<tr><td><b>Sandboxed execution</b></td><td>The <code>terminal</code> tool runs shell commands (any language) under a per-session jail — <code>sandbox-exec</code> (macOS) / <code>bubblewrap</code> or <code>Landlock</code> (Linux) — confined to the workspace, and it refuses to run if no jail is available rather than degrade. (<code>admin</code> isolation opts out of the jail entirely for a trusted operator.)</td></tr>
 <tr><td><b>Bounded, auditable memory</b></td><td>Durable memory is a token-capped file the character edits through tools, not an unbounded database; every tool call lands in <code>sandbox/logs/audit.jsonl</code>.</td></tr>
 <tr><td><b>Lives on its own</b></td><td>In <code>live</code> mode the character keeps thinking and creating between your messages, paced by its card/settings <code>patience</code>; in <code>chat</code> mode it attends to you only. A resident <code>lunamothd</code> supervisor owns desktop/background life.</td></tr>
 <tr><td><b>Terminal-first TUI</b></td><td>A single-terminal split interface (display stream + operator console) with gauges and hot-swappable settings.</td></tr>
@@ -146,7 +146,7 @@ lunamoth stop muse           # send a chara back to sleep
 lunamoth desktop --daemon    # start the resident web/supervisor daemon
 lunamoth daemon status       # list chara/gateway/life states
 lunamoth daemon stop         # stop the resident daemon
-lunamoth new muse --isolation docker
+lunamoth new muse --isolation admin   # opt out of the jail (default is sandbox)
 ```
 
 When `lunamoth desktop --daemon` is running, one resident supervisor (`lunamothd`) owns long-lived chara children and web clients reconnect to them instead of killing/recreating them. The older per-chara `start` path remains as a fallback when no daemon is answering. Attaching a legacy backgrounded chara pauses its daemon so the two don't fight over the workspace, then hands it back to the background when you detach — the chara keeps living. Remote baseline: `ssh yourserver -t lunamoth attach muse` — charas live on the server, your terminal is just a viewport. (A proper gateway for public-IP/VPS access is on the roadmap; activation is already factored behind `SessionMeta.env()`.)
@@ -182,9 +182,7 @@ A card is the ONE content file: identity, voice, embedded world (`character_book
 
 The dropdowns also scan your local SillyTavern data directory if you opt in with `LUNAMOTH_ST_DIR=~/SillyTavern/data/default-user`.
 
-Standalone SillyTavern world books remain importable through the desktop deck: upload the `.json` and merge it into a card's embedded `character_book` (`card.merge_world`).
-
-Imported cards are plain roleplay by default — tool access is opt-in via a tool pack, never implied by the card.
+A card is plain roleplay by default — tool access is opt-in via a tool pack, never implied by the card.
 
 ## Tools & isolation
 
@@ -194,13 +192,14 @@ How that command is contained is the isolation level, chosen per session with `l
 
 | Level | Mechanism |
 | --- | --- |
-| `dir` | No jail — runs with **your** privileges, cwd in the workspace (Claude-Code-style "I trust this directory") |
-| `sandbox` (default) | OS jail: `sandbox-exec` on macOS / `bubblewrap` on Linux — writes confined to the workspace, network denied, no daemon, no root |
-| `docker` | Container: read-only rootfs, bind-mounted workspace, memory/CPU/pid caps — strongest, heaviest |
+| `sandbox` (default) | OS jail: `sandbox-exec` on macOS / `bubblewrap` → `Landlock` on Linux — writes confined to the workspace, the secret home (`~/.lunamoth`) unreadable, no root. Refuses to run if no jail is available rather than degrade. |
+| `admin` | No jail — runs with **your** privileges, cwd in the workspace (Claude-Code-style "I trust this directory"). Opt-in. |
 
-**Permissions are runtime-adjustable, not all-or-nothing.** Network is off by default; flip it live with `/net on` (per session, persisted). Grant writes to a path outside the workspace with `/allow-dir <path>` under `sandbox`. Sessions **persist** between runs like Hermes/Claude Code — nothing is wiped on exit unless you pass `--clean-on-exit`.
+(Legacy `dir`/`local`/`docker` session values normalize to `admin`.)
 
-**Browser tools (optional).** A suite of `browser_*` tools (drive a real Chromium for navigation, clicks, snapshots) stays hidden until you install their driver: run `lunamoth setup browser` (it installs the Node `agent-browser` CLI + its Chromium, or prints the two `npm` steps and the Node prerequisite if absent). A real Chromium will **not** launch under the default `sandbox` isolation — enable the browser pack only on a chara running under `dir` or `docker` (with `--no-sandbox`, which the driver injects automatically as root / under AppArmor). `lunamoth doctor` shows whether the driver is ready.
+**Permissions are runtime-adjustable, not all-or-nothing.** Network is on by default; turn it off live with `/net off` (per session, persisted). Grant writes to a path outside the workspace with `/allow-dir <path>` under `sandbox`. Sessions **persist** between runs like Hermes/Claude Code — nothing is wiped on exit unless you pass `--clean-on-exit`.
+
+**Browser tools (optional).** A suite of `browser_*` tools (drive a real Chromium for navigation, clicks, snapshots) stays hidden until you install their driver: run `lunamoth setup browser` (it installs the Node `agent-browser` CLI + its Chromium, or prints the two `npm` steps and the Node prerequisite if absent). The browser runs **under `sandbox` isolation on all platforms** (macOS sandbox-exec, Linux bwrap, Linux/Docker Landlock) — a Chromium-capable jail confines writes to the workspace+temp and keeps the secret home unreadable, with `--no-sandbox` auto-injected since Chromium can't nest its own sandbox inside the OS jail. `admin` isolation also works. `lunamoth doctor` shows whether the driver is ready.
 
 ## TUI reference
 

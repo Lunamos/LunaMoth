@@ -246,6 +246,70 @@ def test_chunking_long_outbound_text():
     assert all(0 < len(chunk) <= 2048 for chunk in chunks)
     assert "".join(chunks) == text
 
+
+def test_weixin_context_tokens_no_race_between_send_and_poll(tmp_path):
+    """Regression: the poll thread mutates context_tokens while the send thread
+    iterates it (_target_for_send) and _save_state snapshots it. Before the fix
+    the send-side read was unlocked → 'dict changed size during iteration'. Now
+    every access shares _state_lock, so concurrent access is safe."""
+    import threading
+
+    from lunamoth.messaging.weixin import WeixinAdapter
+
+    adapter = WeixinAdapter({}, state_path=tmp_path / "state.json")
+    errors: list[BaseException] = []
+    stop = threading.Event()
+
+    def writer():  # mirrors the production locked write in _handle_inbound_message
+        i = 0
+        while not stop.is_set():
+            with adapter._state_lock:
+                adapter.context_tokens[f"user{i % 50}"] = f"tok{i}"
+            i += 1
+
+    def reader():  # the real send-side readers (now locked) + the snapshot
+        try:
+            while not stop.is_set():
+                adapter._target_for_send()
+                with adapter._state_lock:
+                    adapter._state_snapshot()
+        except BaseException as e:  # noqa: BLE001 - capture the race if it happens
+            errors.append(e)
+
+    threads = [threading.Thread(target=writer) for _ in range(2)]
+    threads += [threading.Thread(target=reader) for _ in range(2)]
+    for t in threads:
+        t.start()
+    time.sleep(0.4)
+    stop.set()
+    for t in threads:
+        t.join(timeout=2)
+    assert not errors, f"context_tokens race: {errors[:1]}"
+
+
+def test_gateway_send_retry_wait_is_interruptible_on_close():
+    """A pending send-retry must not block a clean shutdown: close() sets _stop,
+    which cuts the retry wait short instead of sleeping the full delay."""
+    import threading
+
+    import lunamoth.messaging.gateway as gw_mod
+
+    handle = FakeHandle()
+    adapter = FlakyAdapter(failures=99)  # always fails → enters the retry wait
+    gateway = MessagingGateway(handle=handle, adapters=[adapter], allowed_senders=["u1"], patience=999)
+    # A long retry delay would block shutdown for 30s if the wait were a plain sleep.
+    gw_mod._SEND_RETRY_DELAY = 30.0
+    try:
+        # Fire close() from another thread shortly after the send starts waiting.
+        threading.Timer(0.1, gateway.close).start()
+        t0 = time.monotonic()
+        gateway._send(adapter, "hello")
+        elapsed = time.monotonic() - t0
+        assert elapsed < 5.0, f"retry wait was not interrupted by close() (took {elapsed:.1f}s)"
+        assert gateway._stop.is_set()
+    finally:
+        gw_mod._SEND_RETRY_DELAY = 3.0
+
 class FakeHTTPResponse:
     def __init__(self, payload):
         self.payload = payload

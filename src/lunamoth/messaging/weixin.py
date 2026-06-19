@@ -582,8 +582,10 @@ class WeixinAdapter(Adapter):
             return self._reply_target
         if self._last_sender:
             return self._last_sender
-        if len(self.context_tokens) == 1:
-            return next(iter(self.context_tokens))
+        # Read context_tokens under the lock — the poll thread may be mutating it.
+        with self._state_lock:
+            if len(self.context_tokens) == 1:
+                return next(iter(self.context_tokens))
         return ""
 
     def send(self, text: str) -> None:
@@ -602,7 +604,8 @@ class WeixinAdapter(Adapter):
             )
             _log.warning(message)
             raise DeliveryDeferred(message)
-        context_token = self.context_tokens.get(target, "")
+        with self._state_lock:
+            context_token = self.context_tokens.get(target, "")
         if not context_token:
             message = (
                 f"WeChat iLink cannot send to {target}: waiting for the human to say hi first "
@@ -662,9 +665,15 @@ class WeixinAdapter(Adapter):
             return False
         context_token = str(msg.get("context_token") or "").strip()
         dirty = False
-        if context_token and self.context_tokens.get(sender_id) != context_token:
-            self.context_tokens[sender_id] = context_token
-            dirty = True
+        # context_tokens is shared between the poll thread (this write) and the
+        # send thread (_target_for_send / send) + _save_state's snapshot. Mutate
+        # it under _state_lock so a concurrent snapshot/iter can't hit
+        # "dict changed size during iteration" (_state_lock is re-entrant — the
+        # later _save_state on this same thread re-acquires it safely).
+        with self._state_lock:
+            if context_token and self.context_tokens.get(sender_id) != context_token:
+                self.context_tokens[sender_id] = context_token
+                dirty = True
         text, attachments = item_list_to_parts(msg.get("item_list"))
         # Drop ONLY an echo of a reply we just sent (same bound id); a genuine
         # operator message with different content passes through.

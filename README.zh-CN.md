@@ -36,7 +36,7 @@
 基础已经齐了 —— 兼容 SillyTavern 的角色卡与世界书、可组合工具包 + 原生 tool calling、沙盒执行、带在场感知与 `live`/`chat` 模式的持久后台 chara、对话记录 + 有界记忆、自己会写的 skills、MCP、目标、诚实的失败策略、类型化事件协议、三区提示词栈、桌面端 app，以及消息网关。剩下的主要是 chara 本身：
 
 - **chara 课程（最大的一块）** —— 中立的提示词引导，让任何世界观、任何角色都能好好生活：怎么用工具、怎么对待目标、怎么打发无人陪伴的时间 —— 都是建议，绝非命令。（化身 `literal`/`actor` 已落地；下一步：跨世界观的评测卡，以及一条供好奇心使用的浏览路径。）
-- **卡片工作室与市场** —— 让 Web 卡册里「灵感→活生生的 chara」更快，以及一个可分享的卡片/工具包索引（ST PNG 导入已经能用）。
+- **卡片工作室与市场** —— 让 Web 卡册里「灵感→活生生的 chara」更快，以及一个可分享的卡片/工具包索引（卡片 + 资产导入会随市场一起落地）。
 - **Hermes 对齐收尾 + 声明式工具注册表** —— 移植 hermes 的健壮性处理；用按模块注册的 `tools/builtin/` 替换硬编码的 `ToolGateway.tool_*` 方法。
 - **世界书功能对齐** —— 递归扫描、cooldown/delay、插入位置/深度、触发概率、全词匹配。*涉及 `content/worldinfo.py`。*
 - **消息与远程** —— 用真实凭据 live-test 各网关；做一个走网关的远程 TUI 客户端。
@@ -44,10 +44,10 @@
 ## 特性
 
 <table>
-<tr><td><b>兼容 SillyTavern 内容格式</b></td><td>直接导入 V2/V3 角色卡（PNG 或 JSON）；独立世界书经桌面卡册导入并并入某张卡的内嵌 <code>character_book</code>。<code>{{char}}</code>/<code>{{user}}</code> 宏、<code>first_mes</code> 开场白、按关键词触发的 lore 条目均可用。</td></tr>
+<tr><td><b>兼容 SillyTavern 内容格式</b></td><td>角色卡<i>本身就是</i> ST 格式（内嵌 <code>character_book</code> 的 V2/V3 <code>.json</code>/<code>.png</code>）。想从外部卡片起步，把它的 JSON 粘进创建框——AI 会以它为灵感起草。<code>{{char}}</code>/<code>{{user}}</code> 宏、<code>first_mes</code> 开场白、按关键词触发的 lore 条目均可用。（专门的卡片+资产导入功能延后到卡片市场。）</td></tr>
 <tr><td><b>原生 tool calling</b></td><td>工具通过 OpenAI tool-calling 协议暴露；agent 循环边流式输出文本、边在回合中执行工具调用。</td></tr>
 <tr><td><b>可组合工具包</b></td><td>能力以 <code>toolpacks/*.json</code> 打包，精确声明角色能用哪些工具。没给包，就没有能力。</td></tr>
-<tr><td><b>沙盒执行</b></td><td><code>terminal</code> 工具在会话隔离下跑 shell 命令（任意语言）——默认 <code>sandbox-exec</code>（macOS）/ <code>bubblewrap</code> 或 <code>Landlock</code>（Linux）牢笼，可切 Docker 获得更强边界；限制在 workspace 内，没有可用牢笼时拒绝运行而非降级。</td></tr>
+<tr><td><b>沙盒执行</b></td><td><code>terminal</code> 工具在会话隔离下跑 shell 命令（任意语言）—— <code>sandbox-exec</code>（macOS）/ <code>bubblewrap</code> → <code>Landlock</code>（Linux）牢笼；限制在 workspace 内，密钥之家（<code>~/.lunamoth</code>）不可读，没有可用牢笼时拒绝运行而非降级。（<code>admin</code> 隔离则完全退出牢笼，交给可信操作者。）</td></tr>
 <tr><td><b>有界、可审计的记忆</b></td><td>持久记忆是一个有 token 上限的文件，角色通过工具编辑它，而不是无限数据库；所有工具调用写入 <code>sandbox/logs/audit.jsonl</code>。</td></tr>
 <tr><td><b>自己生活</b></td><td><code>live</code> 模式下角色在你的消息间隙持续思考与创作，节奏由角色卡/设置中的 <code>patience</code> 控制；<code>chat</code> 模式下它只专心陪你。常驻 <code>lunamothd</code> 监督进程负责桌面端/后台生命。</td></tr>
 <tr><td><b>终端优先 TUI</b></td><td>单终端分屏界面（上方角色输出流 + 下方操作员控制台），支持状态仪表和热切换设置。</td></tr>
@@ -146,7 +146,7 @@ lunamoth stop muse           # 让一个 chara 回到沉睡
 lunamoth desktop --daemon    # 启动常驻 Web/监督进程
 lunamoth daemon status       # 列出 chara / 网关 / 生命状态
 lunamoth daemon stop         # 停止常驻进程
-lunamoth new muse --isolation docker
+lunamoth new muse --isolation admin   # 退出牢笼（默认是 sandbox）
 ```
 
 `lunamoth desktop --daemon` 运行时，一个常驻监督进程（`lunamothd`）拥有长期存在的 chara 子进程，网页刷新/重连不会杀死再重建对话。没有可用 lunamothd 时，旧的按 chara 后台 `start` 路径仍保留。attach 一个旧式后台 chara 时会先暂停它的守护进程（免得两边争抢 workspace），detach 时再把它交还后台——chara 一直活着。远程保底方案：`ssh yourserver -t lunamoth attach muse` —— chara 生活在服务器上，你的终端只是取景框。（公网 IP / VPS 网关在路线图上；激活已抽象在 `SessionMeta.env()` 后面。）
@@ -182,9 +182,7 @@ export OPENAI_MODEL=qwen2.5:3b-instruct
 
 设置 `LUNAMOTH_ST_DIR=~/SillyTavern/data/default-user` 后，下拉框还会扫描你本机的 SillyTavern 数据目录。
 
-独立的 SillyTavern 世界书仍可导入：在桌面卡册上传 `.json`，再并入某张卡的内嵌 `character_book`（`card.merge_world`）。
-
-导入的角色卡默认是纯角色扮演——工具能力必须通过工具包显式授予，卡本身不隐含任何权限。
+角色卡默认是纯角色扮演——工具能力必须通过工具包显式授予，卡本身不隐含任何权限。
 
 ## 工具与隔离
 
@@ -194,13 +192,14 @@ export OPENAI_MODEL=qwen2.5:3b-instruct
 
 | 等级 | 机制 |
 | --- | --- |
-| `dir` | 无牢笼——用**你的**权限运行，cwd 在 workspace（Claude Code 式"我信任这个目录"） |
-| `sandbox`（默认） | OS 牢笼：macOS `sandbox-exec` / Linux `bubblewrap` —— 写入限制在 workspace、拒绝网络、无守护进程、无需 root |
-| `docker` | 容器：只读根文件系统、bind-mount 工作区、内存/CPU/PID 上限 —— 最强也最重 |
+| `sandbox`（默认） | OS 牢笼：macOS `sandbox-exec` / Linux `bubblewrap` → `Landlock` —— 写入限制在 workspace、密钥之家（`~/.lunamoth`）不可读、无需 root；没有可用牢笼时拒绝运行而非降级。 |
+| `admin` | 无牢笼 —— 以**你的**权限运行，cwd 在 workspace（Claude-Code 式「我信任这个目录」）。需显式选择。 |
 
-**权限运行时可改，不是一刀切。** 网络默认关闭，`/net on` 实时打开（按会话持久化）；`sandbox` 档下用 `/allow-dir <path>` 放开 workspace 之外某个路径的写入。会话像 Hermes/Claude Code 一样**跨次运行持久化**——除非加 `--clean-on-exit`，退出时什么都不清。
+（旧的 `dir`/`local`/`docker` 会话值会归一化为 `admin`。）
 
-**浏览器工具（可选）。** 一组 `browser_*` 工具（驱动真实 Chromium 做导航、点击、快照）在安装驱动前一直隐藏：运行 `lunamoth setup browser`（它安装 Node 版 `agent-browser` CLI 及其 Chromium；若缺失则打印两条 `npm` 步骤与 Node 前置要求）。真实 Chromium **无法**在默认 `sandbox` 隔离下启动——只在跑 `dir` 或 `docker` 隔离的 chara 上启用浏览器工具包（配合 `--no-sandbox`，驱动会在 root / AppArmor 受限场景下自动注入）。`lunamoth doctor` 会显示驱动是否就绪。
+**权限运行时可改，不是一刀切。** 网络默认开启，`/net off` 实时关闭（按会话持久化）；`sandbox` 档下用 `/allow-dir <path>` 放开 workspace 之外某个路径的写入。会话像 Hermes/Claude Code 一样**跨次运行持久化**——除非加 `--clean-on-exit`，退出时什么都不清。
+
+**浏览器工具（可选）。** 一组 `browser_*` 工具（驱动真实 Chromium 做导航、点击、快照）在安装驱动前一直隐藏：运行 `lunamoth setup browser`（它安装 Node 版 `agent-browser` CLI 及其 Chromium；若缺失则打印两条 `npm` 步骤与 Node 前置要求）。浏览器在**所有平台的 `sandbox` 隔离下都能跑**（macOS sandbox-exec、Linux bwrap、Linux/Docker Landlock）—— 一个支持 Chromium 的牢笼把写入限制在 workspace+临时目录、密钥之家不可读，并自动注入 `--no-sandbox`（Chromium 无法在 OS 牢笼里再套一层自己的沙盒）。`admin` 隔离同样可用。`lunamoth doctor` 会显示驱动是否就绪。
 
 ## TUI 速查
 

@@ -160,6 +160,9 @@ class MessagingGateway:
         self._inbox: "queue.Queue[_Envelope]" = queue.Queue()
         self._threads: list[threading.Thread] = []
         self._errors: "queue.Queue[BaseException]" = queue.Queue()
+        # Shared stop signal so a pending send-retry wait is interruptible (set by
+        # run() and close()); a clean shutdown must not block on a 3s retry sleep.
+        self._stop = threading.Event()
         self._started = False
         self._attached = False
         self._refusals = RefusalThrottle()
@@ -205,6 +208,7 @@ class MessagingGateway:
             _log.exception("messaging adapter %s stopped with an error", adapter.name)
 
     def close(self) -> None:
+        self._stop.set()  # interrupt any pending send-retry wait
         for adapter in self.adapters:
             try:
                 adapter.close()
@@ -213,7 +217,7 @@ class MessagingGateway:
 
     def run(self, stop: threading.Event | None = None) -> None:
         self.start()
-        stop = stop or threading.Event()
+        stop = stop or self._stop
         try:
             while not stop.is_set():
                 self.tick(timeout=0.1)
@@ -387,7 +391,11 @@ class MessagingGateway:
                             "messaging adapter %s send failed (%s: %s) — one retry in %gs",
                             adapter.name, type(e).__name__, e, _SEND_RETRY_DELAY,
                         )
-                        time.sleep(_SEND_RETRY_DELAY)
+                        # Interruptible: a pending retry must not delay shutdown
+                        # (close()/run-stop sets self._stop). The drain loop is
+                        # serialized by design — one turn at a time — so this wait
+                        # only ever delays the NEXT inbound, and only on a failure.
+                        self._stop.wait(_SEND_RETRY_DELAY)
                         continue
                     _log.error(
                         "messaging adapter %s dropped a message after retry (%s: %s): %.80s",
