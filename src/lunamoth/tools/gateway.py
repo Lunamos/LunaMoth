@@ -30,7 +30,7 @@ from .memory import MemoryStore
 from .skills import SkillStore
 from .sandbox import Sandbox
 from .context import ToolContext
-from .registry import registry, discover_builtin_tools
+from .registry import TOOL_ERROR_KEY, registry, discover_builtin_tools
 from ..core.state import EnvState
 
 _log = get_logger("tools")
@@ -371,21 +371,29 @@ class ToolGateway:
 
 
 def _is_error_json(payload: str) -> bool:
-    """A handler signalled failure when it returned a JSON object whose top-level
-    "error" key carries a non-empty value (hermes' tool_error shape). A success
-    result that merely *includes* an "error": null field (e.g. the terminal
-    background path) is NOT a failure — gating on key presence alone turned such
-    successes into a spurious "ERROR: None" and sent the model chasing ghosts."""
+    """Did the handler signal failure? Authoritative path: the explicit
+    ``__tool_error__`` sentinel that tool_error stamps (TOOL_ERROR_KEY). Fallback
+    (for raw error dicts built outside tool_error — MCP, dispatch internals):
+    the legacy heuristic of a non-empty top-level "error". A result that merely
+    carries "error": null (e.g. a background-launch success) is NOT a failure —
+    gating on key presence alone once turned such successes into a spurious
+    "ERROR: None" and sent the model chasing ghosts."""
     if not isinstance(payload, str):
         return False
     s = payload.lstrip()
-    if not s.startswith("{") or '"error"' not in s:
+    if not s.startswith("{"):
+        return False
+    if TOOL_ERROR_KEY not in s and '"error"' not in s:
         return False
     try:
         obj = json.loads(s)
     except (json.JSONDecodeError, ValueError):
         return False
-    return isinstance(obj, dict) and obj.get("error") not in (None, "")
+    if not isinstance(obj, dict):
+        return False
+    if obj.get(TOOL_ERROR_KEY):  # explicit, authoritative
+        return True
+    return obj.get("error") not in (None, "")  # legacy shape fallback
 
 
 def _error_text(payload: str) -> str:

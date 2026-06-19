@@ -125,3 +125,10 @@ def test_error_null_is_not_a_failure():
     # And the canonical helpers round-trip through the classifier correctly:
     assert _is_error_json(tool_error("boom")) is True
     assert _is_error_json(tool_result(ok=True, value=1)) is False
+    # The explicit sentinel is authoritative: a tool_error is a failure even if a
+    # caller passed error="" (the legacy heuristic alone would miss this).
+    from lunamoth.tools.registry import TOOL_ERROR_KEY
+    assert TOOL_ERROR_KEY in tool_error("x")
+    assert _is_error_json(json.dumps({TOOL_ERROR_KEY: True, "error": ""})) is True
+    # A success result is never misread, even if it carries the key set falsy.
+    assert _is_error_json(json.dumps({TOOL_ERROR_KEY: False, "data": 1})) is False

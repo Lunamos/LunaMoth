@@ -278,8 +278,18 @@ registry = ToolRegistry()
 # a JSON string; these kill the json.dumps boilerplate.
 # ---------------------------------------------------------------------------
 
+# Explicit failure sentinel. Tool success/failure used to be inferred purely from
+# JSON shape (a non-empty top-level "error" key), which misread legitimate results
+# that merely carry "error": null (e.g. a background-launch result) as failures.
+# tool_error now stamps this namespaced key so the gateway can judge status
+# UNAMBIGUOUSLY; the shape heuristic remains only as a fallback for raw error
+# dicts built outside tool_error (MCP, dispatch internals). Two-step migration:
+# write the sentinel, recognize both — so replayed transcripts stay valid.
+TOOL_ERROR_KEY = "__tool_error__"
+
+
 def tool_error(message, **extra) -> str:
-    result = {"error": str(message)}
+    result = {TOOL_ERROR_KEY: True, "error": str(message)}
     if extra:
         result.update(extra)
     return json.dumps(result, ensure_ascii=False)
