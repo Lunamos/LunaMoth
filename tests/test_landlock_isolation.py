@@ -62,9 +62,14 @@ def test_background_sandbox_refusal_surfaces_as_tool_error(tmp_path, monkeypatch
     monkeypatch.setattr(ISO, "landlock_available", lambda: False)
     from lunamoth.tools.builtin.terminal import terminal
 
+    from lunamoth.core.state import Permissions
+
     class _State:
         def load(self):
             return {"isolation": "sandbox", "network_access": False, "writable_paths": []}
+
+        def permissions(self):
+            return Permissions(isolation="sandbox", network_on=False, writable_paths=[])
 
     class _Ctx:
         def __init__(self, ws):
@@ -75,6 +80,9 @@ def test_background_sandbox_refusal_surfaces_as_tool_error(tmp_path, monkeypatch
         @property
         def workspace(self):
             return self._ws
+
+        def permissions(self):
+            return self.state.permissions()
 
     ws = tmp_path / "ws"
     ws.mkdir()

@@ -23,6 +23,14 @@ class _FakeState:
     def load(self):
         return dict(self._d)
 
+    def permissions(self):
+        from lunamoth.core.state import Permissions
+        return Permissions(
+            isolation=self._d["isolation"],
+            network_on=bool(self._d["network_access"]),
+            writable_paths=list(self._d["writable_paths"]),
+        )
+
 
 class _FakeCtx:
     def __init__(self, workspace: Path, isolation="admin"):
@@ -34,16 +42,20 @@ class _FakeCtx:
     def workspace(self) -> Path:
         return self._workspace
 
-    def run_terminal(self, command, *, timeout, workdir=None):
+    def permissions(self):
+        return self.state.permissions()
+
+    def run_terminal(self, command, *, timeout, workdir=None, browser=False):
         from lunamoth.tools.runner import run_terminal as _run
-        status = self.state.load()
+        perms = self.state.permissions()
         return _run(
             command,
             workdir or self.workspace,
-            isolation="admin",
-            allow_network=bool(status.get("network_access", False)),
-            writable_paths=status.get("writable_paths", []),
+            isolation=perms.isolation or None,
+            allow_network=perms.network_on,
+            writable_paths=perms.writable_paths,
             timeout=timeout,
+            browser=browser,
         )
 
 

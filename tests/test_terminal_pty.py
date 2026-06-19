@@ -128,9 +128,16 @@ def test_terminal_tool_pty_path_uses_a_tty(tmp_path):
         def load(self):
             return {"isolation": "admin", "network_access": False, "writable_paths": []}
 
+        def permissions(self):
+            from lunamoth.core.state import Permissions
+            return Permissions(isolation="admin", network_on=False, writable_paths=[])
+
     class _Ctx:
         workspace = ws
         state = _State()
+
+        def permissions(self):
+            return self.state.permissions()
 
         def run_terminal(self, command, *, timeout, workdir=None, browser=False):  # pragma: no cover
             raise AssertionError("pty=true must not fall back to the pipe runner")
@@ -153,9 +160,16 @@ def test_terminal_tool_no_stale_pty_deferred_note(tmp_path):
         def load(self):
             return {"isolation": "admin", "network_access": False, "writable_paths": []}
 
+        def permissions(self):
+            from lunamoth.core.state import Permissions
+            return Permissions(isolation="admin", network_on=False, writable_paths=[])
+
     class _Ctx:
         workspace = ws
         state = _State()
+
+        def permissions(self):
+            return self.state.permissions()
 
         def run_terminal(self, command, *, timeout, workdir=None, browser=False):
             return "exit=0"

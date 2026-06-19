@@ -222,13 +222,13 @@ def _run_foreground_pty(command, ctx, *, timeout, workdir) -> str:
     but on a real pseudo-terminal (``runner.run_terminal_pty``). Env facts come
     from the live state snapshot (ctx.run_terminal isn't pty-aware)."""
     from ..runner import run_terminal_pty
-    status = ctx.state.load()
+    perms = ctx.permissions()
     return run_terminal_pty(
         command,
         ctx.workspace,
-        isolation=str(status.get("isolation") or "") or None,
-        allow_network=bool(status.get("network_access", False)),
-        writable_paths=status.get("writable_paths", []) or [],
+        isolation=perms.isolation or None,
+        allow_network=perms.network_on,
+        writable_paths=perms.writable_paths,
         timeout=timeout,
         workdir=str(workdir) if workdir else None,
     )
@@ -247,10 +247,10 @@ def _run_background(command, ctx, *, workdir, notify_on_complete, watch_patterns
     if workdir:
         cwd = Path(workdir) if str(workdir).startswith("/") else (ctx.workspace / workdir)
 
-    status = ctx.state.load()
-    isolation = str(status.get("isolation", "sandbox"))
-    allow_network = bool(status.get("network_access", False))
-    writable_paths = status.get("writable_paths", []) or []
+    perms = ctx.permissions()
+    isolation = perms.isolation
+    allow_network = perms.network_on
+    writable_paths = perms.writable_paths
 
     reg = get_registry(ctx)
     try:

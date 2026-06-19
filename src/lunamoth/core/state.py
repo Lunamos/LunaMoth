@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,18 @@ _LEGACY_KEYS = (
     "host" + "ility",
     "memory_" + "integrity",
 )
+
+
+@dataclass(frozen=True)
+class Permissions:
+    """A typed, point-in-time snapshot of the three runtime facts every tool
+    runner needs: which jail, whether the network is open, and any extra writable
+    paths. ONE accessor (EnvState.permissions) builds it, so consumers stop each
+    re-digging `status.get("isolation"/"network_access"/"writable_paths")` out of
+    the raw dict (the drift that let foreground and background runs disagree)."""
+    isolation: str = "sandbox"
+    network_on: bool = True
+    writable_paths: list[str] = field(default_factory=list)
 
 
 class EnvState:
@@ -67,6 +80,16 @@ class EnvState:
         if changed:
             self.save(data)
         return data
+
+    def permissions(self) -> Permissions:
+        """The typed snapshot of (isolation, network, writable_paths) — the single
+        accessor every tool runner should use instead of re-reading the dict."""
+        data = self.load()
+        return Permissions(
+            isolation=str(data.get("isolation", "sandbox")),
+            network_on=bool(data.get("network_access", False)),
+            writable_paths=list(data.get("writable_paths", []) or []),
+        )
 
     def save(self, data: dict[str, Any]) -> None:
         self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

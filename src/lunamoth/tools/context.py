@@ -70,14 +70,19 @@ class ToolContext:
         material) but never writes it; the file tools enforce that."""
         return getattr(self.sandbox, "assets_dir", None) or (self.sandbox.root / "assets")
 
+    def permissions(self):
+        """Typed snapshot of (isolation, network, writable_paths) — the ONE source
+        every tool runner reads, so foreground/background/PTY can't disagree."""
+        return self.state.permissions()
+
     def network_on(self) -> bool:
-        return bool(self.state.load().get("network_access", False))
+        return self.permissions().network_on
 
     def writable_paths(self) -> list[str]:
-        return list(self.state.load().get("writable_paths", []) or [])
+        return list(self.permissions().writable_paths)
 
     def isolation(self) -> str:
-        return str(self.state.load().get("isolation", "sandbox"))
+        return self.permissions().isolation
 
     def run_terminal(self, command: str, *, timeout: int, workdir: Path | None = None,
                      browser: bool = False) -> str:
@@ -85,13 +90,13 @@ class ToolContext:
         Thin pass-through to tools.runner.run_terminal with the live env facts.
         ``browser=True`` selects the browser-specific jail (Chromium-capable)."""
         from .runner import run_terminal as _run
-        status = self.state.load()
+        perms = self.permissions()
         return _run(
             command,
             workdir or self.workspace,
-            isolation=str(status.get("isolation") or "") or None,
-            allow_network=bool(status.get("network_access", False)),
-            writable_paths=status.get("writable_paths", []),
+            isolation=perms.isolation or None,
+            allow_network=perms.network_on,
+            writable_paths=perms.writable_paths,
             timeout=timeout,
             browser=browser,
         )
