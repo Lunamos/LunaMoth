@@ -303,7 +303,14 @@ class ToolGateway:
         return result
 
     def _safe_args(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        return {k: (v[:300] if isinstance(v, str) else v) for k, v in kwargs.items()}
+        # Truncate AND redact: the audit trail is a security record that can be
+        # exported, so a secret passed as a tool arg (a key in a `terminal`
+        # export=…, a token in a url) must not land in it in clear. Central redactor.
+        from ..core.redact import redact_sensitive_text
+        return {
+            k: (redact_sensitive_text(v[:300], force=True) if isinstance(v, str) else v)
+            for k, v in kwargs.items()
+        }
 
     def result_cap(self, name: str) -> int | float:
         """The agent-layer backstop cap for a tool's content (the registry

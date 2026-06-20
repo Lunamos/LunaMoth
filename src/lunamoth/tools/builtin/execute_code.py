@@ -66,17 +66,8 @@ _TERMINAL_BLOCKED_PARAMS = {"background", "pty", "notify_on_complete", "watch_pa
 # ANSI escape stripper (hermes tools/ansi_strip.py shape).
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
-# Secret redaction: bearer tokens / common API-key prefixes. Mirrors the intent
-# of hermes' agent.redact._PREFIX_RE — never let a leaked secret enter context.
-_SECRET_RE = re.compile(
-    r"(?i)\b(?:sk-[A-Za-z0-9_-]{16,}"
-    r"|sk-ant-[A-Za-z0-9_-]{16,}"
-    r"|ghp_[A-Za-z0-9]{20,}"
-    r"|github_pat_[A-Za-z0-9_]{20,}"
-    r"|AKIA[0-9A-Z]{16}"
-    r"|xox[baprs]-[A-Za-z0-9-]{10,}"
-    r"|AIza[0-9A-Za-z_-]{20,})\b"
-)
+# Secret redaction now delegates to core.redact (the central ~30-shape redactor)
+# in _redact() below — no separate prefix list here.
 
 
 def check_sandbox_requirements() -> bool:
@@ -339,7 +330,11 @@ def _strip_ansi(text: str) -> str:
 
 
 def _redact(text: str) -> str:
-    return _SECRET_RE.sub("[REDACTED]", text)
+    # Use the CENTRAL redactor (core.redact, ~30 secret shapes) rather than this
+    # module's narrow prefix list — one redactor, used everywhere. force=True
+    # because execute_code output flows straight into the model's context.
+    from ...core.redact import redact_sensitive_text
+    return redact_sensitive_text(text, force=True)
 
 
 def _enabled_tools(ctx) -> list[str]:

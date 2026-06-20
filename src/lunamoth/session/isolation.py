@@ -114,6 +114,7 @@ def _base_env(workspace: Path) -> dict[str, str]:
 def _macos_profile(workspace: Path, allow_network: bool, writable: list[Path], *,
                    interactive: bool = False, browser: bool = False) -> str:
     home = _lunamoth_home()
+    user_home = Path.home()
     assets = workspace.parent / "assets"
     if browser:
         # A real Chromium needs latitude the deny-default shell profile doesn't
@@ -138,11 +139,20 @@ def _macos_profile(workspace: Path, allow_network: bool, writable: list[Path], *
             for p in [workspace, *writable, Path(_darwin_user_temp()), Path("/private/tmp")]
         )
         b_net = "" if allow_network else "(deny network*)"  # AF_UNIX (local socket) is unaffected
+        # The browser jail is allow-default (Chromium needs broad latitude, and its
+        # own binary lives under ~/.agent-browser), so we can't deny all of $HOME
+        # like the shell jail does. But the highest-value operator secrets are cheap
+        # to deny surgically — they're never anything a browser legitimately reads.
+        secret_dirs = "\n".join(
+            f'(deny file-read* (subpath "{user_home / d}"))'
+            for d in (".ssh", ".aws", ".gnupg", ".kube", ".config/gcloud", ".docker")
+        )
         return f'''
 (version 1)
 (allow default)
 (deny file-read* (subpath "{home}"))
 (allow file-read-metadata (subpath "{home}"))
+{secret_dirs}
 (allow file-read* (subpath "{workspace}"))
 (allow file-read* (subpath "{assets}"))
 (deny file-write*)
@@ -151,15 +161,18 @@ def _macos_profile(workspace: Path, allow_network: bool, writable: list[Path], *
 {b_net}'''
     writes = "\n".join(f'(allow file-write* (subpath "{p}"))' for p in [workspace, *writable])
     net = "(allow network*)" if allow_network else "(deny network*)"
-    # Tighten reads: a shell needs to read system libs/binaries, so we keep the
-    # broad read allow — but DENY the LunaMoth home (the global key in
-    # desktop.json, the login hash in auth.json, every OTHER chara's session),
-    # then re-allow only THIS chara's own workspace + assets shelf (both sit
-    # under the home). Parity with the Linux jails, which never expose the home.
-    home = _lunamoth_home()
-    assets = workspace.parent / "assets"
+    # Tighten reads: a shell needs system libs/binaries, so keep the broad read
+    # allow for /usr,/bin,/System,… — but DENY the user's whole HOME (so
+    # ~/.ssh, ~/.aws, ~/.config, shell history, browser cookies are unreadable)
+    # AND the LunaMoth home (the global key in desktop.json, the login hash in
+    # auth.json, every OTHER chara's session), then re-allow ONLY this chara's
+    # own workspace + assets. Previously only ~/.lunamoth was denied, so a chara's
+    # terminal/read_file could read the operator's ~/.ssh — the macOS shell jail
+    # is now as tight as the Linux bwrap jail, which never exposes $HOME. PATH is
+    # system-only (_base_env), so interpreters still resolve under /usr.
     reads = (
         '(allow file-read*)\n'
+        f'(deny file-read* (subpath "{user_home}"))\n'
         f'(deny file-read* (subpath "{home}"))\n'
         f'(allow file-read* (subpath "{workspace}"))\n'
         f'(allow file-read* (subpath "{assets}"))'

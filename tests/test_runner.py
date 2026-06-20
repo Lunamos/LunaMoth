@@ -1,4 +1,6 @@
 
+import sys
+
 import pytest
 
 from lunamoth.tools.runner import (
@@ -208,6 +210,37 @@ def test_sandbox_blocks_outside_write(tmp_path):
     out = run_terminal(f"printf x > {target}", ws, isolation="sandbox", timeout=15)
     assert not target.exists()
     assert "exit=0" not in out  # the redirect should fail
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or not os_sandbox_available(),
+    reason="macOS sandbox-exec read-confinement regression",
+)
+def test_macos_sandbox_hides_user_home_secrets(tmp_path, monkeypatch):
+    """Regression: the default macOS shell jail must NOT let a chara read the
+    operator's home secrets (~/.ssh, ~/.aws, …) — previously it allowed all reads
+    and denied only ~/.lunamoth. Point HOME at a tmp dir, plant a fake ~/.ssh key,
+    and assert a sandbox `cat` can't read it while the workspace + system stay
+    readable."""
+    fake_home = tmp_path / "home"
+    (fake_home / ".ssh").mkdir(parents=True)
+    secret = fake_home / ".ssh" / "id_rsa"
+    secret.write_text("TOPSECRET_HOME_KEY")
+    monkeypatch.setenv("HOME", str(fake_home))  # Path.home() → fake_home
+
+    ws = tmp_path / "work" / "workspace"
+    ws.mkdir(parents=True)
+    (ws / "mine.txt").write_text("MY_WORKSPACE_FILE")
+
+    blocked = run_terminal(f"cat {secret}", ws, isolation="sandbox", allow_network=True, timeout=15)
+    assert "TOPSECRET_HOME_KEY" not in blocked  # home secret unreadable
+
+    allowed = run_terminal(f"cat {ws / 'mine.txt'}", ws, isolation="sandbox", allow_network=True, timeout=15)
+    assert "MY_WORKSPACE_FILE" in allowed  # own workspace still readable
+
+    sysread = run_terminal("cat /usr/bin/true >/dev/null && echo SYSREAD_OK", ws,
+                           isolation="sandbox", allow_network=True, timeout=15)
+    assert "SYSREAD_OK" in sysread  # system libs/binaries still readable (shell works)
 
 
 def _q(s: str) -> str:

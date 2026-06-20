@@ -178,8 +178,10 @@ def test_execute_code_secret_redaction(tmp_path):
     ctx = make_ctx(tmp_path, dispatch=lambda n, a: "{}",
                    terminal_output="token=sk-ABCDEFGHIJKLMNOPQRSTUV done")
     out = json.loads(ec_mod.execute_code({"code": "print('x')"}, ctx))
+    # The central redactor (core.redact) masks the secret to a partial form
+    # (sk-ABC...STUV) — the FULL secret never reaches the model's context.
     assert "sk-ABCDEFGHIJKLMNOPQRSTUV" not in out["output"]
-    assert "[REDACTED]" in out["output"]
+    assert "sk-ABC...STUV" in out["output"]
 
 
 def test_execute_code_stdout_truncation(tmp_path):
