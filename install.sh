@@ -136,8 +136,8 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
 fi
 
 say "resolving the latest release of ${REPO_SLUG} ..."
-release_json="$(curl -fsSL "${AUTH_HEADER[@]}" -H "Accept: application/vnd.github+json" "$API")" \
-  || fail "could not reach the GitHub releases API (private repo? set GITHUB_TOKEN=<repo:read PAT>)"
+release_json="$(curl -fsSL ${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"} -H "Accept: application/vnd.github+json" "$API")" \
+  || fail "could not fetch the latest release of ${REPO_SLUG} — no published release yet, or a private repo (set GITHUB_TOKEN=<repo:read PAT>). To install from source instead, re-run with: ... | bash -s -- --dev"
 
 # Find the .whl asset's download URL (grep/sed — no jq dependency).
 WHEEL_URL="$(printf '%s\n' "$release_json" \
@@ -154,7 +154,7 @@ TMP_WHEEL=""
 if [ -n "${GITHUB_TOKEN:-}" ]; then
   TMP_WHEEL="$(mktemp -t lunamoth-XXXXXX).whl"
   say "downloading wheel (authenticated) ..."
-  curl -fsSL "${AUTH_HEADER[@]}" -H "Accept: application/octet-stream" -o "$TMP_WHEEL" "$WHEEL_URL" \
+  curl -fsSL ${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"} -H "Accept: application/octet-stream" -o "$TMP_WHEEL" "$WHEEL_URL" \
     || fail "wheel download failed"
   INSTALL_TARGET="$TMP_WHEEL"
 fi
