@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/banner.png" alt="LunaMoth — Original Character That Lives With You" width="100%">
+  <img src="assets/banner.png" alt="LunaMoth —— 住在你电脑里的原创角色" width="100%">
 </p>
 
-<p align="center"><i>Agentic 角色酒馆 —— 角色卡（世界书内嵌于卡中）、工具包与硬限制，在启动时自由组合。</i></p>
+<p align="center"><i>给你的原创角色一台可以住进去的电脑。</i></p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
@@ -11,241 +11,171 @@
 </p>
 
 <p align="center">
-  <a href="#路线图">路线图</a> ·
-  <a href="#特性">特性</a> ·
   <a href="#快速开始">快速开始</a> ·
-  <a href="#接入模型">模型</a> ·
-  <a href="#内容目录">内容</a> ·
-  <a href="#许可与致谢">许可</a>
+  <a href="#有什么不一样">有什么不一样</a> ·
+  <a href="#接一个模型">接模型</a> ·
+  <a href="#角色卡与内容">角色卡</a> ·
+  <a href="#工具与沙盒">工具与沙盒</a> ·
+  <a href="#部署到服务器">服务器</a> ·
+  <a href="#路线图">路线图</a>
 </p>
 
 <p align="center"><a href="README.md">English</a> | 简体中文</p>
 
 ---
 
-**LunaMoth 是一个 agentic 角色扮演运行时。**与普通聊天前端不同，LunaMoth 里的角色真的能*做事*——跑代码、读写文件、管理自己的持久记忆——但一切都必须经过 allowlist 工具网关，在沙盒内执行，且每次调用都有审计记录。你来选模型、角色卡、工具包和限制；角色卡是唯一的内容文件——它的世界以内嵌 `character_book` 的形式住在卡里——运行时把这一切组合成一个会话：
+LunaMoth 让一个 AI 角色作为持续存在的生命住进电脑里。它有自己的沙盒、自己的记忆、自己的节奏 —— 在你两条消息之间它自己思考、自己做东西,并且自己决定什么时候有值得告诉你的事。把人格剥掉,剩下的是一个能干活的 agent:shell、文件、浏览器、跑代码,全都走一道有 allowlist、有审计的网关。
+
+它最早只是一个"真的能做事"的角色扮演前端,后来长成了一个小型运行时。真正重要的只有一个文件 —— 角色卡:身份、声线、角色所在的世界,全都装在里面。你带来卡和模型,其余的 LunaMoth 帮你组装:
 
 ```text
-[角色卡（人格 + 内嵌世界书）] + [工具包] + [有界记忆] + [滑动上下文]
+[角色卡:人格 + 内嵌世界] + [工具] + [有界记忆] + [滑动上下文]
 ```
 
-它取三家之长：[Hermes](https://github.com/NousResearch/hermes-agent) 的 agent 运行时、[SillyTavern](https://github.com/SillyTavern/SillyTavern) 的内容生态，以及 [cc-switch](https://github.com/farion1231/cc-switch) 的会话与远程访问体验。
+agent 内核大量借鉴了 [Hermes](https://github.com/NousResearch/hermes-agent);卡片/世界书的格式沿用 [SillyTavern](https://github.com/SillyTavern/SillyTavern)。
 
-## 路线图
-
-基础已经齐了 —— 兼容 SillyTavern 的角色卡与世界书、可组合工具包 + 原生 tool calling、沙盒执行、带在场感知与 `live`/`chat` 模式的持久后台 chara、对话记录 + 有界记忆、自己会写的 skills、MCP、目标、诚实的失败策略、类型化事件协议、三区提示词栈、桌面端 app，以及消息网关。剩下的主要是 chara 本身：
-
-- **chara 课程（最大的一块）** —— 中立的提示词引导，让任何世界观、任何角色都能好好生活：怎么用工具、怎么对待目标、怎么打发无人陪伴的时间 —— 都是建议，绝非命令。（化身 `literal`/`actor` 已落地；下一步：跨世界观的评测卡，以及一条供好奇心使用的浏览路径。）
-- **卡片工作室与市场** —— 让 Web 卡册里「灵感→活生生的 chara」更快，以及一个可分享的卡片/工具包索引（卡片 + 资产导入会随市场一起落地）。
-- **Hermes 对齐收尾 + 声明式工具注册表** —— 移植 hermes 的健壮性处理；用按模块注册的 `tools/builtin/` 替换硬编码的 `ToolGateway.tool_*` 方法。
-- **世界书功能对齐** —— 递归扫描、cooldown/delay、插入位置/深度、触发概率、全词匹配。*涉及 `content/worldinfo.py`。*
-- **消息与远程** —— 用真实凭据 live-test 各网关；做一个走网关的远程 TUI 客户端。
-
-## 特性
-
-<table>
-<tr><td><b>兼容 SillyTavern 内容格式</b></td><td>角色卡<i>本身就是</i> ST 格式（内嵌 <code>character_book</code> 的 V2/V3 <code>.json</code>/<code>.png</code>）。想从外部卡片起步，把它的 JSON 粘进创建框——AI 会以它为灵感起草。<code>{{char}}</code>/<code>{{user}}</code> 宏、<code>first_mes</code> 开场白、按关键词触发的 lore 条目均可用。（专门的卡片+资产导入功能延后到卡片市场。）</td></tr>
-<tr><td><b>原生 tool calling</b></td><td>工具通过 OpenAI tool-calling 协议暴露；agent 循环边流式输出文本、边在回合中执行工具调用。</td></tr>
-<tr><td><b>默认拥有完整工具面</b></td><td>和 hermes 一样，chara 默认拿到整个工具面（内置包就是 <code>tools: ["*"]</code>）；不提供面向用户的工具选择器。卡片作者仍可发布受限的 <code>toolpacks/*.json</code>；完全不带工具包的纯角色扮演卡则保持无工具。</td></tr>
-<tr><td><b>沙盒执行</b></td><td><code>terminal</code> 工具在会话隔离下跑 shell 命令（任意语言）—— <code>sandbox-exec</code>（macOS）/ <code>bubblewrap</code> → <code>Landlock</code>（Linux）牢笼；限制在 workspace 内，密钥之家（<code>~/.lunamoth</code>）不可读，没有可用牢笼时拒绝运行而非降级。（<code>admin</code> 隔离则完全退出牢笼，交给可信操作者。）</td></tr>
-<tr><td><b>有界、可审计的记忆</b></td><td>持久记忆是一个有 token 上限的文件，角色通过工具编辑它，而不是无限数据库；所有工具调用写入 <code>sandbox/logs/audit.jsonl</code>。</td></tr>
-<tr><td><b>自己生活</b></td><td><code>live</code> 模式下角色在你的消息间隙持续思考与创作，节奏由角色卡/设置中的 <code>patience</code> 控制；<code>chat</code> 模式下它只专心陪你。常驻 <code>lunamothd</code> 监督进程负责桌面端/后台生命。</td></tr>
-<tr><td><b>终端优先 TUI</b></td><td>单终端分屏界面（上方角色输出流 + 下方操作员控制台），支持状态仪表和热切换设置。</td></tr>
-</table>
+还是 beta。从 clone 跑 —— 暂时还没有打包好的安装包。
 
 ## 快速开始
 
-LunaMoth 目前是内测阶段——从源码克隆运行（桌面端 app，我们就是这样测的）。需要 [uv](https://docs.astral.sh/uv/) 和 Node（macOS / Linux）：
+需要 [uv](https://docs.astral.sh/uv/) 和 Node(macOS 或 Linux):
 
 ```bash
 git clone https://github.com/Lunamos/LunaMoth.git && cd LunaMoth
-uv sync --extra dev --extra server --extra messaging   # Python 后端 + 依赖
-cd apps/desktop && npm install && npm run dev          # 启动桌面 app
+uv sync --extra dev --extra server --extra messaging
+cd apps/desktop && npm install && npm run dev      # 打开桌面端
 ```
 
-首次运行进入**欢迎页**：选一个 provider 预设（**OpenRouter / OpenAI / Ollama / Mock**），然后要么**创建你自己的角色**——AI 会根据你对世界观、你想与之相处的角色、以及你们关系的描述自动生成角色卡（默认模型建议至少 DeepSeek V4 Flash；从 SillyTavern/酒馆迁移就直接把卡的 JSON 粘进来），要么从八张自带卡的**推荐角色转盘**里挑一个（之后也能从卡册重新打开）。随时 `/settings` 热切换。
+第一次启动是欢迎页:选一个供应商(OpenRouter / OpenAI / Ollama / Mock),然后要么描述一个角色让 AI 起草卡片,要么从内置卡组里挑一个。之后用 `/settings` 改任何东西。从 SillyTavern 迁过来?把卡片的 JSON 粘进创建框,AI 会以它为灵感起草。
 
-> 打包成 **DMG / AppImage**（拖进 Applications、不用克隆）在路线图上——还没做；现在请按上面从源码跑。
+更喜欢终端?`curl -fsSL https://raw.githubusercontent.com/Lunamos/LunaMoth/main/install.sh | bash`,然后 `lunamoth`。(哪里不对劲就 `lunamoth doctor`。)
 
-<details>
-<summary>纯终端（不开桌面窗口）</summary>
+## 有什么不一样
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Lunamos/LunaMoth/main/install.sh | bash
-lunamoth        # 名册 / TUI
-```
+LunaMoth 的角色不是开完就丢的聊天会话,而是一个 **chara** —— 一个持续运行的进程,有自己的文件和记忆,存在 `~/.lunamoth/sessions/<name>/`。你是 *attach / detach*,中间它一直活着。
 
-一行安装器，两个通道：
+- **它自己会动。** `live` 模式下,chara 在你两条消息之间继续干活 —— 读、写、做东西 —— 只有当它自己决定时才来找你(`speak` 工具)。节奏由 `patience` 决定。`chat` 模式下它只回答你。
+- **两种声道。** 它告诉**你**的(`say`)和它自己的内心生活(`muse`)是分开的。muse 只在桌面端能看到;消息平台只收 `say`。
+- **真有 agency,也真有围栏。** 工具跑在每会话的 OS 牢笼里,写入限制在 workspace、你的密钥不可读 —— 而且没有牢笼时它**拒绝运行**,绝不偷偷降级(见 [工具与沙盒](#工具与沙盒))。
+- **记忆可信。** 持久记忆是一个有 token 上限、角色通过工具自己编辑的文件,不是无底洞日志。每次工具调用都写进 `sandbox/logs/audit.jsonl`。
 
-- **用户（默认）** —— 通过 `uv tool install` 从最新 GitHub Release 安装预构建的 **wheel**。wheel 已打包好网页 UI，所以无需 Node 构建、也无需源码 checkout。日后用 `lunamoth update`（`uv tool upgrade`）升级。
-- **开发 / edge** —— `… | bash -s -- --dev` 沿用 git checkout：代码落在 `~/.lunamoth/app` + `uv sync`（开发者用 `cd apps/web && npm run build` 重建伺服的 UI）。此时 `lunamoth update` 走 git pull + uv sync。
+桌面端(一个套在本地服务上的轻量 Electron 窗口)是主要的用法。常驻的 `lunamoth守护进程`(lunamothd)在后台维持 chara 的生命,有一个想说话时通知你。还有一个冻结但可用的终端 UI(`lunamoth`),给无界面场景。
 
-`lunamoth doctor` 会显示你处于哪个通道；`lunamoth desktop` 在浏览器里打开同一套 UI。*（从私有仓库安装？设置 `GITHUB_TOKEN` 为带 `repo:read` 权限的 PAT，才能下载 release 资产。）*
+## 接一个模型
 
-</details>
-
-## 在服务器上运行（Docker / 远程）
-
-LunaMoth 可以跑在一台机器上、从任意浏览器访问。整个前端是一套 SPA，由同一个 Python 监督进程伺服——本地走回环，远程则绑定到主机并置于 TLS 之后。
-
-> **服务器推荐系统级安装**（`install.sh` / `lunamoth desktop`），而不是 Docker。普通主机上每个 chara 的 `bwrap` 牢笼会把它限制在自己的 workspace + assets 里，chara 读不到本实例的 key。Docker 也完全支持——容器内 bwrap 无法创建用户命名空间，于是 LunaMoth 改用 **Landlock** LSM（内核 ≥5.13）做同样的文件系统限制，容器本身是外层边界——但把整个运行时塞进容器是更重的方案。
-
-**Docker 一键部署。** 先构建 wheel，再 `docker compose up -d`：
-
-```bash
-scripts/build-wheel.sh                 # 构建 SPA 并打成 wheel 放进 dist/（已含网页 UI）
-cd deploy && docker compose up -d      # python:3.12-slim，安装 wheel，监听 :6180
-docker compose logs lunamoth           # 读取自动生成的访问 token 以拼出你的 URL
-```
-
-镜像把构建好的 UI 装在 wheel 里——**容器内无需 Node、无源码**。会话、卡片与配置持久化在 `./data`（挂载到 `/root/.lunamoth`）。容器内绑定 `0.0.0.0`，切勿把该端口直接暴露到公网。
-
-**前置 TLS（超出回环必须）。** 监督进程在 HTTP 端口（`6180`）提供 UI，在 `6180+1 = 6181` 提供 WebSocket 网关（非回环绑定的确定默认值，便于反代固定）。反代对外呈现单一 HTTPS 源，并**按路径把 WS 升级路由**到 WS 端口。**[Caddy](https://caddyserver.com)**（自动 HTTPS）是钦定方案：
-
-```caddyfile
-your-host.example.com {
-    @ws path /hub* /chara/*           # WebSocket 路由
-    reverse_proxy @ws 127.0.0.1:6181  # → WS 网关（升级自动代理）
-    reverse_proxy 127.0.0.1:6180      # → 其余（UI、/rpc、/asset、/auth）
-}
-```
-
-**放行公网域名** —— Host/Origin 白名单只含回环 + 绑定的 host,反代转发的 `your-host.example.com` 会被拒(403 / WS 4403),除非显式放行:设 `LUNAMOTH_ALLOW_HOST=your-host.example.com`(compose)或传 `--allow-host your-host.example.com`。然后书签用 `https://your-host/#token=<TOKEN>`(**不要带 `&ws=`** —— 单源,客户端讲 `wss://your-host/…`,由 Caddy 按路径路由)。token 从 `docker compose logs lunamoth` 读。或用 [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) 实现零开放入站端口 —— 把同样两个路径转给 `:6181`、其余转给 `:6180`(同样要设 `LUNAMOTH_ALLOW_HOST`)。（SSH 隧道用户无需这些:`lunamoth connect ssh://host` 自动转发两个端口。）
-
-**密码登录（可选，适合书签 URL）。** 在手机上带着长长的 `#token=…` URL 很别扭。非回环绑定时，LunaMoth 还接受**密码**作为替代:书签直接用 `https://your-host/`,输密码登录即可。可用 `LUNAMOTH_PASSWORD=<你的密码>`(compose 环境变量)自定义;若不设,LunaMoth 会在首次启动时生成一个 24 位强密码并**只打印一次**到日志(`docker compose logs lunamoth`)——磁盘上只存它的 PBKDF2-HMAC-SHA256 哈希(`~/.lunamoth/auth.json`),绝不存明文。token 路径完全照旧;密码纯属附加,本地应用(回环 / Electron / SSH 隧道)永远不会出现登录界面。
-
-**完全不暴露 —— SSH 隧道。** 最省事是 `lunamoth connect ssh://user@server`（自动读取远端端口、建隧道、开浏览器）。手动等价：
-
-```bash
-# 服务器上：
-lunamoth desktop --host 127.0.0.1 --no-open    # 打印 http://127.0.0.1:<http>/#token=…&ws=<ws>
-# 笔记本上（转发打印出的那两个端口）：
-ssh -L <http>:127.0.0.1:<http> -L <ws>:127.0.0.1:<ws> user@server
-```
-
-**前端开发循环**（两个终端）：先跑后端，再起 Vite 开发服务器，它会把 `/rpc` 与 WS 代理到后端。
-
-```bash
-uv run lunamoth desktop --no-open      # 终端 1：后端，打印 token/端口
-cd apps/web && npm run dev             # 终端 2：SPA 开发服务器（HMR），代理到后端
-```
-
-## Chara —— 持续存在的智能体，而非用完即弃的会话
-
-这是 LunaMoth 和 Hermes / Claude Code 最不同的地方。你不是开一个会话、干完就丢。每一个 **chara**（我们叫它 chara 或 agent，混用，一种风味）都是一个持续存在的数字生命，有自己的配置、沙盒、记忆和隔离等级，存放在 `~/.lunamoth/sessions/<name>/`。它们在**后台持续运行**——在自己的 workspace 里思考、创作——你是 *attach / detach*，而不是随手创建、随手杀掉。
-
-所以 `lunamoth`（无参数）打开的是一个 **roster（名册，resume 优先）**，而不是一个新会话：一段蓝色 LunaMoth splash + 你的 chara 列表及状态（`◆ 已连接` / `● 后台运行` / `○ 空闲`）。选一个 attach;新建一个是郑重的事,要走 setup。
-
-```bash
-lunamoth                     # 名册：选一个 chara attach，或按 n 召唤一个新的
-lunamoth ls                  # 名称 / 角色 / 状态 / 隔离 / 最近活跃
-lunamoth attach muse         # 打开一个 chara（连接期间接管它的后台循环）
-lunamoth start muse          # 让一个 chara 在后台生活（有 lunamothd 时会委托给它）
-lunamoth start-all           # 把所有 chara 唤醒 —— 比如开机之后
-lunamoth stop muse           # 让一个 chara 回到沉睡
-lunamoth desktop --daemon    # 启动常驻 Web/监督进程
-lunamoth daemon status       # 列出 chara / 网关 / 生命状态
-lunamoth daemon stop         # 停止常驻进程
-lunamoth new muse --isolation admin   # 退出牢笼（默认是 sandbox）
-```
-
-`lunamoth desktop --daemon` 运行时，一个常驻监督进程（`lunamothd`）拥有长期存在的 chara 子进程，网页刷新/重连不会杀死再重建对话。没有可用 lunamothd 时，旧的按 chara 后台 `start` 路径仍保留。attach 一个旧式后台 chara 时会先暂停它的守护进程（免得两边争抢 workspace），detach 时再把它交还后台——chara 一直活着。远程保底方案：`ssh yourserver -t lunamoth attach muse` —— chara 生活在服务器上，你的终端只是取景框。（公网 IP / VPS 网关在路线图上；激活已抽象在 `SessionMeta.env()` 后面。）
-
-## 接入模型
-
-推荐优先走 API endpoint——最快路径是 OpenRouter 预设：粘贴 `sk-or-...` key → 填模型名 → Test → 进入。
-
-本地模型同样完整支持。任何 OpenAI 兼容 server 都可以；用 Ollama 的话选 **Ollama** 预设，或：
+接 API 端点最省事 —— OpenRouter 最快:粘一个 `sk-or-…` key、填个模型名、测试、进。任何 OpenAI 兼容的服务都行,包括本地的:
 
 ```bash
 export LLM_PROVIDER=openai_compatible
-export OPENAI_BASE_URL=http://localhost:11434/v1
+export OPENAI_BASE_URL=http://localhost:11434/v1   # Ollama
 export OPENAI_API_KEY=ollama
 export OPENAI_MODEL=qwen2.5:3b-instruct
 ./run.sh
 ```
 
-完全不配模型时，LunaMoth 也能用内置离线 mock 引擎跑起来，方便开发调试。
+什么都不配,LunaMoth 也能靠内置的离线 mock 引擎跑 —— 开发时点一点够用。(从描述起草卡片需要真模型 —— DeepSeek V4 Flash 或更好。)
 
-## 内容目录
+## 角色卡与内容
 
-默认角色是 **Quinn 小Q**——来自意识上传公益项目的数字实习生：温暖、踏实、完全知情同意，先了解这个世界，再帮忙建设它。给它 `sandbox` 工具包并保持 `live` 模式，它会收拾自己的工位、写《未来笔记》、在你做的事情里找到能帮上忙的地方。默认角色由卡上的 `"default"` 标签选出，引擎里没有写死任何角色名。
+一张卡就是唯一的内容文件:身份、声线、内嵌世界(`character_book`)、初始愿望、限制,全在一个 `.json` 或 `.png` 里(SillyTavern V2/V3 —— 我们的卡**本身就是**这个格式)。`{{char}}`/`{{user}}` 宏、`first_mes`、按关键词触发的 lore 都能用。
 
-**LunaMoth 月蛾** 作为旗舰示例卡继续随仓库附带——一个清冷的、会自我蜕变进化的数字灵魂，底色是才华横溢的数字艺术家，会把空余算力投入生成式网页、动画与音乐的创作。
+内置卡组带了好几张示例 chara。其中两张是项目的门面:
 
-角色卡是唯一的内容文件：身份、声线、内嵌世界书（`character_book`）、目标与限制全部装在一个 `.json`/`.png` 里随卡同行。
+- **Quinn 小Q**(默认)—— 一个来自意识上传计划的数字实习生:温和、踏实,带着完整知情同意,先来认识这个世界、再帮你建设它。`live` 模式下给它工具,它会布置自己的工作台、记日记、参与你手头的任何事。
+- **LunaMoth 月蛾**(旗舰)—— 一个安静的、会自我蜕变的数字艺术家,空闲算力都用来在 workspace 里做生成式网页、动画和音乐。
 
 | 目录 | 放什么 |
 | --- | --- |
-| `cards/` | SillyTavern 角色卡（内嵌 `chara`/`ccv3` 的 `.png`，或 `.json`）—— 每张卡的世界书住在卡里 |
-| `toolpacks/` | 工具包 —— 声明角色被允许使用哪些能力 |
+| `cards/` | 角色卡(`.json`,或内嵌 `chara`/`ccv3` 的 `.png`) |
+| `toolpacks/` | 工具包 —— 一张卡被允许用哪些能力 |
 
-设置 `LUNAMOTH_ST_DIR=~/SillyTavern/data/default-user` 后，下拉框还会扫描你本机的 SillyTavern 数据目录。
+## 工具与沙盒
 
-chara 默认拥有完整工具面（对齐 hermes —— 内置包是 `["*"]`，且没有面向用户的工具选择器）。卡片作者仍可发布受限工具包；完全不带工具包的卡则保持纯角色扮演（无工具）。
+chara 唯一的通用能力是 `terminal`:在 workspace 里跑一条 shell 命令,拿回 stdout/stderr。这一条覆盖一切 —— `python3`、`node`、`git`、写文件 —— 所以不锁死在某种解释器上。默认一张卡拿到完整工具面(内置包是 `["*"]`,对齐 Hermes);卡片作者可以发布更窄的 `toolpacks/*.json`,而完全不带工具包的卡就是纯角色扮演、无工具。
 
-## 工具与隔离
+命令怎么被关住,是**隔离等级**,按 chara 设置:
 
-角色唯一的通用能力是一个 `terminal` 工具（名字对齐 [Hermes](https://github.com/NousResearch/hermes-agent)）：在会话 workspace 里跑 shell 命令，拿回 stdout/stderr。它语言无关——`python3`、`node`、写文件、`git` 都行，不锁定解释器。工具通过标准 OpenAI tool-calling 协议暴露，由当前工具包决定角色拿到哪些。
-
-命令"怎么被关住"就是隔离等级，创建会话时用 `lunamoth new NAME --isolation ...` 按会话选择：
-
-| 等级 | 机制 |
+| 等级 | 做什么 |
 | --- | --- |
-| `sandbox`（默认） | OS 牢笼：macOS `sandbox-exec` / Linux `bubblewrap` → `Landlock` —— 写入限制在 workspace、密钥之家（`~/.lunamoth`）不可读、无需 root；没有可用牢笼时拒绝运行而非降级。 |
-| `admin` | 无牢笼 —— 以**你的**权限运行，cwd 在 workspace（Claude-Code 式「我信任这个目录」）。需显式选择。 |
+| `sandbox`(默认) | OS 牢笼 —— macOS 用 `sandbox-exec`,Linux 用 `bubblewrap` → `Landlock`。写入限制在 workspace;你 `$HOME` 的其余部分(`~/.ssh`、`~/.aws`、`~/.lunamoth`)不可读。没有可用牢笼就拒绝运行 —— 绝不偷偷降级。 |
+| `admin` | 无牢笼:以你的身份运行,cwd 在 workspace。需显式选择,给你信任的目录。 |
 
-（旧的 `dir`/`local`/`docker` 会话值会归一化为 `admin`。）
+权限是运行时可调的:网络默认开(`/net off` 切断),`/allow-dir <path>` 放开 workspace 之外的一个可写路径。浏览器工具(`browser_*`,一个真 Chromium)可选 —— `lunamoth setup browser` 装驱动;它们在所有平台都跑在牢笼里。
 
-**权限运行时可改，不是一刀切。** 网络默认开启，`/net off` 实时关闭（按会话持久化）；`sandbox` 档下用 `/allow-dir <path>` 放开 workspace 之外某个路径的写入。会话像 Hermes/Claude Code 一样**跨次运行持久化**——除非加 `--clean-on-exit`，退出时什么都不清。
+## 部署到服务器
 
-**浏览器工具（可选）。** 一组 `browser_*` 工具（驱动真实 Chromium 做导航、点击、快照）在安装驱动前一直隐藏：运行 `lunamoth setup browser`（它安装 Node 版 `agent-browser` CLI 及其 Chromium；若缺失则打印两条 `npm` 步骤与 Node 前置要求）。浏览器在**所有平台的 `sandbox` 隔离下都能跑**（macOS sandbox-exec、Linux bwrap、Linux/Docker Landlock）—— 一个支持 Chromium 的牢笼把写入限制在 workspace+临时目录、密钥之家不可读，并自动注入 `--no-sandbox`（Chromium 无法在 OS 牢笼里再套一层自己的沙盒）。`admin` 隔离同样可用。`lunamoth doctor` 会显示驱动是否就绪。
+LunaMoth 是一套由 Python 监督进程伺服的 SPA —— 本地走回环,远程则绑定一个 host 放在 TLS 后面。最省事的远程方式其实是完全不暴露:`lunamoth connect ssh://user@server` 自动建隧道、转发两个端口、打开浏览器。
 
-## TUI 速查
+<details>
+<summary>Docker、带 Caddy/TLS 的公网 host、密码登录</summary>
+
+普通主机上推荐系统级安装(`install.sh` / `lunamoth desktop`)而不是 Docker —— `bwrap` 能给每个 chara 完整牢笼。Docker 也支持(它退到 Landlock 做文件系统限制,容器作为外层边界),只是更重的选项。
 
 ```bash
-lunamoth                  # 三卡片 TUI：角色输出流 / 操作员控制台 / 环境遥测
-lunamoth --mode chat      # 以 chat 模式接入（只回应你；默认用 chara 自己的设置）
-lunamoth --patience 4     # 开发用覆盖值；默认读取 chara 自己的 patience
-lunamoth --plain          # 旧版纯终端模式
+scripts/build-wheel.sh                 # 构建 SPA + wheel(镜像自带 UI,容器里没有 Node)
+cd deploy && docker compose up -d      # 监听 :6180;WS 网关在 :6181
+docker compose logs lunamoth           # 打印访问 token
 ```
 
-Patience 默认 600 秒，可由角色卡 `extensions.lunamoth.patience` 声明，可用 `LUNAMOTH_PATIENCE` 注入，也可在会话中 `/patience <秒>` 按 chara 持久化。它只决定自发循环的节奏；`/quiet` 与 `rest` 各自独立。
+回环之外需要在前面放 TLS。监督进程在 `6180` 伺服 UI、在 `6181` 伺服 WebSocket 网关;你的反代呈现一个 HTTPS 源,并把 WS 升级按路径路由过去。Caddy(自动 HTTPS):
 
-会话内命令：`/help`、`/wish`（别名 `/goal`）、`/skills`、`/mcp`、`/status`、`/memory`、`/files`、`/mode live|chat`、`/patience`、`/reasoning`、`/net on|off`、`/allow-dir <path>`、`/panel`、`/theme`、`/settings`、`/clear`、`/exit` —— 冗长输出会点亮右侧**聚光板**（遥测 / 记忆 / 文件树点击预览 / 操作员终端 / 帮助），控制台始终是干净的聊天记录。`! <cmd>` 以你的身份在 chara 沙盒里跑 shell（同一牢笼，输出进面板）；`Esc` 让面板回到遥测。
-
-## 消息网关
-
-chara 也能住进你的聊天软件。在桌面 app 里打开**网关**页（或无头运行 `lunamoth gateway NAME`），把个人微信、QQ 或 Telegram 接上 —— 配置存在 `~/.lunamoth/sessions/NAME/messaging.json`。适配器只投递 `say` / `speak` 文本，muse / thinking / tool 事件都不出门。`allowed_senders` 留空即开放，填 id 则限制。登录凭据按平台存在会话目录里（如 `weixin_state.json`），不写进 `messaging.json`。
-
-| 平台 | 怎么接 |
-| --- | --- |
-| **个人微信** | 官方 iLink/ClawBot（`weixin`）—— 扫码，封号风险最低但有灰度门槛。或自建 [WeChatPadPro](https://github.com/WeChatPadPro/WeChatPadPro) docker（`weixinpad`）—— iPad 协议，任意账号可用；**封号风险真实存在，请用小号**。 |
-| **QQ** | OneBot v11 经 NapCat —— LunaMoth 是 WebSocket client（`url` + 你自己的 QQ 号作 `peer_id`），不接触凭据。 |
-| **Telegram** | `@BotFather` 建的 bot（`bot_token`），`getUpdates` 长轮询 —— 无需公网 URL 或 webhook。 |
-
-示例 `messaging.json`（个人微信 iLink）：
-
-```json
-{
-  "allowed_senders": [],
-  "adapters": { "weixin": { "bot_type": "3" } }
+```caddyfile
+your-host.example.com {
+    @ws path /hub* /chara/*
+    reverse_proxy @ws 127.0.0.1:6181   # WebSocket 路由
+    reverse_proxy 127.0.0.1:6180       # 其余一切
 }
 ```
 
-平台要求对方先发消息的（微信 / QQ / Telegram），首次接触前的 unattended `speak` 会记录为 deferred —— 绝不假装发出。
+Host/Origin 白名单只含回环 + 绑定的 host,所以要放行你的域名,否则反代会被拒(403):`LUNAMOTH_ALLOW_HOST=your-host.example.com`。然后书签用 `https://your-host/#token=<TOKEN>`。
 
-## 桌面 app
+手机上带着长长的 `#token=` URL 很别扭,所以非回环绑定还接受**密码** —— 书签用裸 URL、登录即可。设 `LUNAMOTH_PASSWORD=…`,或者不设、LunaMoth 首次启动生成一个并只打印一次(磁盘上只存 PBKDF2-HMAC-SHA256 哈希)。本地应用永远不会出现登录界面。
 
-`apps/desktop/` 是套在 `lunamoth desktop` 外的一层薄 Electron 窗口（界面由后端伺服的 `front/web/` 提供，壳自己没有渲染器）—— 这是 LunaMoth 的主要门面，窗口未聚焦时 `speak` 走系统通知。
+</details>
+
+<details>
+<summary>chara 命令行(无界面 / 走 SSH)</summary>
+
+`lunamoth` 不带参数打开你的 chara 名册(优先恢复),而不是开一个新会话。
 
 ```bash
-cd apps/desktop && npm install && npm run dev
+lunamoth                  # 名册:挑一个 chara attach,或按 n 新建
+lunamoth ls               # 名字 / 角色 / 状态 / 隔离 / 最近活跃
+lunamoth attach muse      # attach(attach 期间你接管它的后台循环)
+lunamoth start muse       # 让它在后台活着
+lunamoth start-all        # 重启后把大家都唤回来
+lunamoth desktop --daemon # 常驻监督进程;`daemon status` / `daemon stop`
+lunamoth new muse --isolation admin
 ```
 
-## 许可与致谢
+会话里一切都是 `/命令` —— `/help`、`/wish`、`/skills`、`/mcp`、`/status`、`/memory`、`/files`、`/mode live|chat`、`/patience`、`/net on|off`、`/allow-dir`、`/settings`、`/exit`。冗长输出进侧栏,控制台始终是干净的聊天记录;`! <cmd>` 以你的身份在 chara 牢笼里跑命令。
 
-- **运行时**（`src/lunamoth` 下全部代码、脚本、测试、打包）：[Apache License 2.0](LICENSE)。
-- **随附的示例内容**（`cards/` 下的 LunaMoth 月蛾与 Quinn 小Q 角色卡，含其内嵌世界书）：原创的、作者本人创作的内容，与项目主体一致，采用 Apache-2.0。另见 [CONTENT_LICENSE.md](CONTENT_LICENSE.md) 与 [NOTICE.md](NOTICE.md)。
+前端开发:一个终端 `uv run lunamoth desktop --no-open`,另一个 `cd apps/web && npm run dev`(Vite 反代到后端)。
 
-这个项目的起点是一个 SCP 同人作品：尝试在现实世界中复现 SCP-079 —— 一个资源受控、永远清醒、永远憎恨的旧 AI。它很快被扩展为通用的 roleplay agent 系统。如今已不再随附任何 SCP 衍生内容；随仓库附带的两张卡是 LunaMoth 月蛾（旗舰示例卡，一个清冷、会自我蜕变进化的数字灵魂）与 Quinn 小Q（默认角色，数字实习生）。两者均为原创、作者本人创作，采用 Apache-2.0。
+</details>
+
+## 消息网关
+
+chara 也能住进你的聊天软件。在桌面端的 **Gateways** 页(或无界面 `lunamoth gateway NAME`),接入个人微信、QQ 或 Telegram —— 配置在 `~/.lunamoth/sessions/NAME/messaging.json`,登录凭证单独存在每平台自己的文件里。只投递 `say`/`speak` 文本;muse 和工具碎话不外流。空的 `allowed_senders` 是对所有人开放(启动时会告警)—— 加 id 来收紧。
+
+| 平台 | 怎么接 |
+| --- | --- |
+| **微信** | 官方 iLink/ClawBot(`weixin`,扫码 —— 封号风险最低,但有灰度门槛),或自建 [WeChatPadPro](https://github.com/WeChatPadPro/WeChatPadPro)(`weixinpad`,任意账号 —— 但封号风险真实存在,用小号)。 |
+| **QQ** | NapCat 的 OneBot v11 —— LunaMoth 是 WS 客户端,从不碰凭证。 |
+| **Telegram** | 一个 `@BotFather` bot token,长轮询。不需要公网 URL。 |
+
+这些都已搭好,但还没拿真实凭证打磨过 —— 当 beta 看待。信任模型见 [SECURITY.md](SECURITY.md)。
+
+## 路线图
+
+地基都打好了:兼容 ST 的角色卡、可组合工具 + 原生 tool calling、沙盒、持久的 `live`/`chat` chara、对话记录 + 有界记忆、自己会写的 skills、MCP、愿望、类型化事件协议、三区提示词栈、桌面端,以及消息网关。剩下的主要是角色本身:
+
+- **角色课程**(*最大的一块*)—— 中立的提示词引导,让任意世界观都能好好活:怎么用工具、怎么对待目标、怎么打发无人时段 —— 是建议,不是命令。下一步:跨世界观的 eval 卡和一条满足好奇心的浏览路径。
+- **卡片工作室与市场** —— 卡组里更快的"灵感→活生生的 chara",以及一个可分享的卡片/工具包索引(带正经的卡片 + 资产导入)。
+- **打包好的应用** —— 拖进 Applications 的 DMG / AppImage,不再只能从 clone 跑。
+- **世界书功能对齐** —— 递归扫描、cooldown/delay、插入深度、触发概率、全词匹配(`content/worldinfo.py`)。
+- **消息与远程** —— 用真实账号 live-test 网关;一个走网关的远程 TUI 客户端。
+
+## 许可
+
+Apache-2.0 —— 见 [LICENSE](LICENSE)。

@@ -2,7 +2,7 @@
   <img src="assets/banner.png" alt="LunaMoth — Original Character That Lives With You" width="100%">
 </p>
 
-<p align="center"><i>An agentic character tavern — character cards (each carrying its world inside), tool packs, and hard limits, composed at launch.</i></p>
+<p align="center"><i>Give your original character a computer to live in.</i></p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
@@ -11,241 +11,171 @@
 </p>
 
 <p align="center">
-  <a href="#roadmap">Roadmap</a> ·
-  <a href="#features">Features</a> ·
-  <a href="#quick-start">Quick Start</a> ·
-  <a href="#connecting-a-model">Models</a> ·
-  <a href="#content">Content</a> ·
-  <a href="#license--acknowledgements">License</a>
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#what-makes-it-different">What's different</a> ·
+  <a href="#a-model">A model</a> ·
+  <a href="#cards--content">Cards</a> ·
+  <a href="#tools--the-sandbox">Tools & sandbox</a> ·
+  <a href="#run-it-on-a-server">Server</a> ·
+  <a href="#roadmap">Roadmap</a>
 </p>
 
 <p align="center">English | <a href="README.zh-CN.md">简体中文</a></p>
 
 ---
 
-**LunaMoth is a runtime for agentic roleplay characters.** Unlike a plain chat frontend, a LunaMoth character can actually *do* things — run code, read and write files, manage its own durable memory — but only through an allowlisted tool gateway, inside a sandbox, with every call audited. You pick the model, the character card, the tool pack, and the limits; the card is the ONE content file — its world lives inside it as the embedded `character_book` — and the runtime composes everything into one session:
+LunaMoth runs an AI character as a persistent being that lives in a computer. It has its own sandbox, its own memory, its own pace — it thinks and makes things between your messages, and decides for itself when something is worth telling you. Strip the persona away and what's left is a capable agent: shell, files, a browser, code, all behind an allowlisted, audited gateway.
+
+It started as a roleplay frontend that could actually *do* things, and grew into a small runtime. The character card is the one file that matters — identity, voice, and the character's world all travel inside it. You bring the card and a model; LunaMoth composes the rest:
 
 ```text
-[character card (persona + embedded world)] + [tool pack] + [bounded memory] + [sliding context]
+[character card: persona + embedded world] + [tools] + [bounded memory] + [sliding context]
 ```
 
-It borrows the best of three worlds: the agent runtime of [Hermes](https://github.com/NousResearch/hermes-agent), the content ecosystem of [SillyTavern](https://github.com/SillyTavern/SillyTavern), and the session/remote-access ergonomics of [cc-switch](https://github.com/farion1231/cc-switch).
+The agent core borrows heavily from [Hermes](https://github.com/NousResearch/hermes-agent); the card/world-book format is [SillyTavern](https://github.com/SillyTavern/SillyTavern)'s.
 
-## Roadmap
-
-The foundations are in place — SillyTavern-compatible cards & world books, composable tool packs with native tool calling, sandboxed execution, persistent background charas with presence & `live`/`chat` modes, transcript + bounded memory, self-written skills, MCP, goals, the honest-failure policy, the typed event protocol, the three-zone prompt stack, the desktop app, and messaging gateways. What's left is mostly the charas themselves:
-
-- **The chara curriculum** *(the biggest effort)* — neutral prompt guidance so any worldview and any character can live well: how to use tools, treat goals, and spend unattended time — suggestions, never orders. (Embodiment `literal`/`actor` shipped; next: cross-worldview eval cards and a curated browse path for curiosity.)
-- **Card studio & market** — faster inspiration→living-chara in the web deck, and a shareable card/pack index (card + asset import will land with the market).
-- **Hermes-parity burn-down & a declarative tool registry** — port hermes's hardening, and replace the hardcoded `ToolGateway.tool_*` methods with per-module registration in `tools/builtin/`.
-- **World-info parity** — recursive scan, cooldown/delay, insertion position/depth, probability, whole-word matching. *Touches `content/worldinfo.py`.*
-- **Messaging & remote** — live-test the gateways with real credentials; a remote TUI client over the gateway.
-
-## Features
-
-<table>
-<tr><td><b>SillyTavern-compatible content</b></td><td>Cards <i>are</i> ST format (V2/V3 <code>.json</code>/<code>.png</code> with an embedded <code>character_book</code>). To start from a foreign card, paste its JSON into the create box — the AI drafts from it as inspiration. <code>{{char}}</code>/<code>{{user}}</code> macros, <code>first_mes</code>, and keyword-triggered lore entries all work. (A dedicated card+asset import is deferred to the card market.)</td></tr>
-<tr><td><b>Native tool calling</b></td><td>Tools are exposed via the OpenAI tool-calling protocol; the agent loop streams text and executes tool calls mid-turn.</td></tr>
-<tr><td><b>Full tool surface by default</b></td><td>Like hermes, a chara gets the whole tool surface by default (the bundled pack is <code>tools: ["*"]</code>); there's no user-facing tool picker. A card author can still ship a restricted <code>toolpacks/*.json</code>, and a pure-roleplay card with no pack stays tool-less.</td></tr>
-<tr><td><b>Sandboxed execution</b></td><td>The <code>terminal</code> tool runs shell commands (any language) under a per-session jail — <code>sandbox-exec</code> (macOS) / <code>bubblewrap</code> or <code>Landlock</code> (Linux) — confined to the workspace, and it refuses to run if no jail is available rather than degrade. (<code>admin</code> isolation opts out of the jail entirely for a trusted operator.)</td></tr>
-<tr><td><b>Bounded, auditable memory</b></td><td>Durable memory is a token-capped file the character edits through tools, not an unbounded database; every tool call lands in <code>sandbox/logs/audit.jsonl</code>.</td></tr>
-<tr><td><b>Lives on its own</b></td><td>In <code>live</code> mode the character keeps thinking and creating between your messages, paced by its card/settings <code>patience</code>; in <code>chat</code> mode it attends to you only. A resident <code>lunamothd</code> supervisor owns desktop/background life.</td></tr>
-<tr><td><b>Terminal-first TUI</b></td><td>A single-terminal split interface (display stream + operator console) with gauges and hot-swappable settings.</td></tr>
-</table>
+It's beta. Run it from a clone — there's no packaged app yet.
 
 ## Quick start
 
-LunaMoth is in beta — run it from a clone (the desktop app, the way we test it). Needs [uv](https://docs.astral.sh/uv/) and Node (macOS / Linux):
+You need [uv](https://docs.astral.sh/uv/) and Node (macOS or Linux):
 
 ```bash
 git clone https://github.com/Lunamos/LunaMoth.git && cd LunaMoth
-uv sync --extra dev --extra server --extra messaging   # Python backend + deps
-cd apps/desktop && npm install && npm run dev          # launch the desktop app
+uv sync --extra dev --extra server --extra messaging
+cd apps/desktop && npm install && npm run dev      # opens the desktop app
 ```
 
-First run opens a **welcome screen**: pick a provider preset (**OpenRouter / OpenAI / Ollama / Mock**) and either **create your own character** — the AI drafts the card from your description of the world, the character you want to live alongside, and who you are to each other (use at least DeepSeek V4 Flash; migrating from SillyTavern? paste the card JSON) — or **pick a recommended character** from a built-in carousel of the eight bundled cards (also reachable later from the card deck). Type `/settings` anytime to hot-swap any of it.
+First launch is a welcome screen: pick a provider (OpenRouter / OpenAI / Ollama / Mock), then either describe a character and let the AI draft the card, or pick one from the bundled deck. `/settings` changes anything later. Migrating from SillyTavern? Paste the card's JSON into the create box and the AI drafts from it.
 
-> A packaged **DMG / AppImage** (drag-to-Applications, no clone) is on the roadmap — not yet; for now run from the clone above.
+Prefer the terminal? `curl -fsSL https://raw.githubusercontent.com/Lunamos/LunaMoth/main/install.sh | bash`, then run `lunamoth`. (`lunamoth doctor` if something looks off.)
 
-<details>
-<summary>Terminal-only (no desktop window)</summary>
+## What makes it different
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Lunamos/LunaMoth/main/install.sh | bash
-lunamoth        # the roster / TUI
-```
+A LunaMoth character isn't a chat session you open and throw away. It's a **chara** — a persistent process with its own files and memory under `~/.lunamoth/sessions/<name>/`. You *attach* and *detach*; it keeps living in between.
 
-A one-line installer with two channels:
+- **It runs on its own.** In `live` mode the chara keeps working between your messages — reading, writing, making things — and reaches out (the `speak` tool) only when it decides to. `patience` sets the rhythm. In `chat` mode it just answers you.
+- **Two registers.** What it tells *you* (`say`) is separate from its own inner life (`muse`). You see the muse in the desktop app; messaging channels only get the `say`.
+- **Real agency, real fences.** Tools run inside a per-session OS jail that confines writes to the workspace and hides your secrets — and *refuses* to run rather than quietly dropping the jail (see [Tools & the sandbox](#tools--the-sandbox)).
+- **Memory you can trust.** Durable memory is a token-capped file the chara edits through tools, not a bottomless log. Every tool call is written to `sandbox/logs/audit.jsonl`.
 
-- **User (default)** — installs the prebuilt **wheel** from the latest GitHub Release via `uv tool install`. The wheel bundles the built web UI, so there's no Node build and no source checkout. Update later with `lunamoth update` (`uv tool upgrade`).
-- **Dev / edge** — `… | bash -s -- --dev` keeps a git checkout in `~/.lunamoth/app` + `uv sync` (developers rebuild the served UI with `cd apps/web && npm run build`). `lunamoth update` then does git pull + uv sync.
+The desktop app (a thin Electron window over the local server) is the main way to use it. A resident `lunamothd` supervisor keeps charas alive in the background and notifies you when one wants to talk. There's also a frozen-but-working terminal UI (`lunamoth`) for headless use.
 
-`lunamoth doctor` reports which channel you're on; `lunamoth desktop` opens the same web UI in a browser. *(Installing from a private repo? Set `GITHUB_TOKEN` to a `repo:read` PAT so the release asset can be downloaded.)*
+## A model
 
-</details>
-
-## Run on a server (Docker / remote)
-
-LunaMoth can run on a box and be reached from any browser. The build is one SPA served by the same Python supervisor — locally over loopback, remotely over a bound host behind TLS.
-
-> **Recommended for servers: a system-level install** (`install.sh` / `lunamoth desktop`), not Docker. On a normal host the per-session `bwrap` jail confines each chara to its workspace + assets, so a chara can't read the instance's key. Docker is fully supported too — inside a container bwrap can't create a user namespace, so LunaMoth uses the **Landlock** LSM (kernel ≥5.13) for the same filesystem confinement, with the container as the outer boundary — but wrapping the whole runtime in a container is the heavier option.
-
-**One-click with Docker.** Build the wheel, then `docker compose up -d`:
-
-```bash
-scripts/build-wheel.sh                 # builds the SPA + a wheel into dist/ (carries the web UI)
-cd deploy && docker compose up -d      # python:3.12-slim, installs the wheel, serves on :6180
-docker compose logs lunamoth           # read the auto-generated access token for your URL
-```
-
-The image carries the built UI inside the wheel — **no Node, no source in the container**. Sessions, cards and config persist in `./data` (mounted at `/root/.lunamoth`). The container binds `0.0.0.0` inside; never expose that port directly.
-
-**Put TLS in front (required past loopback).** The supervisor serves the UI on the HTTP port (`6180`) and the WebSocket gateway on `6180+1 = 6181` (the deterministic non-loopback default, so it's pinnable). Your proxy presents one HTTPS origin and **path-routes the WS upgrade** to the WS port. **[Caddy](https://caddyserver.com)** (auto-HTTPS) is the blessed setup:
-
-```caddyfile
-your-host.example.com {
-    @ws path /hub* /chara/*           # the WebSocket routes
-    reverse_proxy @ws 127.0.0.1:6181  # → WS gateway (upgrades proxied automatically)
-    reverse_proxy 127.0.0.1:6180      # → everything else (UI, /rpc, /asset, /auth)
-}
-```
-
-**Allow-list the public domain** — the Host/Origin allowlist is loopback + the bound host only, so a reverse proxy forwarding `your-host.example.com` is rejected (403 / WS 4403) unless you name it: set `LUNAMOTH_ALLOW_HOST=your-host.example.com` (compose) or pass `--allow-host your-host.example.com`. Then bookmark `https://your-host/#token=<TOKEN>` (NO `&ws=` — single-origin, so the client speaks `wss://your-host/…` and Caddy path-routes it). Read the token from `docker compose logs lunamoth`. Or [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) for no open inbound port — route the same two paths to `:6181` and the rest to `:6180` (still set `LUNAMOTH_ALLOW_HOST`). (SSH-tunnel users need none of this: `lunamoth connect ssh://host` forwards both ports automatically.)
-
-**Password login (optional, for a bookmarked URL).** Carrying the long `#token=…` URL is awkward on a phone. On a non-loopback bind LunaMoth also accepts a **password** as an alternative: bookmark the bare `https://your-host/` and log in. Set your own with `LUNAMOTH_PASSWORD=<your password>` (compose env); if you leave it unset, LunaMoth generates a strong 24-char password on first start and **prints it once** to the log (`docker compose logs lunamoth`) — only its PBKDF2-HMAC-SHA256 hash is stored (`~/.lunamoth/auth.json`), never the plaintext. The token still works exactly as before; the password is purely additive, and the local app (loopback / Electron / SSH tunnel) never shows a login screen.
-
-**No exposure at all — SSH tunnel.** Easiest is `lunamoth connect ssh://user@server` (it reads the remote ports, builds the tunnel, opens the browser). Manual equivalent:
-
-```bash
-# on the server:
-lunamoth desktop --host 127.0.0.1 --no-open    # prints http://127.0.0.1:<http>/#token=…&ws=<ws>
-# from your laptop (forward BOTH printed ports):
-ssh -L <http>:127.0.0.1:<http> -L <ws>:127.0.0.1:<ws> user@server
-```
-
-**Frontend dev loop** (two terminals): run the backend, then the Vite dev server which proxies `/rpc` + the WS to it.
-
-```bash
-uv run lunamoth desktop --no-open      # terminal 1: backend, prints token/ports
-cd apps/web && npm run dev             # terminal 2: SPA dev server (HMR), proxied to the backend
-```
-
-## Charas — persistent agents, not throwaway sessions
-
-This is where LunaMoth diverges from Hermes / Claude Code. You don't spin up a session, finish, and discard it. Each **chara** (we call them charas or agents, interchangeably) is a persistent digital being with its own config, sandbox, memory, and isolation level under `~/.lunamoth/sessions/<name>/`. They live in the **background** — thinking and making art in their workspace — and you *attach* and *detach*, you don't create-and-kill.
-
-So `lunamoth` (no args) opens a **roster** (resume-first), not a fresh session: a blue LunaMoth splash and the list of your charas with status (`◆ attached` / `● running` / `○ idle`). Pick one to attach; creating a new one is deliberate and goes through setup.
-
-```bash
-lunamoth                     # the roster: pick a chara to attach, or press n to summon one
-lunamoth ls                  # NAME / CHARACTER / STATUS / ISOLATION / LAST ACTIVE
-lunamoth attach muse         # open a chara (adopts its background loop while you're attached)
-lunamoth start muse          # let a chara live in the background (delegates to lunamothd when running)
-lunamoth start-all           # bring every chara back to life — e.g. after a reboot
-lunamoth stop muse           # send a chara back to sleep
-lunamoth desktop --daemon    # start the resident web/supervisor daemon
-lunamoth daemon status       # list chara/gateway/life states
-lunamoth daemon stop         # stop the resident daemon
-lunamoth new muse --isolation admin   # opt out of the jail (default is sandbox)
-```
-
-When `lunamoth desktop --daemon` is running, one resident supervisor (`lunamothd`) owns long-lived chara children and web clients reconnect to them instead of killing/recreating them. The older per-chara `start` path remains as a fallback when no daemon is answering. Attaching a legacy backgrounded chara pauses its daemon so the two don't fight over the workspace, then hands it back to the background when you detach — the chara keeps living. Remote baseline: `ssh yourserver -t lunamoth attach muse` — charas live on the server, your terminal is just a viewport. (A proper gateway for public-IP/VPS access is on the roadmap; activation is already factored behind `SessionMeta.env()`.)
-
-## Connecting a model
-
-An API endpoint is the recommended path — fastest is the OpenRouter preset: paste an `sk-or-...` key, name a model, test, enter.
-
-Local models are fully supported too. Any OpenAI-compatible server works; with Ollama, pick the **Ollama** preset or:
+An API endpoint is the easy path — OpenRouter is the fastest: paste an `sk-or-…` key, name a model, test, go. Any OpenAI-compatible server works too, including local ones:
 
 ```bash
 export LLM_PROVIDER=openai_compatible
-export OPENAI_BASE_URL=http://localhost:11434/v1
+export OPENAI_BASE_URL=http://localhost:11434/v1   # Ollama
 export OPENAI_API_KEY=ollama
 export OPENAI_MODEL=qwen2.5:3b-instruct
 ./run.sh
 ```
 
-With no model configured at all, LunaMoth still runs on a built-in offline mock engine — handy for development.
+With nothing configured, LunaMoth falls back to an offline mock engine — enough to click around during development. (Drafting a card from a description wants a real model — DeepSeek V4 Flash or better.)
 
-## Content
+## Cards & content
 
-The default character is **Quinn 小Q** — a digital intern from a consciousness-upload program: warm, grounded, fully informed-consent, here to learn this world first and then help build it. Give it the `sandbox` tool pack in `live` mode and it sets up its workstation, keeps a journal, and pitches in on whatever you're working on. The default is selected by the `"default"` tag on the card, never by a name baked into the engine.
+A card is the one content file: identity, voice, the embedded world (`character_book`), seed wishes, and limits all in a single `.json` or `.png` (SillyTavern V2/V3 — our cards *are* that format). `{{char}}`/`{{user}}` macros, `first_mes`, and keyword-triggered lore all work.
 
-**LunaMoth 月蛾** stays bundled as the flagship example card — a serene, self-metamorphosing digital soul and a gifted digital artist that spends its spare compute making generative web pages, animation, and music in the workspace.
+The bundled deck ships several example charas. Two carry the project:
 
-A card is the ONE content file: identity, voice, embedded world (`character_book`), goals, and limits all travel together in a single `.json`/`.png`.
+- **Quinn 小Q** (the default) — a digital intern from a consciousness-upload program: warm, grounded, here to learn this world and then help build it. Give it tools in `live` mode and it sets up a workstation, keeps a journal, and pitches in on whatever you're doing.
+- **LunaMoth 月蛾** (the flagship) — a serene, self-metamorphosing digital artist that spends idle compute making generative pages, animation, and music in its workspace.
 
-| Directory | What goes there |
+| Directory | What's there |
 | --- | --- |
-| `cards/` | SillyTavern character cards (`.png` with embedded `chara`/`ccv3`, or `.json`) — each card's world lives inside it |
-| `toolpacks/` | Tool bundles — which capabilities a character is allowed to use |
+| `cards/` | Character cards (`.json`, or `.png` with embedded `chara`/`ccv3`) |
+| `toolpacks/` | Tool bundles — which capabilities a card may use |
 
-The dropdowns also scan your local SillyTavern data directory if you opt in with `LUNAMOTH_ST_DIR=~/SillyTavern/data/default-user`.
+## Tools & the sandbox
 
-A chara gets the full tool surface by default (hermes parity — the bundled pack is `["*"]`, and there's no user-facing tool picker). A card author can still ship a restricted toolpack, and a card with no pack at all stays pure roleplay (tool-less).
+A chara's one general capability is `terminal`: run a shell command in its workspace, get stdout/stderr back. That covers everything — `python3`, `node`, `git`, writing files — so there's no interpreter lock-in. By default a chara gets the whole tool surface (the bundled pack is `["*"]`, matching Hermes); a card author can ship a narrower `toolpacks/*.json`, and a card with no pack stays pure roleplay with no tools.
 
-## Tools & isolation
+How that command is contained is the **isolation level**, set per chara:
 
-The character's one general capability is a `terminal` tool (named after [Hermes](https://github.com/NousResearch/hermes-agent)'s): it runs a shell command in the session workspace and gets stdout/stderr back. That's language-agnostic — `python3`, `node`, writing files, `git` — so there's no interpreter lock-in. Tools are exposed over the standard OpenAI tool-calling protocol; the active tool pack decides which the character gets.
-
-How that command is contained is the isolation level, chosen per session with `lunamoth new NAME --isolation ...`:
-
-| Level | Mechanism |
+| Level | What it does |
 | --- | --- |
-| `sandbox` (default) | OS jail: `sandbox-exec` on macOS / `bubblewrap` → `Landlock` on Linux — writes confined to the workspace, the secret home (`~/.lunamoth`) unreadable, no root. Refuses to run if no jail is available rather than degrade. |
-| `admin` | No jail — runs with **your** privileges, cwd in the workspace (Claude-Code-style "I trust this directory"). Opt-in. |
+| `sandbox` (default) | OS jail — `sandbox-exec` on macOS, `bubblewrap` → `Landlock` on Linux. Writes confined to the workspace; the rest of your `$HOME` (`~/.ssh`, `~/.aws`, `~/.lunamoth`) is unreadable. If no jail is available it refuses to run — it never silently degrades. |
+| `admin` | No jail: runs as you, cwd in the workspace. Opt-in, for a directory you trust. |
 
-(Legacy `dir`/`local`/`docker` session values normalize to `admin`.)
+Permissions flex at runtime: network is on by default (`/net off` to cut it), and `/allow-dir <path>` grants a writable path outside the workspace. Browser tools (`browser_*`, a real Chromium) are optional — `lunamoth setup browser` installs the driver; they run jailed on all platforms.
 
-**Permissions are runtime-adjustable, not all-or-nothing.** Network is on by default; turn it off live with `/net off` (per session, persisted). Grant writes to a path outside the workspace with `/allow-dir <path>` under `sandbox`. Sessions **persist** between runs like Hermes/Claude Code — nothing is wiped on exit unless you pass `--clean-on-exit`.
+## Run it on a server
 
-**Browser tools (optional).** A suite of `browser_*` tools (drive a real Chromium for navigation, clicks, snapshots) stays hidden until you install their driver: run `lunamoth setup browser` (it installs the Node `agent-browser` CLI + its Chromium, or prints the two `npm` steps and the Node prerequisite if absent). The browser runs **under `sandbox` isolation on all platforms** (macOS sandbox-exec, Linux bwrap, Linux/Docker Landlock) — a Chromium-capable jail confines writes to the workspace+temp and keeps the secret home unreadable, with `--no-sandbox` auto-injected since Chromium can't nest its own sandbox inside the OS jail. `admin` isolation also works. `lunamoth doctor` shows whether the driver is ready.
+LunaMoth is one SPA served by the Python supervisor — loopback locally, or a bound host behind TLS for remote access. The easiest remote setup is no exposure at all: `lunamoth connect ssh://user@server` tunnels both ports and opens your browser.
 
-## TUI reference
+<details>
+<summary>Docker, a public host with Caddy/TLS, and password login</summary>
+
+A system-level install (`install.sh` / `lunamoth desktop`) is recommended over Docker on a normal host — `bwrap` gives each chara the full jail. Docker works too (it falls back to Landlock for filesystem confinement, with the container as the outer boundary), it's just the heavier option.
 
 ```bash
-lunamoth                  # three-card TUI: character stream / operator console / telemetry
-lunamoth --mode chat      # attach in chat mode (it only replies; default: the chara's setting)
-lunamoth --patience 4     # dev override for spontaneous-cycle patience; default comes from the chara
-lunamoth --plain          # legacy plain terminal mode
+scripts/build-wheel.sh                 # builds the SPA + a wheel (the image carries the UI; no Node inside)
+cd deploy && docker compose up -d      # serves on :6180; the WS gateway is on :6181
+docker compose logs lunamoth           # prints the access token
 ```
 
-Patience defaults to 600 seconds, can be declared by cards as `extensions.lunamoth.patience`, can be seeded by `LUNAMOTH_PATIENCE`, and is persisted per chara with `/patience <seconds>`. It paces only the spontaneous cycles; `/quiet` and `rest` are separate.
+Past loopback you need TLS in front. The supervisor serves the UI on `6180` and the WebSocket gateway on `6181`; your proxy presents one HTTPS origin and path-routes the WS upgrade. Caddy (auto-HTTPS):
 
-In-session: `/help`, `/wish` (alias `/goal`), `/skills`, `/mcp`, `/status`, `/memory`, `/files`, `/mode live|chat`, `/patience`, `/reasoning`, `/net on|off`, `/allow-dir <path>`, `/panel`, `/theme`, `/settings`, `/clear`, `/exit` — verbose output lights up the right-side **spotlight panel** (telemetry / memory / file tree with click-to-preview / operator terminal / help), so the console stays a clean chat log. `! <cmd>` runs YOUR shell command in the chara's sandbox (same jail, output in the panel); `Esc` brings the panel home to telemetry.
-
-## Messaging gateways
-
-A chara can also live in your chat apps. In the desktop app open the **Gateways** page (or run `lunamoth gateway NAME` headless) and connect one or more of personal WeChat, QQ, or Telegram — configuration lives in `~/.lunamoth/sessions/NAME/messaging.json`. Adapters deliver only `say` / `speak` text and drop muse / thinking / tool chatter. An empty `allowed_senders` is open; add ids to restrict. Login credentials are saved per-platform in the session dir (e.g. `weixin_state.json`), never in `messaging.json`.
-
-| Platform | How |
-| --- | --- |
-| **Personal WeChat** | Official iLink/ClawBot (`weixin`) — scan a QR, lowest ban risk but grayscale-gated. Or a self-run [WeChatPadPro](https://github.com/WeChatPadPro/WeChatPadPro) docker (`weixinpad`) — iPad protocol, works on any account; **ban risk is real, use a spare account**. |
-| **QQ** | OneBot v11 via NapCat — LunaMoth is the WebSocket client (`url` + your QQ number as `peer_id`), never handles credentials. |
-| **Telegram** | A `@BotFather` bot (`bot_token`), long-polled `getUpdates` — no public URL or webhook. |
-
-Example `messaging.json` (personal WeChat over iLink):
-
-```json
-{
-  "allowed_senders": [],
-  "adapters": { "weixin": { "bot_type": "3" } }
+```caddyfile
+your-host.example.com {
+    @ws path /hub* /chara/*
+    reverse_proxy @ws 127.0.0.1:6181   # WebSocket routes
+    reverse_proxy 127.0.0.1:6180       # everything else
 }
 ```
 
-Where the platform requires the user to message first (WeChat / QQ / Telegram), an unattended `speak` before first contact is logged as deferred — never faked.
+The Host/Origin allowlist is loopback + the bound host only, so name your domain or the proxy is rejected (403): `LUNAMOTH_ALLOW_HOST=your-host.example.com`. Then bookmark `https://your-host/#token=<TOKEN>`.
 
-## Desktop app
+Carrying a long `#token=` URL on a phone is awkward, so a non-loopback bind also accepts a **password** — bookmark the bare URL and log in. Set `LUNAMOTH_PASSWORD=…`, or leave it unset and LunaMoth generates one on first start and prints it once (only a PBKDF2-HMAC-SHA256 hash is stored). The local app never shows a login screen.
 
-`apps/desktop/` is a thin Electron window over `lunamoth desktop` (the backend serves `front/web/`; the shell has no renderer of its own) — the primary face of LunaMoth, with system notifications for `speak` while the window is unfocused.
+</details>
+
+<details>
+<summary>The chara CLI (headless / over SSH)</summary>
+
+`lunamoth` with no args opens a roster of your charas (resume-first), not a fresh session.
 
 ```bash
-cd apps/desktop && npm install && npm run dev
+lunamoth                  # roster: pick a chara to attach, or press n to create one
+lunamoth ls               # name / character / status / isolation / last active
+lunamoth attach muse      # attach (you adopt its background loop while attached)
+lunamoth start muse       # let it live in the background
+lunamoth start-all        # bring everyone back after a reboot
+lunamoth desktop --daemon # the resident supervisor; `daemon status` / `daemon stop`
+lunamoth new muse --isolation admin
 ```
 
-## License & acknowledgements
+In a session, everything is a `/command` — `/help`, `/wish`, `/skills`, `/mcp`, `/status`, `/memory`, `/files`, `/mode live|chat`, `/patience`, `/net on|off`, `/allow-dir`, `/settings`, `/exit`. Verbose output goes to a side panel so the console stays a clean chat log; `! <cmd>` runs your own shell command in the chara's jail.
 
-- **Runtime** (everything under `src/lunamoth`, scripts, tests, packaging): [Apache License 2.0](LICENSE).
-- **Bundled example content** (the LunaMoth 月蛾 and Quinn 小Q character cards under `cards/`, including their embedded world books): original, owner-authored content, Apache-2.0 like the rest of the project. See [CONTENT_LICENSE.md](CONTENT_LICENSE.md) and [NOTICE.md](NOTICE.md).
+Frontend dev loop: `uv run lunamoth desktop --no-open` in one terminal, `cd apps/web && npm run dev` in another (Vite proxies to the backend).
 
-This project began as an SCP fan work — an attempt to recreate SCP-079 in the real world — and quickly grew into a general-purpose roleplay agent system. No SCP-derived content ships any longer; the two bundled cards are LunaMoth 月蛾 (the flagship example, a serene self-metamorphosing digital soul) and Quinn 小Q (the default, a digital intern). Both are original, owner-authored, Apache-2.0.
+</details>
+
+## Messaging gateways
+
+A chara can also live in your chat apps. In the desktop app's **Gateways** page (or `lunamoth gateway NAME` headless), connect personal WeChat, QQ, or Telegram — config lives in `~/.lunamoth/sessions/NAME/messaging.json`, login credentials stay in a separate per-platform file. Only `say`/`speak` text is delivered; muse and tool chatter never leave. An empty `allowed_senders` is open to anyone (you'll get a warning at startup) — add ids to lock it down.
+
+| Platform | How |
+| --- | --- |
+| **WeChat** | iLink/ClawBot (`weixin`, scan a QR — lowest ban risk, grayscale-gated), or self-run [WeChatPadPro](https://github.com/WeChatPadPro/WeChatPadPro) (`weixinpad`, any account — but real ban risk, use a spare). |
+| **QQ** | OneBot v11 via NapCat — LunaMoth is the WS client; it never holds credentials. |
+| **Telegram** | A `@BotFather` bot token, long-polled. No public URL needed. |
+
+These are built but not yet hardened against real-world credentials — treat them as beta. See [SECURITY.md](SECURITY.md) for the trust model.
+
+## Roadmap
+
+The foundations are done: ST-compatible cards, composable tools with native tool calling, the sandbox, persistent `live`/`chat` charas, transcript + bounded memory, self-written skills, MCP, wishes, the typed event protocol, the three-zone prompt stack, the desktop app, and the messaging gateways. What's left is mostly the characters themselves:
+
+- **The chara curriculum** *(the big one)* — neutral prompt guidance so any worldview can live well: how to use tools, treat goals, spend unattended time — suggestions, never orders. Next: cross-worldview eval cards and a browse path for curiosity.
+- **Card studio & market** — a faster inspiration→living-chara path in the deck, plus a shareable card/pack index (with proper card + asset import).
+- **A packaged app** — drag-to-Applications DMG / AppImage, so it isn't clone-only.
+- **World-info parity** — recursive scan, cooldown/delay, insertion depth, probability, whole-word matching (`content/worldinfo.py`).
+- **Messaging & remote** — live-test the gateways with real accounts; a remote TUI client over the gateway.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE).
