@@ -12,7 +12,7 @@ from typing import Any
 
 from ..protocol import SAY, TextDelta
 from ..protocol.api import CharaHandle
-from .access import RefusalThrottle, sender_allowed
+from .access import RefusalThrottle, sender_allowed, warn_if_open_allowlist
 from .base import Adapter, DeliveryDeferred, InboundMessage
 from .filters import is_silence_narration
 from .media import deliver_image_url, deliver_media, extract_outbound, missing_media_note
@@ -186,6 +186,7 @@ class MessagingGateway:
     def start(self) -> None:
         if self._started:
             return
+        warn_if_open_allowlist(self.allowed_senders, channel="gateway")
         if not self._attached:
             self.handle.attach()
             self._attached = True

@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ..messaging.access import RefusalThrottle, sender_allowed
+from ..messaging.access import RefusalThrottle, sender_allowed, warn_if_open_allowlist
 from ..messaging.base import Adapter, DeliveryDeferred, InboundMessage
 from ..messaging.media import deliver_image_url, deliver_media, extract_outbound, missing_media_note
 from ..messaging.gateway import (
@@ -116,6 +116,7 @@ class MessagingHost:
             adapters = make_adapters(cfg)
             allowed = cfg.get("allowed_senders", [])
             self._allowed = {str(x) for x in allowed} if isinstance(allowed, list) else set()
+            warn_if_open_allowlist(self._allowed, channel=self._platform or "messaging")
             self._refusal = str(cfg.get("refusal_text") or DEFAULT_REFUSAL)
             self._adapters = adapters
             self._platform = ",".join(sorted(a.name for a in adapters))

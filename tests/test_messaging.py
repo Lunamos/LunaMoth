@@ -1114,3 +1114,19 @@ def test_gateway_config_error_exits_fatal_not_retried(tmp_path, monkeypatch):
     # missing config file -> fatal exit too (retrying can't create it)
     (meta.root / "messaging.json").unlink()
     assert cli.cmd_gateway(ns) == GATEWAY_FATAL_EXIT
+
+
+def test_warn_if_open_allowlist_logs_only_when_open(caplog, monkeypatch):
+    """An empty allow-list (= open) must emit a loud WARNING; a restricted one is silent."""
+    import logging
+    from lunamoth.messaging.access import warn_if_open_allowlist
+    # obs.setup_logging (run by sibling tests) cuts propagation on "lunamoth";
+    # restore it so caplog sees the record regardless of test order.
+    monkeypatch.setattr(logging.getLogger("lunamoth"), "propagate", True)
+    with caplog.at_level(logging.WARNING, logger="lunamoth.messaging.access"):
+        assert warn_if_open_allowlist(set(), channel="weixin") is True
+    assert any("OPEN allow-list" in r.message for r in caplog.records)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="lunamoth.messaging.access"):
+        assert warn_if_open_allowlist({"u1"}, channel="weixin") is False
+    assert not any("OPEN allow-list" in r.message for r in caplog.records)

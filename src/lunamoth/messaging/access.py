@@ -8,7 +8,26 @@ Keeping them here means a change lands in BOTH paths instead of drifting — the
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime
+
+_log = logging.getLogger("lunamoth.messaging.access")
+
+
+def warn_if_open_allowlist(allowed, channel: str = "") -> bool:
+    """Emit a loud WARNING when a messaging gateway starts with an EMPTY allow-list
+    (= open: any inbound sender can summon a capable shell/file agent). This is the
+    documented default, but on a public channel it's the #1 misconfiguration risk,
+    so we make it visible in the log at start. Returns True when the list is open."""
+    if not allowed:
+        _log.warning(
+            "messaging gateway%s started with an OPEN allow-list (empty = anyone "
+            "can reach this chara, which has tool access). Set allowed_senders to "
+            "restrict it for any non-trusted channel.",
+            f" [{channel}]" if channel else "",
+        )
+        return True
+    return False
 
 
 def sender_allowed(sender_id: str, allowed: set[str]) -> bool:
