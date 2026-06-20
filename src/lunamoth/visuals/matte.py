@@ -133,9 +133,20 @@ def deps_progress() -> dict:
         return dict(_deps_progress)
 
 
-def _uv_bin() -> str:
+def _find_uv() -> "str | None":
+    """Locate the ``uv`` binary. LunaMoth is uv-based (install.sh drops it in
+    ~/.lunamoth/bin), but a GUI app launched from Finder doesn't inherit the shell
+    PATH, so check the common install locations too. None if genuinely absent."""
     import shutil
-    return shutil.which("uv") or str(Path.home() / ".lunamoth" / "bin" / "uv")
+    found = shutil.which("uv")
+    if found:
+        return found
+    for p in (Path.home() / ".lunamoth" / "bin" / "uv",
+              Path.home() / ".local" / "bin" / "uv",
+              Path.home() / ".cargo" / "bin" / "uv"):
+        if p.exists():
+            return str(p)
+    return None
 
 
 def _visuals_pkgs() -> list[str]:
@@ -147,21 +158,39 @@ def _visuals_pkgs() -> list[str]:
 def _install_deps_blocking(timeout: int = 1800) -> None:
     """Install the visuals stack INTO THE RUNNING interpreter's environment so
     ``import rembg`` works at runtime. Blocks until done; raises ``RuntimeError``
-    carrying the output tail on failure (never a silent/fake success)."""
+    carrying the output tail on failure (never a silent/fake success).
+
+    Robust to how the app was set up: prefer ``uv pip`` (works for a uv-created
+    venv, which has NO pip); if uv is genuinely absent, BOOTSTRAP pip with
+    ``ensurepip`` first (that uv venv lacks pip) and then ``pip install``."""
     import importlib
-    import shutil
     import subprocess
     import sys
-    uv = _uv_bin()
-    if Path(uv).exists() or shutil.which("uv"):
-        cmd = [uv, "pip", "install", "--python", sys.executable, *_visuals_pkgs()]
-    else:
-        cmd = [sys.executable, "-m", "pip", "install", "--break-system-packages", *_visuals_pkgs()]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    importlib.invalidate_caches()  # make the freshly-installed package importable now
-    if proc.returncode != 0 or not deps_available():
-        tail = (proc.stderr or proc.stdout or "dependency install failed").strip()[-400:]
-        raise RuntimeError(f"could not install background-removal dependencies: {tail}")
+
+    def _ok(proc) -> bool:
+        importlib.invalidate_caches()  # make the fresh install importable now
+        return proc.returncode == 0 and deps_available()
+
+    last = ""
+    uv = _find_uv()
+    if uv:
+        proc = subprocess.run([uv, "pip", "install", "--python", sys.executable, *_visuals_pkgs()],
+                              capture_output=True, text=True, timeout=timeout)
+        if _ok(proc):
+            return
+        last = (proc.stderr or proc.stdout or "").strip()[-400:]
+
+    # pip fallback — a uv-created venv ships no pip, so bootstrap it first
+    # (best-effort; ignore failure), then install.
+    subprocess.run([sys.executable, "-m", "ensurepip", "--default-pip"],
+                   capture_output=True, text=True, timeout=300)
+    proc = subprocess.run([sys.executable, "-m", "pip", "install",
+                           "--break-system-packages", *_visuals_pkgs()],
+                          capture_output=True, text=True, timeout=timeout)
+    if _ok(proc):
+        return
+    last = (proc.stderr or proc.stdout or last or "no uv or pip available").strip()[-400:]
+    raise RuntimeError(f"could not install background-removal dependencies: {last}")
 
 
 def install_deps_async() -> dict:
