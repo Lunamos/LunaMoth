@@ -254,9 +254,13 @@ zero internal deps; `obs/` imports only `config`.
     todo/processes/browser). hermes' per-task env → LunaMoth's one-per-chara ctx.
   - `gateway.py` — `ToolGateway` is now a THIN shim over the registry: the SECURITY
     audit trail, the #24 loop guardrails (warn@2/refuse@5/streak-block@8), the
-    gate (registered ∩ pack.tools — `tool_access` as a 3rd owner was retired; the
-    toolpack IS the allowlist), MCP dispatch, and the `{ok,data}` result the agent
-    loop consumes. Tool success/failure is judged on the explicit `__tool_error__`
+    gate, MCP dispatch, and the `{ok,data}` result the agent loop consumes. The
+    gate is DEFAULT-OPEN (hermes parity, 2026-06-20): the model gets the FULL tool
+    surface by default — the bundled `sandbox` pack declares `tools: ["*"]` (same
+    wildcard as the MCP allow-list) and the gateway expands `*` to every registered
+    tool; an explicit pack list narrows, and `None` = a tool-less pure-roleplay
+    chara. There is no user-facing tool picker. (`tool_access` as a 3rd owner was
+    retired.) Tool success/failure is judged on the explicit `__tool_error__`
     sentinel (`tool_error` stamps it), not a JSON-shape guess. No tool bodies live here.
   - `builtin/` — each tool is an island that self-registers at import. The
     general surface mirrors hermes: `file_tools.py` (read_file offset/limit,

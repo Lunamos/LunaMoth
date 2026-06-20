@@ -46,7 +46,7 @@ The foundations are in place — SillyTavern-compatible cards & world books, com
 <table>
 <tr><td><b>SillyTavern-compatible content</b></td><td>Cards <i>are</i> ST format (V2/V3 <code>.json</code>/<code>.png</code> with an embedded <code>character_book</code>). To start from a foreign card, paste its JSON into the create box — the AI drafts from it as inspiration. <code>{{char}}</code>/<code>{{user}}</code> macros, <code>first_mes</code>, and keyword-triggered lore entries all work. (A dedicated card+asset import is deferred to the card market.)</td></tr>
 <tr><td><b>Native tool calling</b></td><td>Tools are exposed via the OpenAI tool-calling protocol; the agent loop streams text and executes tool calls mid-turn.</td></tr>
-<tr><td><b>Composable tool packs</b></td><td>Capability bundles (<code>toolpacks/*.json</code>) declare exactly which tools a character gets. No pack, no powers.</td></tr>
+<tr><td><b>Full tool surface by default</b></td><td>Like hermes, a chara gets the whole tool surface by default (the bundled pack is <code>tools: ["*"]</code>); there's no user-facing tool picker. A card author can still ship a restricted <code>toolpacks/*.json</code>, and a pure-roleplay card with no pack stays tool-less.</td></tr>
 <tr><td><b>Sandboxed execution</b></td><td>The <code>terminal</code> tool runs shell commands (any language) under a per-session jail — <code>sandbox-exec</code> (macOS) / <code>bubblewrap</code> or <code>Landlock</code> (Linux) — confined to the workspace, and it refuses to run if no jail is available rather than degrade. (<code>admin</code> isolation opts out of the jail entirely for a trusted operator.)</td></tr>
 <tr><td><b>Bounded, auditable memory</b></td><td>Durable memory is a token-capped file the character edits through tools, not an unbounded database; every tool call lands in <code>sandbox/logs/audit.jsonl</code>.</td></tr>
 <tr><td><b>Lives on its own</b></td><td>In <code>live</code> mode the character keeps thinking and creating between your messages, paced by its card/settings <code>patience</code>; in <code>chat</code> mode it attends to you only. A resident <code>lunamothd</code> supervisor owns desktop/background life.</td></tr>
@@ -182,7 +182,7 @@ A card is the ONE content file: identity, voice, embedded world (`character_book
 
 The dropdowns also scan your local SillyTavern data directory if you opt in with `LUNAMOTH_ST_DIR=~/SillyTavern/data/default-user`.
 
-A card is plain roleplay by default — tool access is opt-in via a tool pack, never implied by the card.
+A chara gets the full tool surface by default (hermes parity — the bundled pack is `["*"]`, and there's no user-facing tool picker). A card author can still ship a restricted toolpack, and a card with no pack at all stays pure roleplay (tool-less).
 
 ## Tools & isolation
 

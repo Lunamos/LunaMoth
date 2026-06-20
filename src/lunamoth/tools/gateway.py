@@ -163,16 +163,23 @@ class ToolGateway:
         self.mcp_allowed = self.mcp.allowed_servers(mcp_servers) if self.mcp else []
 
     def _effective(self) -> set[str]:
-        """Callable builtin tools = registered ∩ active pack.
+        """Callable builtin tools.
 
-        The pack (set_enabled) is the per-chara allowlist; the registry is the
-        source of truth for what exists. There is no third hand-kept list — a
-        newly-registered tool in the pack is callable with nothing to edit.
-        Runtime toggles like `/net off` gate at CALL time (network_access), they
-        do not remove tools here."""
+        The DEFAULT is ALL registered tools (hermes parity — the model gets the
+        whole surface; there is no user-facing tool picker). A pack of ``["*"]``
+        means exactly that and is what the bundled default pack declares; the same
+        ``*`` wildcard the MCP allow-list already uses. A pack with an explicit
+        list narrows to ``registered ∩ list`` (a card author can still restrict).
+        ``None`` means a TOOL-LESS chara (a plain-roleplay card with no pack) —
+        it gets nothing and is free to just narrate. The registry is the source
+        of truth for what exists, so a newly-registered tool is callable with
+        nothing to edit. Runtime toggles like ``/net off`` gate at CALL time."""
         if self.enabled_tools is None:
             return set()
-        return set(registry.get_all_tool_names()) & self.enabled_tools
+        all_names = set(registry.get_all_tool_names())
+        if "*" in self.enabled_tools:
+            return all_names
+        return all_names & self.enabled_tools
 
     def has_tools(self) -> bool:
         return bool(self._effective()) or bool(self.mcp_allowed)

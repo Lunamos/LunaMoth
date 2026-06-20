@@ -56,6 +56,23 @@ def gw(tmp_path):
             registry.deregister(n)
 
 
+def test_effective_tools_default_all_via_wildcard(gw):
+    """hermes parity: the default pack is ['*'] = every registered tool. An
+    explicit list narrows; None means a tool-less (pure-roleplay) chara."""
+    from lunamoth.tools.registry import registry as _reg
+    all_names = set(_reg.get_all_tool_names())
+    assert all_names  # builtins are registered
+
+    gw.set_enabled(["*"])
+    assert gw._effective() == all_names  # wildcard → everything
+
+    gw.set_enabled(["terminal"])
+    assert gw._effective() == ({"terminal"} & all_names)  # explicit list narrows
+
+    gw.set_enabled(None)
+    assert gw._effective() == set()  # tool-less chara
+
+
 def _set_terminal(handler):
     _register("terminal", handler)
 

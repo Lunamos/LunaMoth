@@ -1,13 +1,29 @@
 
 import pytest
 
-from lunamoth.tools.runner import os_sandbox_available, run_terminal, strip_ansi, truncate_middle
+from lunamoth.tools.runner import (
+    os_sandbox_available,
+    run_terminal,
+    run_terminal_result,
+    strip_ansi,
+    truncate_middle,
+)
 
 
 def test_dir_runs_any_command(tmp_path):
     ws = tmp_path / "workspace"
     out = run_terminal("echo hello && echo world", ws, isolation="admin", timeout=10)
     assert "hello" in out and "world" in out and "exit=0" in out
+
+
+def test_terminal_result_carries_real_exit_code(tmp_path):
+    ws = tmp_path / "workspace"
+    ok = run_terminal_result("true", ws, isolation="admin", timeout=10)
+    assert ok.exit_code == 0 and not ok.timed_out and not ok.refused
+    bad = run_terminal_result("exit 7", ws, isolation="admin", timeout=10)
+    assert bad.exit_code == 7 and not bad.timed_out
+    # run_terminal stays a thin text wrapper (same blob, no behavior change).
+    assert run_terminal("exit 7", ws, isolation="admin", timeout=10) == bad.text
 
 
 def test_dir_writes_into_workspace(tmp_path):

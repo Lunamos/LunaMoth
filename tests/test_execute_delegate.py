@@ -77,6 +77,19 @@ def make_ctx(tmp_path, *, dispatch=None, llm=None, tool_access=None,
             terminal_records.append({"command": command, "timeout": timeout, "workdir": workdir})
         return terminal_output
 
+    def _run_terminal_result(command, *, timeout, workdir=None, browser=False):
+        from lunamoth.tools.runner import TerminalResult
+        text = _run_terminal(command, timeout=timeout, workdir=workdir)
+        # Default the fake to a clean exit (0) so execute_code reports success;
+        # a non-zero "exit=N" prefix in terminal_output is honored for error-path tests.
+        code = 0
+        if text.startswith("exit="):
+            try:
+                code = int(text.split("\n", 1)[0].split("=", 1)[1])
+            except ValueError:
+                code = 0
+        return TerminalResult(text=text, exit_code=code)
+
     ctx = ToolContext(
         sandbox=_FakeSandbox(root),
         state=_FakeState(tool_access),
@@ -85,6 +98,7 @@ def make_ctx(tmp_path, *, dispatch=None, llm=None, tool_access=None,
         dispatch=dispatch,
     )
     ctx.run_terminal = _run_terminal  # type: ignore[method-assign]
+    ctx.run_terminal_result = _run_terminal_result  # type: ignore[method-assign]
     # execute_code now mirrors the gateway's effective set; in tests the fake
     # state's tool_access expresses that set.
     ctx.enabled_tool_names = lambda: set(ctx.state.load().get("tool_access") or [])
@@ -147,6 +161,17 @@ def test_execute_code_runs_and_returns_stdout(tmp_path):
     assert records and "python3 script.py" in records[0]["command"]
     # Staging dir cleaned up.
     assert not list((tmp_path / "chara" / "workspace").glob(".execute_code_*"))
+
+
+def test_execute_code_nonzero_exit_is_error_not_success(tmp_path):
+    # A script that exits non-zero must report status=error with the real code —
+    # the old substring-scan reported success unless the output said "timed out".
+    ctx = make_ctx(tmp_path, dispatch=lambda n, a: "{}",
+                   terminal_output="exit=1\nSTDERR:\nTraceback ... SystemExit")
+    out = json.loads(ec_mod.execute_code({"code": "raise SystemExit(1)"}, ctx))
+    assert out["status"] == "error"
+    assert out["exit_code"] == 1
+    assert "exited with code 1" in out["error"]
 
 
 def test_execute_code_secret_redaction(tmp_path):

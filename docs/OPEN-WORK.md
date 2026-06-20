@@ -47,21 +47,30 @@ independent defects. The 2026-06-20 audit round collapsed the shared roots:
 - *CI* — `.github/workflows/ci.yml` now runs ruff + pytest (incl. the architecture
   guard) + frontend tsc/vitest on push/PR, so the test-enforced boundaries
   actually gate changes.
+- *execute_code structured status* (DONE 2026-06-20) — `runner` now returns a
+  typed `TerminalResult(text, exit_code, timed_out, refused)`; `run_terminal`
+  stays a thin text wrapper, and `execute_code` reports status from the REAL exit
+  code (non-zero → error with the code), not a substring scan. `ctx.run_terminal_result`
+  is the structured accessor.
+- *Tools default-open* (DONE 2026-06-20, owner sign-off) — hermes parity: the
+  model gets the FULL tool surface by default. The bundled `sandbox` pack declares
+  `tools: ["*"]` (the same wildcard the MCP allow-list uses); the gateway expands
+  `*` to every registered tool. `None` still means a tool-less pure-roleplay chara;
+  an explicit list can still narrow. There is no user-facing tool picker (the deck
+  hardcodes the default pack).
 
 **STILL OPEN (genuinely deferred — owner sign-off / lower value):**
-- *execute_code structured status*: `runner`/`execute_code` still infer
-  success from text rather than returning a real exit code; a non-zero script
-  exit can still read as success. (Medium; the `__tool_error__` sentinel covers
-  the tool-layer, not the in-sandbox script exit code.)
-- *attach decision table*: `protocol/api.py`'s opening decision still chains
-  several orthogonal facts as short-circuits; extract a pure, unit-testable
-  `_decide_opening(...)`. (Lower value now that presence was deleted.)
-- *`LifeState.state`* single string still carries several meanings with an
-  overloaded `detail` (`supervisor.py`).
-- **P2 (needs owner sign-off — touches default capability / Settings schema /
-  card semantics):** allowlist white→deny-list inversion (default-open, same
-  philosophy as network-on-by-default); `patience` dropping its companion
-  `patience_override` bool; card `wishes` re-seeding on edit; `LifeState` struct.
+  (NOTE 2026-06-20: two items previously listed here were already obsolete and
+  were dropped — the *attach decision table* (the present/_greeted/resting/
+  first_meeting chain was removed with presence on 2026-06-18; `attach()` is now
+  just "empty epoch → greeting once, else none"), and the *LifeState struct*
+  (today's `LifeState` is already a frozen dataclass with per-state typed fields
+  next_cycle_at/rest_until/engaged_until/detail — not the single overloaded string
+  the old note described; `CharaChild.state` is a SEPARATE concern, process
+  lifecycle vs life rhythm, not duplication).)
+- **P2 (needs owner sign-off — touches Settings schema / card semantics):**
+  `patience` dropping its companion `patience_override` bool; card `wishes`
+  re-seeding on edit; `LifeState` struct.
 
 ---
 

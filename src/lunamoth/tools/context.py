@@ -89,7 +89,15 @@ class ToolContext:
         """Run a shell command under the chara's isolation (sandbox/admin).
         Thin pass-through to tools.runner.run_terminal with the live env facts.
         ``browser=True`` selects the browser-specific jail (Chromium-capable)."""
-        from .runner import run_terminal as _run
+        return self.run_terminal_result(command, timeout=timeout, workdir=workdir,
+                                        browser=browser).text
+
+    def run_terminal_result(self, command: str, *, timeout: int, workdir: Path | None = None,
+                            browser: bool = False):
+        """Like run_terminal but returns the structured TerminalResult (text +
+        real exit code + timed_out/refused) — so execute_code can judge success on
+        the script's actual exit code, not a substring scan of the output."""
+        from .runner import run_terminal_result as _run
         perms = self.permissions()
         return _run(
             command,

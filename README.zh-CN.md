@@ -46,7 +46,7 @@
 <table>
 <tr><td><b>兼容 SillyTavern 内容格式</b></td><td>角色卡<i>本身就是</i> ST 格式（内嵌 <code>character_book</code> 的 V2/V3 <code>.json</code>/<code>.png</code>）。想从外部卡片起步，把它的 JSON 粘进创建框——AI 会以它为灵感起草。<code>{{char}}</code>/<code>{{user}}</code> 宏、<code>first_mes</code> 开场白、按关键词触发的 lore 条目均可用。（专门的卡片+资产导入功能延后到卡片市场。）</td></tr>
 <tr><td><b>原生 tool calling</b></td><td>工具通过 OpenAI tool-calling 协议暴露；agent 循环边流式输出文本、边在回合中执行工具调用。</td></tr>
-<tr><td><b>可组合工具包</b></td><td>能力以 <code>toolpacks/*.json</code> 打包，精确声明角色能用哪些工具。没给包，就没有能力。</td></tr>
+<tr><td><b>默认拥有完整工具面</b></td><td>和 hermes 一样，chara 默认拿到整个工具面（内置包就是 <code>tools: ["*"]</code>）；不提供面向用户的工具选择器。卡片作者仍可发布受限的 <code>toolpacks/*.json</code>；完全不带工具包的纯角色扮演卡则保持无工具。</td></tr>
 <tr><td><b>沙盒执行</b></td><td><code>terminal</code> 工具在会话隔离下跑 shell 命令（任意语言）—— <code>sandbox-exec</code>（macOS）/ <code>bubblewrap</code> → <code>Landlock</code>（Linux）牢笼；限制在 workspace 内，密钥之家（<code>~/.lunamoth</code>）不可读，没有可用牢笼时拒绝运行而非降级。（<code>admin</code> 隔离则完全退出牢笼，交给可信操作者。）</td></tr>
 <tr><td><b>有界、可审计的记忆</b></td><td>持久记忆是一个有 token 上限的文件，角色通过工具编辑它，而不是无限数据库；所有工具调用写入 <code>sandbox/logs/audit.jsonl</code>。</td></tr>
 <tr><td><b>自己生活</b></td><td><code>live</code> 模式下角色在你的消息间隙持续思考与创作，节奏由角色卡/设置中的 <code>patience</code> 控制；<code>chat</code> 模式下它只专心陪你。常驻 <code>lunamothd</code> 监督进程负责桌面端/后台生命。</td></tr>
@@ -182,7 +182,7 @@ export OPENAI_MODEL=qwen2.5:3b-instruct
 
 设置 `LUNAMOTH_ST_DIR=~/SillyTavern/data/default-user` 后，下拉框还会扫描你本机的 SillyTavern 数据目录。
 
-角色卡默认是纯角色扮演——工具能力必须通过工具包显式授予，卡本身不隐含任何权限。
+chara 默认拥有完整工具面（对齐 hermes —— 内置包是 `["*"]`，且没有面向用户的工具选择器）。卡片作者仍可发布受限工具包；完全不带工具包的卡则保持纯角色扮演（无工具）。
 
 ## 工具与隔离
 

@@ -425,7 +425,8 @@ def execute_code(args: dict, ctx) -> str:
             f"PYTHONPATH={_q(str(stage_dir))} "
             f"python3 script.py"
         )
-        raw_output = ctx.run_terminal(command, timeout=timeout)
+        term = ctx.run_terminal_result(command, timeout=timeout)
+        raw_output = term.text
         stop_event.set()
         if rpc_thread:
             rpc_thread.join(timeout=3)
@@ -445,18 +446,31 @@ def execute_code(args: dict, ctx) -> str:
                 + output[-tail_n:]
             )
 
-        status = "success"
-        if "[runner: timeout after" in raw_output or "timed out" in raw_output.lower():
+        # Status from the REAL exit code, not a substring scan: a script that
+        # exits non-zero is an error even when its output looks clean. timed_out /
+        # refused (jail unavailable) are surfaced as their own states.
+        if term.timed_out:
             status = "timeout"
+        elif term.refused:
+            status = "error"
+        elif term.exit_code not in (0, None):
+            status = "error"
+        else:
+            status = "success"
 
         result = {
             "status": status,
             "output": output,
+            "exit_code": term.exit_code,
             "tool_calls_made": tool_call_counter[0],
             "duration_seconds": round(time.monotonic() - exec_start, 2),
         }
         if status == "timeout":
             result["error"] = f"Script timed out after {timeout}s and was killed."
+        elif term.refused:
+            result["error"] = "Sandbox unavailable — the script was not run."
+        elif status == "error":
+            result["error"] = f"Script exited with code {term.exit_code}."
         return json.dumps(result, ensure_ascii=False)
 
     except Exception as exc:  # noqa: BLE001

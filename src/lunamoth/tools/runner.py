@@ -32,6 +32,7 @@ import struct
 import subprocess
 import termios
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..obs import get_logger
@@ -213,6 +214,19 @@ def _drain_nonblocking(stream, deadline: float) -> bytes:
     return b"".join(chunks)
 
 
+@dataclass(frozen=True)
+class TerminalResult:
+    """Structured result of a terminal run, so a caller (execute_code) can judge
+    success on the REAL exit code instead of scanning the text for substrings.
+    `text` is the same human/model-facing blob `run_terminal` returns.
+    `exit_code` is None when the command never produced one (timed out, jail
+    refused, or the runner binary was missing)."""
+    text: str
+    exit_code: int | None = None
+    timed_out: bool = False
+    refused: bool = False
+
+
 def run_terminal(
     command: str,
     workspace: Path,
@@ -224,7 +238,27 @@ def run_terminal(
     workdir: str | None = None,
     browser: bool = False,
 ) -> str:
-    """Execute *command* in a shell under the active isolation mechanism.
+    """Execute *command* and return the text blob (exit=…/STDOUT/STDERR). Thin
+    wrapper over ``run_terminal_result`` for the many callers that only want text."""
+    return run_terminal_result(
+        command, workspace, isolation=isolation, allow_network=allow_network,
+        writable_paths=writable_paths, timeout=timeout, workdir=workdir, browser=browser,
+    ).text
+
+
+def run_terminal_result(
+    command: str,
+    workspace: Path,
+    *,
+    isolation: str | None = None,
+    allow_network: bool = False,
+    writable_paths: "list[str] | tuple[str, ...]" = (),
+    timeout: int = DEFAULT_TIMEOUT,
+    workdir: str | None = None,
+    browser: bool = False,
+) -> TerminalResult:
+    """Execute *command* in a shell under the active isolation mechanism, returning
+    a TerminalResult (text + real exit code + timed_out/refused flags).
 
     ``browser=True`` selects the browser-specific jail (a real Chromium needs
     more latitude than the deny-default shell profile; the jail keeps writes
@@ -262,7 +296,7 @@ def run_terminal(
     except JailUnavailableError as e:
         # NEVER degrade to directory trust — under it the chara could read the
         # whole container, incl. the global key in ~/.lunamoth (OPEN-WORK SEC-low).
-        return (f"[lunamoth: refused — {e}]" + note).strip()
+        return TerminalResult((f"[lunamoth: refused — {e}]" + note).strip(), refused=True)
     note += jail_note
     # admin / macOS sandbox honor the resolved workdir; Linux bwrap sets its own
     # --chdir (jail_cwd is None there). The helper returns the workspace as the
@@ -281,7 +315,7 @@ def run_terminal(
         )
     except FileNotFoundError as e:
         _log.error("terminal runner unavailable (%s): %s", isolation, e)
-        return f"[runner error: {e}]{note}"
+        return TerminalResult(f"[runner error: {e}]{note}")
     try:
         out_b, err_b = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -305,7 +339,7 @@ def run_terminal(
             parts.append(f"partial STDOUT:\n{out}")
         if err:
             parts.append(f"partial STDERR:\n{err}")
-        return ("\n".join(parts) + note).strip()
+        return TerminalResult(("\n".join(parts) + note).strip(), timed_out=True)
     _log.info("terminal (%s, net=%s) exit=%d in %.1fs: %.120s",
               isolation, "on" if allow_network else "off", proc.returncode, time.monotonic() - t0, command)
 
@@ -316,7 +350,7 @@ def run_terminal(
         parts.append(f"STDOUT:\n{out}")
     if err:
         parts.append(f"STDERR:\n{err}")
-    return ("\n".join(parts) + note).strip()
+    return TerminalResult(("\n".join(parts) + note).strip(), exit_code=proc.returncode)
 
 
 # ---- PTY path (interactive commands: vim/top/REPL/password prompts) ----------
