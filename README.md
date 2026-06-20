@@ -34,21 +34,43 @@ It started as a roleplay frontend that could actually *do* things, and grew into
 
 The agent core borrows heavily from [Hermes](https://github.com/NousResearch/hermes-agent); the card/world-book format is [SillyTavern](https://github.com/SillyTavern/SillyTavern)'s.
 
-It's beta. Run it from a clone — there's no packaged app yet.
-
 ## Quick start
 
-You need [uv](https://docs.astral.sh/uv/) and Node (macOS or Linux):
+It's beta, macOS and Linux. First launch is a welcome screen: pick a provider (OpenRouter / OpenAI / Ollama / Mock), then describe a character and let the AI draft the card, or pick one from the bundled deck. `/settings` changes anything later.
+
+### On your Mac
+
+The one-line installer (a prebuilt wheel, no Node build), then open the UI in your browser:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lunamos/LunaMoth/main/install.sh | bash
+lunamoth desktop      # serves the UI and opens your browser  (lunamoth = the terminal UI; lunamoth doctor checks your setup)
+```
+
+Or run the full desktop app from a clone (this is how we develop it) — needs [uv](https://docs.astral.sh/uv/) + Node:
 
 ```bash
 git clone https://github.com/Lunamos/LunaMoth.git && cd LunaMoth
 uv sync --extra dev --extra server --extra messaging
-cd apps/desktop && npm install && npm run dev      # opens the desktop app
+cd apps/desktop && npm install && npm run dev      # opens the desktop window
 ```
 
-First launch is a welcome screen: pick a provider (OpenRouter / OpenAI / Ollama / Mock), then either describe a character and let the AI draft the card, or pick one from the bundled deck. `/settings` changes anything later. Migrating from SillyTavern? Paste the card's JSON into the create box and the AI drafts from it.
+### On a Linux server, reached from your browser
 
-Prefer the terminal? `curl -fsSL https://raw.githubusercontent.com/Lunamos/LunaMoth/main/install.sh | bash`, then run `lunamoth`. (`lunamoth doctor` if something looks off.)
+Install on the server and leave a chara living in the background:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lunamos/LunaMoth/main/install.sh | bash
+lunamoth desktop --daemon      # resident supervisor; charas keep running between visits
+```
+
+Then, from your own machine, tunnel in over SSH — no open ports, encryption and auth come from SSH, and your browser opens pointed at the server:
+
+```bash
+lunamoth connect ssh://user@your-server
+```
+
+Prefer a real public URL (TLS, a bookmarkable address, optional password login)? See [Run it on a server](#run-it-on-a-server).
 
 ## What makes it different
 
@@ -104,7 +126,7 @@ Permissions flex at runtime: network is on by default (`/net off` to cut it), an
 
 ## Run it on a server
 
-LunaMoth is one SPA served by the Python supervisor — loopback locally, or a bound host behind TLS for remote access. The easiest remote setup is no exposure at all: `lunamoth connect ssh://user@server` tunnels both ports and opens your browser.
+The Quick Start above gets you in over SSH with no open ports. If instead you want a real public URL — a bookmarkable HTTPS address, optionally with password login — here's the rest.
 
 <details>
 <summary>Docker, a public host with Caddy/TLS, and password login</summary>
