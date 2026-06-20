@@ -34,6 +34,24 @@ jobs:
       - name: Pytest (incl. test_architecture.py boundary guard)
         run: uv run python -m pytest -q
 
+  backend-macos:
+    name: Python on macOS (Seatbelt + PTY jail paths)
+    # The project is "macOS first," and the strongest jail tests (sandbox-exec
+    # read-confinement, the PTY paths) are platform-gated and SKIP on Linux — so
+    # green Linux CI did not actually verify them. This job runs the suite on
+    # macOS so those paths are exercised on their native OS.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Sync (dev + server extras)
+        run: uv sync --extra dev --extra server
+      - name: Pytest (Seatbelt/PTY jail tests run here, not on Linux)
+        run: uv run python -m pytest -q
+
   frontend:
     name: Web (tsc + vitest)
     runs-on: ubuntu-latest
