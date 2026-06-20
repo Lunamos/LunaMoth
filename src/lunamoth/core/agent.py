@@ -43,7 +43,12 @@ from ..tools.toolpacks import ToolPack, load_toolpack
 from ..tools.gateway import ToolGateway
 from .transcript import TranscriptStore
 from ..content.worldinfo import apply_macros
-from ..content.knobs import normalize_embodiment, normalize_website, parse_patience
+from ..content.knobs import (
+    normalize_embodiment,
+    normalize_force_roleplay,
+    normalize_website,
+    parse_patience,
+)
 
 _log = get_logger("agent")
 
@@ -351,7 +356,13 @@ class LunaMothAgent:
         if override:
             return override
         if self.character is not None:
-            card = normalize_embodiment(self.character.defaults().get("embodiment"))
+            defaults = self.character.defaults()
+            # The card FIELD is now a boolean `force_roleplay` (True ≡ "actor");
+            # fall back to the legacy `embodiment` string so old frozen cards work.
+            forced = normalize_force_roleplay(defaults.get("force_roleplay"))
+            if forced is not None:
+                return "actor" if forced else "literal"
+            card = normalize_embodiment(defaults.get("embodiment"))
             if card:
                 return card
         return "literal"

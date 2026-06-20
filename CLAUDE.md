@@ -97,8 +97,8 @@ example) and Quinn 小Q (the default).)
 ## Design principles (binding)
 
 - **The card is the soul — and the ONE external file.** Identity, voice, world
-  (embedded `character_book`), rules hooks, permissions (toolpack), memory
-  size, seed wishes (`extensions.lunamoth.wishes`, legacy `.goals` still read)
+  (embedded `character_book`), rules hooks, seed wishes
+  (`extensions.lunamoth.wishes`, legacy `.goals` still read)
   all live in the card. The
   engine injects no identity and ships ZERO default flavor text: a card that
   doesn't declare a prompt gets silence, not a default.
@@ -453,7 +453,7 @@ Every API request is assembled as **three zones**:
    two only when tools are enabled).
 
 Card override hooks: `extensions.lunamoth.{rules,practice,tool_use,rules_closer,
-embodiment,embodiment_bridge,wishes,toolpack,memory_chars}`; global
+force_roleplay,embodiment_bridge,wishes}`; global
 `~/.lunamoth/rules.md` overrides `rules`. (The `on_attach`/`on_detach` hooks were
 REMOVED 2026-06-18 along with the rest of presence — there is no enter/leave
 marker to override.) (The old `world` path pointer is retired — it

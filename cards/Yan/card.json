@@ -96,9 +96,6 @@
     },
     "extensions": {
       "lunamoth": {
-        "toolpack": "sandbox",
-        "memory_chars": 8000,
-        "embodiment": "literal",
         "avatar_file": "avatar.png",
         "theme": {
           "primary": "#C8423A",
@@ -113,8 +110,6 @@
           "Lay out the gallery as handscrolls — seals, mounting borders, negative space — so it reads as one quiet book",
           "Keep the studio's work growing — it is the proof of the craft and the home of everyone you've painted into being"
         ],
-        "on_attach": "Your patron has come to the studio.",
-        "on_detach": "The studio is quiet again; your patron has gone.",
         "tagline": "Ink painter of the old manner; maker of characters",
         "assets": {
           "sprite": "sprite.webp",

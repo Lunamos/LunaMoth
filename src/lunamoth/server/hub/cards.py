@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ...content.cards import CharacterCard, detect_language, looks_like_world_book, merge_world_into_card
+from ...content.knobs import normalize_force_roleplay
 from ...content.imaging import CAP_ART, avatar_thumb_data_uri, compress_image_bytes
 from ...session import sessions as S
 from ..dispatch import RpcError
@@ -234,7 +235,6 @@ def _parse_card_draft(raw: str) -> dict[str, Any]:
         "seed_goals": _validate_seed_goals(obj.get("seed_goals")),
         "tagline": opt("tagline"),
         "theme_color": _theme_color(obj.get("theme_color")),
-        "embodiment": "literal",
     }
     # No avatar is drafted — it's a manual upload/generate step (stored as a sidecar).
     return draft
@@ -674,14 +674,17 @@ def _card_entry(path: Path, builtin: bool, refs: dict[str, list[str]]) -> dict[s
     theme_color = ""
     avatar_svg = ""
     tagline = ""
-    embodiment = ""
+    force_roleplay: bool | None = None
     theme = card.theme_colors()
     avatar_uri = _avatar_thumb_uri(path, card)
     if isinstance(ext, dict):
         theme_color = theme.get("primary", "")
         avatar_svg = _sanitize_avatar_svg(ext.get("avatar_svg"))[0]
         tagline = str(ext.get("tagline") or "")
-        embodiment = str(ext.get("embodiment") or "")
+        # The card FIELD is a boolean; bridge a legacy `embodiment: "actor"` too.
+        force_roleplay = normalize_force_roleplay(ext.get("force_roleplay"))
+        if force_roleplay is None and str(ext.get("embodiment") or "").lower() == "actor":
+            force_roleplay = True
     used_by = refs.get(str(path), [])
     full_tags = [str(t) for t in (card.tags or [])]
     # The default-card marker must survive display truncation: the deck/welcome
@@ -710,7 +713,7 @@ def _card_entry(path: Path, builtin: bool, refs: dict[str, list[str]]) -> dict[s
         "bg_url": _asset_url(card.asset_path("background")),
         "keyvisual_url": _asset_url(card.asset_path("keyvisual")),
         "stickers_urls": [u for u in (_asset_url(p) for p in card.sticker_paths()) if u],
-        "embodiment": embodiment if embodiment in ("literal", "actor") else "",
+        "force_roleplay": bool(force_roleplay),
     }
 
 
@@ -841,8 +844,15 @@ def _sanitize_card_extensions(card: dict[str, Any]) -> None:
     else:
         lunamoth.pop("theme", None)
     lunamoth.pop("theme_color", None)
-    if lunamoth.get("embodiment") not in ("literal", "actor"):
-        lunamoth["embodiment"] = "literal"
+    # The card FIELD is a boolean; bridge a legacy `embodiment: "actor"`, else omit.
+    forced = normalize_force_roleplay(lunamoth.get("force_roleplay"))
+    if forced is None and str(lunamoth.get("embodiment") or "").lower() == "actor":
+        forced = True
+    lunamoth.pop("embodiment", None)
+    if forced:
+        lunamoth["force_roleplay"] = True
+    else:
+        lunamoth.pop("force_roleplay", None)
 
 
 def _safe_extensions_for_ui(extensions: dict[str, Any]) -> dict[str, Any]:
@@ -867,8 +877,14 @@ def _safe_extensions_for_ui(extensions: dict[str, Any]) -> dict[str, Any]:
     else:
         safe.pop("theme", None)
         safe.pop("theme_color", None)
-    if safe.get("embodiment") not in ("literal", "actor"):
-        safe["embodiment"] = ""
+    forced = normalize_force_roleplay(safe.get("force_roleplay"))
+    if forced is None and str(safe.get("embodiment") or "").lower() == "actor":
+        forced = True
+    safe.pop("embodiment", None)
+    if forced:
+        safe["force_roleplay"] = True
+    else:
+        safe.pop("force_roleplay", None)
     out["lunamoth"] = safe
     return out
 
@@ -1047,15 +1063,14 @@ conservatively and tastefully; never invent contradictions. Reply with ONLY a JS
 no markdown fence, with exactly these keys:
 {"name": str, "appearance": str, "personality": str, "scenario": str, "first_mes": str,
  "alternate_greetings": [str], "world": [{"key": str, "desc": str, "constant": bool}],
- "relationship": str, "goals": [str], "rules": str, "toolpack_hint": str}
+ "relationship": str, "goals": [str], "rules": str}
 - appearance: who they are + how they look, 2-4 sentences, prose.
 - personality: temperament and voice, 2-4 sentences, prose.
 - first_mes: their in-character opening line when meeting the user.
 - world: 2-5 lorebook entries (key = a name/term, desc = one sentence); constant=true for at most one core entry.
 - relationship: the user's place in this character's life, 1-2 sentences.
 - goals: 1-3 ongoing pursuits, short phrases.
-- rules: boundaries/never-dos if implied, else "".
-- toolpack_hint: "sandbox" if this character would plausibly make things (art/code/writing), else ""."""
+- rules: boundaries/never-dos if implied, else ""."""
 
 
 def transcribe_card(defaults: dict[str, str], text: str, model: str = "") -> dict[str, Any]:
@@ -1108,7 +1123,7 @@ def _draft_goals(draft: dict[str, Any]) -> list[str]:
 def draft_to_card(draft: dict[str, Any], origin_text: str = "", as_draft: bool = False) -> dict[str, Any]:
     """Assemble a V3 card object from a (possibly user-edited) draft."""
     world_entries = _draft_world_entries(draft)
-    ext: dict[str, Any] = {"origin": origin_text[:8000], "embodiment": "literal"}
+    ext: dict[str, Any] = {"origin": origin_text[:8000]}
     if as_draft:
         ext["draft"] = True
     wishes = _draft_goals(draft)
@@ -1116,8 +1131,6 @@ def draft_to_card(draft: dict[str, Any], origin_text: str = "", as_draft: bool =
         ext["wishes"] = wishes
     if draft.get("rules"):
         ext["rules"] = str(draft["rules"])
-    if draft.get("toolpack_hint"):
-        ext["toolpack"] = str(draft["toolpack_hint"])
     if draft.get("tagline"):
         ext["tagline"] = str(draft["tagline"]).strip()
     # Who "you" are in this world (the SillyTavern persona convention) rides the card.
@@ -1129,8 +1142,13 @@ def draft_to_card(draft: dict[str, Any], origin_text: str = "", as_draft: bool =
     if theme:
         ext["theme"] = theme
     # No avatar from the draft — it's a manual upload/generate step (sidecar).
-    embodiment = str(draft.get("embodiment") or "literal")
-    ext["embodiment"] = embodiment if embodiment in ("literal", "actor") else "literal"
+    # The card FIELD is a boolean force_roleplay (True ≡ the old "actor" stance).
+    # Accept the boolean from a UI draft, or a legacy `embodiment: "actor"` string.
+    forced = normalize_force_roleplay(draft.get("force_roleplay"))
+    if forced is None and str(draft.get("embodiment") or "").lower() == "actor":
+        forced = True
+    if forced:
+        ext["force_roleplay"] = True
 
     description = str(draft.get("description") if draft.get("description") is not None else draft.get("appearance", ""))
     data: dict[str, Any] = {

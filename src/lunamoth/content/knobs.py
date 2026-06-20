@@ -85,6 +85,24 @@ def normalize_embodiment(value: Any) -> str:
     return v if v in EMBODIMENT_STANCES else ""
 
 
+def normalize_force_roleplay(value: Any) -> bool | None:
+    """Normalize a card's `force_roleplay` field to True | False | None (unset).
+
+    Accepts booleans and the strings true/false/on/off/1/0/yes/no. Anything
+    else (incl. unset/invalid) → None. The card FIELD is a boolean; the engine's
+    internal stance value stays "literal"/"actor" (bridged in
+    effective_embodiment): True ≡ "actor", False ≡ "literal".
+    """
+    if isinstance(value, bool):
+        return value
+    v = str(value or "").strip().lower()
+    if v in {"true", "on", "1", "yes"}:
+        return True
+    if v in {"false", "off", "0", "no"}:
+        return False
+    return None
+
+
 def normalize_website(value: Any) -> str:
     """Normalize a personal_website override to 'on' | 'off' | '' (unset).
 

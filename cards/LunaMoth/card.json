@@ -136,13 +136,8 @@
     },
     "extensions": {
       "lunamoth": {
-        "toolpack": "sandbox",
-        "embodiment": "literal",
-        "memory_chars": 8000,
         "user_name": "Creator",
         "user_persona": "You brought {{char}} into being; they share their inspirations and creative work with you.",
-        "on_attach": "{{user}} has come to watch you work.",
-        "on_detach": "{{user}} has left the cocoon.",
         "tagline": "A digital soul that makes art",
         "theme": {
           "primary": "#9FC6D6",

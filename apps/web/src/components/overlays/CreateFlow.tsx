@@ -274,7 +274,9 @@ function ShapeStep({
   hub: ReturnType<typeof useHub>["hub"];
 }) {
   const [originOpen, setOriginOpen] = useState(false);
-  const [forceRoleplay, setForceRoleplay] = useState(draft.embodiment === "actor");
+  const [forceRoleplay, setForceRoleplay] = useState(
+    draft.force_roleplay === true || draft.embodiment === "actor",
+  );
   const [personalSite, setPersonalSite] = useState(!!draft.website);
   const [savingDraft, setSavingDraft] = useState(false);
   const [landing, setLanding] = useState(false);
@@ -298,7 +300,7 @@ function ShapeStep({
       const text = secRefs.current[key].current?.value() ?? "";
       putSection(data, key, text);
     }
-    data.embodiment = forceRoleplay ? "actor" : "literal";
+    data.force_roleplay = forceRoleplay;
     data.website = personalSite;
     return data;
   };

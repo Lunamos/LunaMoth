@@ -43,6 +43,8 @@ export interface RawDraft {
   theme_color?: string;
   avatar_svg?: string;
   pending_avatar?: unknown;
+  force_roleplay?: boolean | string;
+  /** Legacy stance string ("actor"|"literal"); bridged into force_roleplay. */
   embodiment?: string;
   website?: boolean | string;
   [k: string]: unknown;
@@ -61,7 +63,7 @@ export interface NormalizedDraft {
   theme: Theme;
   avatar_svg: string;
   pending_avatar: unknown;
-  embodiment: "literal" | "actor";
+  force_roleplay: boolean;
   website: boolean;
   [k: string]: unknown;
 }
@@ -69,7 +71,7 @@ export interface NormalizedDraft {
 const HEX6 = /^#[0-9a-fA-F]{6}$/;
 const isHex = (v: unknown): boolean => HEX6.test(String(v || ""));
 
-/** Fill every field, fold legacy aliases, coerce the theme + embodiment.
+/** Fill every field, fold legacy aliases, coerce the theme + force_roleplay.
  *  app.js:2056 normalizeDraft (verbatim semantics). */
 export function normalizeDraft(d: RawDraft | null | undefined): NormalizedDraft {
   const draft: Record<string, unknown> = Object.assign({}, d || {});
@@ -103,7 +105,13 @@ export function normalizeDraft(d: RawDraft | null | undefined): NormalizedDraft 
   delete draft.theme_color;
   draft.avatar_svg = String(draft.avatar_svg || "");
   draft.pending_avatar = draft.pending_avatar || null;
-  draft.embodiment = draft.embodiment === "actor" ? "actor" : "literal";
+  // The card FIELD is a boolean; accept a legacy `embodiment: "actor"` string.
+  draft.force_roleplay =
+    draft.force_roleplay === true ||
+    draft.force_roleplay === "actor" ||
+    draft.force_roleplay === "true" ||
+    draft.embodiment === "actor";
+  delete draft.embodiment;
   draft.website = draft.website === true || draft.website === "on";
   return draft as NormalizedDraft;
 }
@@ -159,10 +167,9 @@ export function putSection(draft: Partial<NormalizedDraft>, key: string, text: s
  *
  *  Fields a surface ALWAYS edits are required strings ("" deletes the lunamoth
  *  key). Fields a surface may NOT edit are optional: `undefined` means "leave the
- *  card's existing value alone" — the card editor preserves user_name/user_persona/
- *  toolpack it never shows, while the wake sheet (which does show them) passes
- *  strings. This is the data-safety contract that lets BOTH save paths share this
- *  one serializer without clobbering fields they don't render. */
+ *  card's existing value alone" — the card editor preserves user_name/user_persona
+ *  it never shows. This is the data-safety contract that lets BOTH save paths share
+ *  this one serializer without clobbering fields they don't render. */
 export interface CardFields {
   name: string;
   description: string;
@@ -170,8 +177,6 @@ export interface CardFields {
   scenario: string;
   first_mes: string;
   tagline: string;
-  on_attach: string;
-  on_detach: string;
   /** Wishes, one per line (textContent of the wishes field). */
   goals: string;
   /** World book, in the "keys — content [constant]" line form. */
@@ -179,8 +184,6 @@ export interface CardFields {
   /** undefined = not edited by this surface (preserve); "" = delete; value = set. */
   user_name?: string;
   user_persona?: string;
-  /** Toolpack name (packInput.value); set-only — undefined/"" never deletes. */
-  toolpack?: string;
   /** data.creator_notes (NOT under lunamoth); undefined = not edited (preserve). */
   creator_notes?: string;
 }
@@ -225,8 +228,6 @@ export function serializeCardFields(
   setOrDel("user_name", fields.user_name);
   setOrDel("user_persona", fields.user_persona);
   setOrDel("tagline", fields.tagline);
-  setOrDel("on_attach", fields.on_attach);
-  setOrDel("on_detach", fields.on_detach);
   const wishes = fields.goals
     .split("\n")
     .map((s) => s.trim())
@@ -234,8 +235,6 @@ export function serializeCardFields(
   if (wishes.length) lm.wishes = wishes;
   else delete lm.wishes;
   delete lm.goals; // migrate the legacy key on save
-  // toolpack is set-only (never deleted here); preserve on undefined.
-  if (fields.toolpack !== undefined && fields.toolpack.trim()) lm.toolpack = fields.toolpack.trim();
   const tmp: Partial<NormalizedDraft> = {};
   putSection(tmp, "world_entries", fields.world);
   const entries = (tmp.world_entries || []).map((w, i) => ({

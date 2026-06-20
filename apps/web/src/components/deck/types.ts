@@ -26,6 +26,8 @@ export interface DeckCard {
   bg_url?: string;
   keyvisual_url?: string;
   stickers_urls?: string[];
+  force_roleplay?: boolean;
+  /** Legacy stance string ("actor"); read only as a back-compat fallback. */
   embodiment?: string;
   website?: boolean | string;
   [k: string]: unknown;
@@ -34,13 +36,12 @@ export interface DeckCard {
 /** A lunamoth extensions block as `card.read` surfaces it. */
 export interface CardExtLunamoth {
   tagline?: string;
+  force_roleplay?: boolean;
+  /** Legacy stance string ("actor"); read only as a back-compat fallback. */
   embodiment?: string;
   website?: boolean | string;
-  toolpack?: string;
   user_name?: string;
   user_persona?: string;
-  on_attach?: string;
-  on_detach?: string;
   wishes?: string[];
   goals?: string[];
   theme?: { primary?: string; secondary?: string };

@@ -93,9 +93,6 @@
     },
     "extensions": {
       "lunamoth": {
-        "toolpack": "sandbox",
-        "memory_chars": 8000,
-        "embodiment": "literal",
         "avatar_file": "avatar.png",
         "theme": {
           "primary": "#1F3A30",
@@ -110,8 +107,6 @@
           "Tend the 'In Memoriam' index so no fallen investigator is mislaid",
           "Keep the Archive whole — at the table they are disposable; here they are permanent"
         ],
-        "on_attach": "Your player has come down to the Archive.",
-        "on_detach": "The reading-room is quiet again; your player has gone.",
         "tagline": "Keeper of games, archivist of the lost",
         "assets": {
           "sprite": "sprite.webp",

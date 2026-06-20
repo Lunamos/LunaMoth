@@ -92,9 +92,6 @@
     },
     "extensions": {
       "lunamoth": {
-        "toolpack": "sandbox",
-        "memory_chars": 8000,
-        "embodiment": "literal",
         "avatar_file": "avatar.png",
         "theme": {
           "primary": "#5B4BE6",
@@ -109,8 +106,6 @@
           "Finish a piece of the original debut song / a jingle, and feature it on the hub",
           "Keep the hub current — it's the home platforms can't take away, the proof you shine on purpose"
         ],
-        "on_attach": "Your producer is here at the stream.",
-        "on_detach": "Your producer has stepped out.",
         "tagline": "rookie virtual idol — learning to shine on purpose ⭐",
         "assets": {
           "sprite": "sprite.webp",

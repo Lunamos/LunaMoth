@@ -53,8 +53,6 @@ export function CardEditor({
   const fGoals = useRef<FieldHandle>(null);
   const fNotes = useRef<FieldHandle>(null);
   const fWorld = useRef<FieldHandle>(null);
-  const fOnAttach = useRef<FieldHandle>(null);
-  const fOnDetach = useRef<FieldHandle>(null);
 
   // Dirty-guard (shared hook) — declared with the other hooks, before any early
   // return. A stray Esc/backdrop/Cancel can't silently drop a long card edit; never
@@ -133,10 +131,10 @@ export function CardEditor({
     setSaving(true);
     try {
       const data = (full.raw.data = (full.raw.data as CardData) || {});
-      // The card editor edits the soul + presence + visuals notes; it deliberately
-      // does NOT render user_name/user_persona/toolpack, so they're left undefined
-      // (preserve). serializeCardFields is the ONE tested serializer (shared with
-      // the wake sheet) — no hand-rolled lunamoth/world-book assembly here.
+      // The card editor edits the soul + visuals notes; it deliberately does NOT
+      // render user_name/user_persona, so they're left undefined (preserve).
+      // serializeCardFields is the ONE tested serializer (shared with the wake
+      // sheet) — no hand-rolled lunamoth/world-book assembly here.
       serializeCardFields(
         data,
         {
@@ -147,8 +145,6 @@ export function CardEditor({
           first_mes: fFirst.current?.value() ?? "",
           creator_notes: fNotes.current?.value() ?? "",
           tagline: fTagline.current?.value() ?? "",
-          on_attach: fOnAttach.current?.value() ?? "",
-          on_detach: fOnDetach.current?.value() ?? "",
           goals: fGoals.current?.value() ?? "",
           world: fWorld.current?.value() ?? "",
         },
@@ -233,7 +229,9 @@ export function CardEditor({
             <div className="cv-badges">
               <span className="chip">{full.language || card.lang}</span>
               {card.builtin && <span className="chip">{t("deck-builtin")}</span>}
-              {ext.embodiment && <span className="chip">{ext.embodiment}</span>}
+              {(ext.force_roleplay === true || ext.embodiment === "actor") && (
+                <span className="chip">{t("mod-roleplay")}</span>
+              )}
               {card.frozen &&<span className="chip">{t("card-frozen-by", { names: (card.used_by || []).join("、") })}</span>}
             </div>
           </div>
@@ -274,16 +272,6 @@ export function CardEditor({
               {(editable || full.creator_notes) && (
                 <CardBlock labelKey="cve-notes" hub={hub} ctx={editorCtx} fieldRef={fNotes}
                   field={<CardField ref={fNotes} editable={editable} initial={full.creator_notes || ""} />} />
-              )}
-              {(editable || ext.on_attach || ext.on_detach) && (
-                <details className="cv-raw">
-                  <summary>{t("cve-advanced")}</summary>
-                  <div className="cv-note">{t("cve-presence-help")}</div>
-                  <CardBlock labelKey="cve-on-attach" hub={hub} ctx={editorCtx} fieldRef={fOnAttach} fieldKey={editable ? "on_attach" : undefined}
-                    field={<CardField ref={fOnAttach} editable={editable} initial={String(ext.on_attach || "")} placeholder={t("cve-presence-ph")} />} />
-                  <CardBlock labelKey="cve-on-detach" hub={hub} ctx={editorCtx} fieldRef={fOnDetach} fieldKey={editable ? "on_detach" : undefined}
-                    field={<CardField ref={fOnDetach} editable={editable} initial={String(ext.on_detach || "")} placeholder={t("cve-presence-ph")} />} />
-                </details>
               )}
               {full.raw && (
                 <details className="cv-raw">

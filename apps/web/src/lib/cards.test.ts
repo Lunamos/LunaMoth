@@ -17,7 +17,7 @@ describe("normalizeDraft", () => {
     expect(d.world_entries).toEqual([]);
     expect(d.seed_goals).toEqual([]);
     expect(d.theme).toEqual({ primary: "#5B9FD4", secondary: "" });
-    expect(d.embodiment).toBe("literal");
+    expect(d.force_roleplay).toBe(false);
     expect(d.pending_avatar).toBeNull();
   });
 
@@ -44,9 +44,12 @@ describe("normalizeDraft", () => {
     expect(normalizeDraft({ theme: { primary: "#000000", secondary: "nope" } }).theme.secondary).toBe("");
   });
 
-  it("coerces embodiment to literal unless explicitly actor", () => {
-    expect(normalizeDraft({ embodiment: "actor" }).embodiment).toBe("actor");
-    expect(normalizeDraft({ embodiment: "weird" }).embodiment).toBe("literal");
+  it("coerces force_roleplay to a boolean (bridging a legacy embodiment string)", () => {
+    expect(normalizeDraft({ force_roleplay: true }).force_roleplay).toBe(true);
+    expect(normalizeDraft({ force_roleplay: "true" }).force_roleplay).toBe(true);
+    expect(normalizeDraft({ embodiment: "actor" }).force_roleplay).toBe(true);
+    expect(normalizeDraft({ embodiment: "weird" }).force_roleplay).toBe(false);
+    expect(normalizeDraft({}).force_roleplay).toBe(false);
   });
 });
 
@@ -97,11 +100,8 @@ describe("serializeCardFields", () => {
     user_name: "Sam",
     user_persona: "the boss",
     tagline: "a tagline",
-    on_attach: "",
-    on_detach: "",
     goals: "ship the site\nlearn rust\n",
     world: "office, desk — a quiet room [constant]",
-    toolpack: "sandbox",
   });
 
   it("folds fields into data + lunamoth extensions and a world book", () => {
@@ -114,8 +114,6 @@ describe("serializeCardFields", () => {
     expect(lm.user_persona).toBe("the boss");
     expect(lm.tagline).toBe("a tagline");
     expect(lm.wishes).toEqual(["ship the site", "learn rust"]);
-    expect(lm.toolpack).toBe("sandbox");
-    expect("on_attach" in lm).toBe(false); // empty → deleted
     expect("goals" in lm).toBe(false); // legacy key migrated away
     expect(data.character_book).toEqual({
       name: "Quinn",
@@ -146,20 +144,18 @@ describe("serializeCardFields", () => {
   });
 
   it("undefined surface-specific fields PRESERVE existing card values (card-editor path)", () => {
-    // The card editor doesn't render user_name/user_persona/toolpack — it passes
-    // them undefined, and the serializer must leave whatever the card already has.
+    // The card editor doesn't render user_name/user_persona — it passes them
+    // undefined, and the serializer must leave whatever the card already has.
     const fields = baseFields();
     fields.user_name = undefined;
     fields.user_persona = undefined;
-    fields.toolpack = undefined;
     const data: CardData = {
-      extensions: { lunamoth: { user_name: "Keep", user_persona: "keep too", toolpack: "browser" } },
+      extensions: { lunamoth: { user_name: "Keep", user_persona: "keep too" } },
     };
     serializeCardFields(data, fields, "fallback");
     const lm = data.extensions!.lunamoth!;
     expect(lm.user_name).toBe("Keep");
     expect(lm.user_persona).toBe("keep too");
-    expect(lm.toolpack).toBe("browser");
   });
 
   it("an empty-string surface-specific field DELETES it (the surface edited it to blank)", () => {

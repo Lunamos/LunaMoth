@@ -134,7 +134,7 @@ def test_snapshot_reports_effective_patience(agent_factory, tmp_path):
 def test_embodiment_actor_bridge_order_override_macros_and_tool_gate(agent_factory, tmp_path):
     card = _write_card(tmp_path / "actor.json", {
         "toolpack": "sandbox",
-        "embodiment": "actor",
+        "force_roleplay": True,
         "embodiment_bridge": "BRIDGE for {{char}} and {{user}}",
     })
     a = agent_factory(card=card)
@@ -173,7 +173,7 @@ def test_default_literal_prefix_sequence(agent_factory, tmp_path):
 
 def test_bundled_actor_bridge_renders_english_with_macros(agent_factory, tmp_path):
     """The actor bridge is English (engine prompt layer) with {{char}} substituted."""
-    card = _write_card(tmp_path / "actor.json", {"toolpack": "sandbox", "embodiment": "actor"})
+    card = _write_card(tmp_path / "actor.json", {"toolpack": "sandbox", "force_roleplay": True})
     a = agent_factory(card=card)
     blob = _blob(a._stable_prefix())
     assert "giving KnobCard life" in blob
@@ -193,10 +193,27 @@ def test_embodiment_is_wake_time_only_no_hot_swap_command(agent_factory, tmp_pat
     assert all(c.name != "embodiment" for c in commands.infos())
 
     # The resolution chain itself is untouched: override > card > literal.
-    card = _write_card(tmp_path / "card-actor.json", {"toolpack": "sandbox", "embodiment": "actor"})
+    card = _write_card(tmp_path / "card-actor.json", {"toolpack": "sandbox", "force_roleplay": True})
     assert agent_factory(card=card).effective_embodiment() == "actor"
     assert agent_factory(card=card, embodiment_override="literal").effective_embodiment() == "literal"
     assert agent_factory().effective_embodiment() == "literal"
+
+
+def test_force_roleplay_card_field_and_legacy_embodiment_fallback(agent_factory, tmp_path):
+    """The card FIELD is now a boolean `force_roleplay` (True ≡ actor). A legacy
+    frozen card still carrying the old `embodiment: "actor"` string must keep
+    resolving to "actor" via the back-compat fallback in effective_embodiment()."""
+    new = _write_card(tmp_path / "fr-true.json", {"toolpack": "sandbox", "force_roleplay": True})
+    assert agent_factory(card=new).effective_embodiment() == "actor"
+
+    new_false = _write_card(tmp_path / "fr-false.json", {"toolpack": "sandbox", "force_roleplay": False})
+    assert agent_factory(card=new_false).effective_embodiment() == "literal"
+
+    legacy = _write_card(tmp_path / "legacy-actor.json", {"toolpack": "sandbox", "embodiment": "actor"})
+    assert agent_factory(card=legacy).effective_embodiment() == "actor"
+
+    legacy_lit = _write_card(tmp_path / "legacy-literal.json", {"toolpack": "sandbox", "embodiment": "literal"})
+    assert agent_factory(card=legacy_lit).effective_embodiment() == "literal"
 
 
 # ── personal_website module ────────────────────────────────────────────────

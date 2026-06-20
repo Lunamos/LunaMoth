@@ -39,7 +39,9 @@ export function WakeSheet({ card, onClose }: { card: DeckCard; onClose: () => vo
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [name, setName] = useState(card.name);
   const [model, setModel] = useState(String(defaults.model || ""));
-  const [forceRoleplay, setForceRoleplay] = useState(card.embodiment === "actor");
+  const [forceRoleplay, setForceRoleplay] = useState(
+    card.force_roleplay === true || card.embodiment === "actor",
+  );
   const [personalSite, setPersonalSite] = useState(card.website === true || card.website === "on");
   const [iso, setIso] = useState("sandbox");
   const [wantNet, setWantNet] = useState(true); // ON by default at wake (matches runtime default)

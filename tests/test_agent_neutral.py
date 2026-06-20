@@ -42,7 +42,8 @@ def test_no_scp_framing_in_system_prompt(agent):
 def test_card_defaults_drive_toolpack_and_memory(agent):
     a = agent()
     assert a.toolpack is not None and a.toolpack.name == "sandbox"
-    assert a.memory.limits.memory_chars == 8000  # moth's card-declared memory size
+    # memory_chars is no longer a card field — it's the engine default now.
+    assert a.memory.limits.memory_chars == 4000
     # Context window is the model's real window (default for mock/unknown), NOT the card.
     from lunamoth.core.providers import DEFAULT_WINDOW
     assert a.context_limit() == DEFAULT_WINDOW

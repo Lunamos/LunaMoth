@@ -31,7 +31,9 @@ def test_bundled_cards_declare_defaults_and_language():
     quinn = CharacterCard.load("cards/Quinn/card.json")
     assert quinn.language == "en"
     assert "world" not in quinn.defaults()
-    assert quinn.defaults()["memory_chars"] == 8000  # the card declares its own memory budget
+    # memory_chars / toolpack are no longer card fields — they were removed.
+    assert "memory_chars" not in quinn.defaults()
+    assert "toolpack" not in quinn.defaults()
 
 
 def test_every_bundled_card_carries_its_world_inside():

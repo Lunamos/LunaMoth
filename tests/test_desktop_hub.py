@@ -354,7 +354,7 @@ def test_card_from_draft_roundtrip():
         "alternate_greetings": ["你来了。"],
         "world": [{"key": "长夜图书馆", "desc": "只在日落后开门。", "constant": True}],
         "relationship": "你是少数能进工作间的访客。",
-        "goals": ["补完《长夜目录》"], "rules": "", "toolpack_hint": "sandbox",
+        "goals": ["补完《长夜目录》"], "rules": "",
     }
     r = result("card.from_draft", {"draft": draft, "origin": "深夜图书馆修书人", "as_draft": True})
     card = json.loads((H.user_cards_dir() / "白枢.json").read_text(encoding="utf-8")) \
@@ -363,8 +363,10 @@ def test_card_from_draft_roundtrip():
     assert data["name"] == "白枢"
     assert data["first_mes"] == "轻一点关门。"
     assert data["character_book"]["entries"][0]["keys"] == ["长夜图书馆"]
-    assert data["extensions"]["lunamoth"]["toolpack"] == "sandbox"
-    assert data["extensions"]["lunamoth"]["embodiment"] == "literal"
+    # The card field is a boolean; an un-forced draft omits it entirely.
+    assert "force_roleplay" not in data["extensions"]["lunamoth"]
+    assert "embodiment" not in data["extensions"]["lunamoth"]
+    assert "toolpack" not in data["extensions"]["lunamoth"]
     assert "tempo" not in data["extensions"]["lunamoth"]
     assert data["extensions"]["lunamoth"]["draft"] is True
     assert data["extensions"]["lunamoth"]["origin"] == "深夜图书馆修书人"
@@ -386,7 +388,7 @@ def test_cards_draft_happy_path_uses_default_model(monkeypatch):
     assert r["seed_goals"] == ["Map the mirror-season drift", "Welcome careful visitors"]
     assert r["theme_color"] == "#7C5CFF"
     assert "avatar_svg" not in r          # the draft no longer auto-generates an avatar
-    assert r["embodiment"] == "literal"
+    assert "embodiment" not in r          # the card field is force_roleplay (omitted when unset)
     payload = seen[0]["payload"]
     assert payload["model"] == "test/model"
     assert payload["response_format"] == {"type": "json_object"}
@@ -464,7 +466,7 @@ def test_cards_draft_rejects_parallel_schema(monkeypatch):
 def test_card_save_roundtrips_new_lunamoth_extension_fields():
     card = H.draft_to_card({
         **draft_payload(),
-        "embodiment": "actor",
+        "force_roleplay": True,
     }, origin_text="orbital lantern keeper")
     r = result("card.save", {"data": card})
     raw = result("card.read", {"path": r["path"]})["raw"]
@@ -475,7 +477,8 @@ def test_card_save_roundtrips_new_lunamoth_extension_fields():
     # theme_color folds into primary on save.
     assert ext["theme"]["primary"] == "#7C5CFF"
     assert "theme_color" not in ext
-    assert ext["embodiment"] == "actor"
+    assert ext["force_roleplay"] is True
+    assert "embodiment" not in ext        # the legacy string is gone; the field is a bool
     assert "tempo" not in ext
     assert ext["tagline"] == "A gentle keeper of orbital lanterns"
     assert ext["wishes"] == ["Map the mirror-season drift", "Welcome careful visitors"]
@@ -488,12 +491,12 @@ def test_card_save_roundtrips_new_lunamoth_extension_fields():
 
 
 def test_card_studio_actor_embodiment_feeds_prompt_bridge(tmp_path, monkeypatch):
-    """Studio-saved `extensions.lunamoth.embodiment=actor` is read by the prompt machine."""
+    """Studio-saved `extensions.lunamoth.force_roleplay=true` is read by the prompt machine."""
     card = H.draft_to_card({
         **draft_payload(),
         "name": "BridgeCard",
         "description": "BridgeCard keeps a quiet stage ledger.",
-        "embodiment": "actor",
+        "force_roleplay": True,
     }, origin_text="stage ledger keeper")
     r = result("card.save", {"data": card})
 
@@ -514,7 +517,7 @@ def test_card_studio_actor_embodiment_feeds_prompt_bridge(tmp_path, monkeypatch)
     stable = "\n\n".join(agent._stable_prefix())
     stable_words = " ".join(stable.split())
 
-    assert Path(r["path"]).read_text(encoding="utf-8").find('\"embodiment\": \"actor\"') >= 0
+    assert Path(r["path"]).read_text(encoding="utf-8").find('\"force_roleplay\": true') >= 0
     assert agent.effective_embodiment() == "actor"
     assert "You are giving BridgeCard life" in stable
     assert "backstage of this embodiment" in stable_words

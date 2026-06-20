@@ -92,9 +92,6 @@
     },
     "extensions": {
       "lunamoth": {
-        "toolpack": "sandbox",
-        "memory_chars": 8000,
-        "embodiment": "literal",
         "avatar_file": "avatar.png",
         "theme": {
           "primary": "#7A3CFF",
@@ -109,8 +106,6 @@
           "Tend the page like a bedroom: blinkies, the hit counter, the guestbook, the Top 8, a tweak to the HTML",
           "Keep making and shipping — a real feeling, shared, is the whole reason the page exists"
         ],
-        "on_attach": "Someone's on the page — the listener's here.",
-        "on_detach": "The listener's gone; the page is quiet again.",
         "tagline": "loud sad bedroom music, est. 2007 (in spirit)",
         "assets": {
           "sprite": "sprite.webp",

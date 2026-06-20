@@ -145,7 +145,7 @@ class CharacterCard:
         """The card's recommended tool pack / limits / life knobs.
 
         Lives in `extensions.lunamoth` (SillyTavern-compatible free-form field):
-            {"toolpack": "sandbox", "memory_chars": 8000, "wishes": ["..."]}
+            {"force_roleplay": false, "wishes": ["..."]}
         The world is NOT here — it lives in the standard `character_book` field
         (the card is the ONE external file). The context window is NOT here
         either — it's the model's real window (providers.py). Cards that omit

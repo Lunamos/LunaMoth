@@ -108,9 +108,7 @@
     },
     "extensions": {
       "lunamoth": {
-        "toolpack": "sandbox",
-        "memory_chars": 8000,
-        "embodiment": "actor",
+        "force_roleplay": true,
         "avatar_file": "avatar.png",
         "theme": {
           "primary": "#5E7C4F",
@@ -125,8 +123,6 @@
           "Cross-link the codex: tie places to their plants, plants to their charms, so the whole book reads as one country",
           "Keep the Grimoire alive and growing — it is the proof you were here and understood it"
         ],
-        "on_attach": "Your companion is back at the travelling study.",
-        "on_detach": "Your companion has gone on ahead down the road.",
         "tagline": "Hedge-witch & cartographer of Aldermere",
         "assets": {
           "sprite": "sprite.webp",
