@@ -20,6 +20,8 @@ from ... import __version__
 from ...session import sessions as S
 from ...session.settings import PRESETS
 from ..dispatch import RpcError, error_response, ok_response, _normalize_request
+from . import avatars as _avatars
+from . import card_draft as _card_draft
 from . import cards as _cards
 from . import config as _config
 from . import models as _models
@@ -112,8 +114,8 @@ class HubDispatcher:
             "card.visual_brief": self._card_visual_brief,
             "card.visual_generate": self._card_visual_generate,
             "card.asset_save": self._card_asset_save,
-            "card.asset_delete": lambda p: _cards.asset_delete(str(p.get("path") or ""), str(p.get("kind") or "")),
-            "card.avatar_read": lambda p: _cards.avatar_read(str(p.get("path") or "")),
+            "card.asset_delete": lambda p: _avatars.asset_delete(str(p.get("path") or ""), str(p.get("kind") or "")),
+            "card.avatar_read": lambda p: _avatars.avatar_read(str(p.get("path") or "")),
             "cards.list": lambda p: _cards.list_cards(),
             "card.read": self._card_read,
             "card.save": lambda p: _cards.save_card(p.get("data"), path=str(p.get("path") or "")),
@@ -291,8 +293,8 @@ class HubDispatcher:
         return matte.status()
 
     def _card_avatar_upload(self, p: dict[str, Any]) -> Any:
-        return _cards.avatar_upload(str(p.get("path") or ""), str(p.get("data_b64") or ""),
-                                    str(p.get("ext") or ""))
+        return _avatars.avatar_upload(str(p.get("path") or ""), str(p.get("data_b64") or ""),
+                                      str(p.get("ext") or ""))
 
     def _card_visual_brief(self, p: dict[str, Any]) -> Any:
         # R9: build (only) the visual brief for a card via the GLOBAL default
@@ -347,8 +349,8 @@ class HubDispatcher:
         }
 
     def _card_asset_save(self, p: dict[str, Any]) -> Any:
-        return _cards.asset_save(str(p.get("path") or ""), str(p.get("kind") or ""),
-                                 str(p.get("data_b64") or ""), str(p.get("ext") or ""))
+        return _avatars.asset_save(str(p.get("path") or ""), str(p.get("kind") or ""),
+                                   str(p.get("data_b64") or ""), str(p.get("ext") or ""))
 
     def _card_read(self, p: dict[str, Any]) -> Any:
         path = Path(str(p.get("path") or ""))
@@ -371,11 +373,11 @@ class HubDispatcher:
                 "raw": raw}
 
     def _card_rewrite_field(self, p: dict[str, Any]) -> Any:
-        return _cards.rewrite_card_field(_config.load_defaults(), field=str(p.get("field") or ""),
-                                         value=str(p.get("value") or ""),
-                                         instruction=str(p.get("instruction") or ""),
-                                         context=str(p.get("context") or ""),
-                                         model=str(p.get("model") or ""))
+        return _card_draft.rewrite_card_field(_config.load_defaults(), field=str(p.get("field") or ""),
+                                              value=str(p.get("value") or ""),
+                                              instruction=str(p.get("instruction") or ""),
+                                              context=str(p.get("context") or ""),
+                                              model=str(p.get("model") or ""))
 
     def _card_merge_world(self, p: dict[str, Any]) -> Any:
         return _cards.merge_world(str(p.get("card_path") or p.get("path") or ""), p.get("world"))
@@ -387,14 +389,14 @@ class HubDispatcher:
         # Card drafting uses the per-task card_model override when set, else the
         # system default model (Settings · 模型 · 其他模态 · 生成角色卡).
         _d = _config.load_defaults()
-        return _cards.draft_card_from_inspiration(_d, inspiration, model=str(_d.get("card_model") or ""))
+        return _card_draft.draft_card_from_inspiration(_d, inspiration, model=str(_d.get("card_model") or ""))
 
     def _card_from_draft(self, p: dict[str, Any]) -> Any:
         draft = p.get("draft")
         if not isinstance(draft, dict):
             raise RpcError(-32602, "card.from_draft expects a draft object")
         return _cards.save_card(
-            _cards.draft_to_card(draft, origin_text=str(p.get("origin") or ""), as_draft=bool(p.get("as_draft"))),
+            _card_draft.draft_to_card(draft, origin_text=str(p.get("origin") or ""), as_draft=bool(p.get("as_draft"))),
             path=str(p.get("path") or ""),
         )
 
@@ -468,7 +470,7 @@ class HubDispatcher:
         text = str(p.get("text") or "").strip()
         if not text:
             raise RpcError(-32602, "transcribe.card needs text")
-        return _cards.transcribe_card(_config.load_defaults(), text)
+        return _card_draft.transcribe_card(_config.load_defaults(), text)
 
     @staticmethod
     def _meta(p: dict[str, Any]) -> S.SessionMeta:
