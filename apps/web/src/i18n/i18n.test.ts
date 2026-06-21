@@ -48,7 +48,7 @@ describe("I18N strings map", () => {
   // gw-h-tg-api-base) → 572. The status pane's per-chara model + reasoning editor
   // (model Select → /model, reasoning seg → /reasoning) added p-model-scope-note → 573.
   it("preserves the full key set from the source dict (573 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(567);
+    expect(Object.keys(I18N).length).toBe(574);
   });
 
   it("every value is a [zh, en] string tuple", () => {

@@ -516,6 +516,40 @@ body.dark .lm-thinking.block{background:rgba(255,255,255,.05)}
 body.dark .composer .attach-btn{color:var(--text-3)}
 body.dark .composer .attach-btn:hover,body.dark .composer .attach-btn.on{background:rgba(255,255,255,.10); color:var(--text)}
 
+/* ---------- composer popovers: the + attach menu + the / command palette ----------
+   One quiet card, floating just above the bar at the left edge (Hermes shape). */
+.composer-pop{
+  position:absolute; left:24px; bottom:66px; z-index:60; min-width:230px; max-width:340px;
+  background:var(--panel); border-radius:12px; padding:6px;
+  box-shadow:0 0 0 1px var(--hairline),0 18px 50px rgba(10,30,50,.22);
+  animation:composer-pop-in .12s ease;
+}
+@keyframes composer-pop-in{from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none}}
+.composer-pop .pop-head{
+  font-size:10.5px; font-weight:600; color:var(--text-3); text-transform:uppercase;
+  letter-spacing:.7px; padding:6px 9px 5px;
+}
+.composer-pop .pop-row{
+  display:flex; align-items:center; gap:10px; width:100%; text-align:left; border:none; background:none;
+  padding:7px 10px; border-radius:8px; cursor:pointer; font-size:13px; color:var(--text); transition:background .1s;
+}
+.composer-pop .pop-row:hover{background:rgba(20,40,60,.07)}
+.composer-pop .pop-row svg{flex:none; color:var(--text-2)}
+.composer-pop .pop-div{height:1px; background:var(--hairline); margin:5px 4px}
+.composer-pop .pop-tip{font-size:11px; color:var(--text-3); line-height:1.5; padding:6px 10px 4px}
+body.dark .composer-pop .pop-row:hover{background:rgba(255,255,255,.07)}
+/* the / command palette — monospace name + a one-line description, keyboard-highlighted */
+.slash-pop{max-width:400px}
+.slash-pop .pop-list{max-height:330px; overflow-y:auto; display:flex; flex-direction:column}
+.slash-row{
+  display:flex; flex-direction:column; gap:1px; width:100%; text-align:left; border:none; background:none;
+  padding:7px 10px; border-radius:8px; cursor:pointer; transition:background .08s;
+}
+.slash-row.on{background:var(--accent-soft)}
+.slash-name{font-size:13px; font-weight:600; color:var(--text); font-family:var(--mono)}
+.slash-desc{font-size:11.5px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+@media (prefers-reduced-motion: reduce){ .composer-pop{animation:none} }
+
 /* ---------- attach menu (Hermes-style popover above the + button) ---------- */
 .attach-menu{
   position:fixed; z-index:60; min-width:190px; background:var(--panel); border-radius:12px; padding:6px;
