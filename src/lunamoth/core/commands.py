@@ -124,29 +124,21 @@ def _reset(agent, session, arg: str) -> Reply:
     return Reply(True, "session context zeroed (new transcript epoch). durable memory remains.")
 
 
-def _wish(agent, session, arg: str) -> Reply:
-    parts = arg.split(maxsplit=1)
-    try:
-        if not arg:
-            wishes = agent.wishes.all()
-            if not wishes:
-                body = "(no wishes yet)\n\n/wish <text>      add a wish (yours show as ⭑)\n/wish done g3     mark done\n/wish drop g3     drop it"
-            else:
-                icon = {"active": "○", "done": "●", "dropped": "✕"}
-                lines = [
-                    f"{icon.get(w['status'], '?')} {w['id']}  {'⭑ ' if w.get('by') == 'operator' else ''}{w['text']}"
-                    for w in wishes
-                ]
-                body = "\n".join(lines) + "\n\n○ active  ● done  ✕ dropped\n/wish <text> · /wish done|drop <id>"
-            return Reply(True, body, tuple(wishes), verbose=True)
-        if parts[0] in {"done", "drop", "active"} and len(parts) == 2:
-            status = {"done": "done", "drop": "dropped", "active": "active"}[parts[0]]
-            wish = agent.wishes.set_status(parts[1].strip(), status)
-            return Reply(True, f"wish {wish['id']} → {wish['status']}", wish)
-        wish = agent.wishes.add(arg, by="operator")
-        return Reply(True, f"wish {wish['id']} added ⭑ — it now steers every turn", wish)
-    except ValueError as e:
-        return Reply(False, f"wish error: {e}")
+def _polaris(agent, session, arg: str) -> Reply:
+    """View or set the chara's Polaris — its single north-star ideal. This is the
+    USER's to author; the chara can never change or complete it. `/polaris` shows
+    it; `/polaris <text>` sets it; `/polaris clear` removes it."""
+    want = arg.strip()
+    if not want:
+        cur = agent.polaris.get()
+        body = (f"北极星 Polaris:\n  {cur}" if cur
+                else "(no Polaris set)\n\n/polaris <text>   set the chara's grand, never-finished ideal")
+        return Reply(True, body, {"polaris": cur}, verbose=True)
+    if want.lower() == "clear":
+        agent.polaris.set("")
+        return Reply(True, "Polaris cleared", {"polaris": ""})
+    cur = agent.polaris.set(want)
+    return Reply(True, "Polaris set — it now quietly orients every turn", {"polaris": cur})
 
 
 def _skills(agent, session, arg: str) -> Reply:
@@ -242,14 +234,12 @@ def _patience(agent, session, arg: str) -> Reply:
             f"patience = {patience:g}s (persisted — base pause between spontaneous cycles)",
             {"patience": patience},
         )
-    cur = agent.effective_patience() if hasattr(agent, "effective_patience") else 600.0
-    parsed = parse_patience(getattr(agent.settings, "patience", 600.0))
-    explicit = bool(getattr(agent.settings, "patience_override", False))
-    source = (
-        "operator"
-        if parsed is not None and (explicit or abs(parsed - 600.0) > 1e-9)
-        else "card/default"
-    )
+    # Source of truth: agent.patience_resolved() owns the operator>card>default
+    # precedence — never re-derive the `abs(x-600)` source bit here.
+    if hasattr(agent, "patience_resolved"):
+        cur, source = agent.patience_resolved()
+    else:
+        cur, source = 600.0, "default"
     return Reply(
         True,
         f"patience = {cur:g}s ({source})  (usage: /patience <seconds>)",
@@ -302,12 +292,44 @@ def _model(agent, session, arg: str) -> Reply:
     want = arg.strip()
     if want:
         agent.swap_model(want)
+        # Persist to THIS chara's session config so the choice survives a child
+        # restart (board off→on, crash respawn, daemon restart, reboot). Only the
+        # model id changes — the provider/key stay the same — so within a session
+        # the route is steady and the prompt cache holds; the GLOBAL default is
+        # untouched. (reasoning persists the same way.)
+        _persist(agent, model=agent.settings.model)
         return Reply(True,
-                     f"model = {agent.settings.model} (this session only — the configured default is unchanged)",
+                     f"model = {agent.settings.model} (saved for this chara)",
                      {"model": agent.settings.model, "context_max": agent.context_limit()})
     return Reply(True,
-                 f"model = {agent.settings.model}  (usage: /model <id> — session-scoped hot swap)",
+                 f"model = {agent.settings.model}  (usage: /model <id> — saved for this chara)",
                  {"model": agent.settings.model, "context_max": agent.context_limit()})
+
+
+def _provider(agent, session, arg: str) -> Reply:
+    from ..session.settings import resolve_named_key
+
+    label = arg.strip()
+    if not label:
+        return Reply(True,
+                     f"provider = {agent.settings.provider or '—'} · {agent.settings.base_url or '—'}  "
+                     "(usage: /provider <key-label> — switch this chara to a saved provider key)",
+                     {"provider": agent.settings.provider, "base_url": agent.settings.base_url})
+    entry = resolve_named_key(label)
+    if not entry:
+        return Reply(False, f"no such provider key: {label} (add it in Settings · Providers)")
+    # Switch live (rebuilds the client), then persist provider/base_url/model to
+    # THIS chara's session config — the api_key is resolved from the global keyring
+    # and never written to the session (SEC-2). The key carries its own default
+    # model; adopt it so the chara lands on a model the provider actually serves.
+    agent.swap_provider(provider=entry["provider"], base_url=entry["base_url"],
+                        api_key=entry["api_key"], model=entry.get("model") or None)
+    _persist(agent, provider=agent.settings.provider, base_url=agent.settings.base_url,
+             model=agent.settings.model)
+    return Reply(True,
+                 f"provider = {agent.settings.provider} · model = {agent.settings.model} (saved for this chara)",
+                 {"provider": agent.settings.provider, "base_url": agent.settings.base_url,
+                  "model": agent.settings.model, "context_max": agent.context_limit()})
 
 
 def _help(agent, session, arg: str) -> Reply:
@@ -331,7 +353,7 @@ _REGISTRY: dict[str, Command] = dict([
     _cmd("wread", "/wread <file>", "read a workspace file", _wread),
     _cmd("write", "/write <file> <text>", "write a sandbox file", _write),
     _cmd("logs", "/logs", "recent audit events", _logs),
-    _cmd("wish", "/wish [text | done <id> | drop <id>]", "the chara's wish list (⭑ = yours)", _wish),
+    _cmd("polaris", "/polaris [text | clear]", "the chara's north-star ideal (yours to set; never finished)", _polaris),
     _cmd("skills", "/skills", "skill index (the chara writes its own)", _skills),
     _cmd("mcp", "/mcp", "configured MCP tool servers", _mcp),
     _cmd("net", "/net on|off", "terminal network access", _net),
@@ -342,13 +364,14 @@ _REGISTRY: dict[str, Command] = dict([
     _cmd("thinking", "/thinking on|off", "show the thinking text (default: ✶ indicator only)", _thinking),
     _cmd("reasoning", "/reasoning off|low|medium|high", "reasoning effort (default medium)", _reasoning),
     _cmd("model", "/model <id>", "session-scoped model hot-swap (empty: show current)", _model),
+    _cmd("provider", "/provider <label>", "switch this chara to a saved provider key (empty: show current)", _provider),
     _cmd("steps", "/steps <n>", "max tool-call iterations per turn (default 80)", _steps),
     _cmd("compact", "/compact", "fold older turns into a summary now", _compact),
     _cmd("reset", "/reset", "zero session context (new transcript epoch)", _reset),
     _cmd("help", "/help", "this list", _help),
 ])
 
-_ALIASES = {"presence": "mode", "skill": "skills", "goal": "wish"}
+_ALIASES = {"presence": "mode", "skill": "skills", "goal": "polaris", "wish": "polaris"}
 
 # Pre-rename muscle memory, whole-line spellings (every frontend gets them).
 _LINE_ALIASES = {

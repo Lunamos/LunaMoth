@@ -144,7 +144,12 @@ class Supervisor:
         """Flip autonomy (mode live|chat) WITHOUT killing the chat you're in —
         the in-chat switch. A running child is told via its /mode command so the
         live agent + snapshot update immediately; a stopped child gets the
-        config write (and is started if turning autonomy on)."""
+        config write (and is started if turning autonomy on).
+
+        Turning autonomy OFF also INTERRUPTS an in-flight self-work turn so the
+        tool chain halts at the next safe boundary (after the current tool call),
+        rather than running the whole turn to completion. An operator chat reply
+        (a live client stream) is left alone — that isn't autonomous work."""
         child = self.child(name)
         mode = "live" if on else "chat"
         Supervisor.set_mode_on_disk(child.meta, mode)
@@ -157,6 +162,12 @@ class Supervisor:
                 child.idle.schedule_after(snap or {})  # resume from now, not instantly
             else:
                 child._emit_life(LifeState("waiting"))
+                # Halt a running self-work turn now (interrupt is a no-op if idle
+                # between cycles). Skip when a client stream is live so toggling
+                # off mid-conversation never cuts the chara's reply to the operator.
+                if not child._client_stream_ids:
+                    with contextlib.suppress(Exception):
+                        await child.private_call("interrupt", {}, timeout=10.0)
         elif on:
             await child.start()
         return child.status()

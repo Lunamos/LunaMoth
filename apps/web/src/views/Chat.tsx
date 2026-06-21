@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useT } from "../i18n";
 import { useNavigate, type ChatSub } from "../hooks/useHashRoute";
-import { useHubApi } from "../state/hub";
+import { useHubApi, useHubState, type BoardSession } from "../state/hub";
 import { glyphOf, paletteClass } from "../lib/format";
 import { assetUrl } from "../rpc";
 import { readVisualPrefs } from "../lib/visual";
@@ -40,6 +40,13 @@ export function Chat({ name, sub }: { name: string; sub: ChatSub }) {
   const sandboxRoot = snap ? String(snap.sandbox_root || snap.workspace_root || "") : undefined;
   const lifeAttr = stream.streaming ? "working" : stream.resting ? "resting" : "";
   const avatarUri = snap?.avatar_uri ? String(snap.avatar_uri) : "";
+  // The header dot mirrors the board: green (breathing) when autonomy is ON, grey
+  // when OFF — read from the SAME roster `paused` the board uses, so inner and
+  // outer are always consistent. Grey too when the socket is down.
+  const { snapshot: hubSnap } = useHubState();
+  const rosterEntry = (hubSnap?.sessions as BoardSession[] | undefined)?.find((s) => s.name === name);
+  const autonomyOn = rosterEntry ? !rosterEntry.paused : true;
+  const headDotOff = !stream.connected || !autonomyOn;
 
   const togglePanel = () => {
     setPanelOpen((open) => {
@@ -67,7 +74,10 @@ export function Chat({ name, sub }: { name: string; sub: ChatSub }) {
               ) : (
                 <span className="glyph-txt">{glyphOf(stream.charName)}</span>
               )}
-              <span className={`mini-dot${stream.connected ? "" : " off"}`} />
+              <span
+                className={`mini-dot${headDotOff ? " off" : ""}`}
+                title={autonomyOn ? t("p-autonomy") : t("st-paused")}
+              />
             </div>
             <div className="who">
               <b>{stream.charName}</b>
@@ -114,7 +124,7 @@ export function Chat({ name, sub }: { name: string; sub: ChatSub }) {
           </div>
 
           <div className="chat-pages">
-            {sub === "chat" && <ChatStreamPage stream={stream} avatarUri={avatarUri} snap={snap} />}
+            {sub === "chat" && <ChatStreamPage stream={stream} name={name} avatarUri={avatarUri} snap={snap} />}
             {sub === "works" && <ChatWorks name={name} sandboxRoot={sandboxRoot} />}
             {sub === "term" && <ChatTerminal name={name} sandboxRoot={sandboxRoot} />}
             {sub === "home" && <Homepage name={name} />}
@@ -136,18 +146,19 @@ export function Chat({ name, sub }: { name: string; sub: ChatSub }) {
    scrollDown's near-bottom guard). */
 function ChatStreamPage({
   stream,
+  name,
   avatarUri,
   snap,
 }: {
   stream: ReturnType<typeof useCharaStream>;
+  name: string;
   avatarUri: string;
   snap: Snapshot | null;
 }) {
   const t = useT();
-  const { hub } = useHubApi();
+  const { hub, refresh } = useHubApi();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [superReadTs, setSuperReadTs] = useState(0);
-  const technical = false; // the "technical" display mode toggle (default off)
 
   // The chara's living backdrop: a low-opacity background image with a readability
   // veil, plus the sprite (立绘). Operator presentation prefs (on/off, opacities,
@@ -188,23 +199,29 @@ function ChatStreamPage({
     if (nearBottom) sc.scrollTop = sc.scrollHeight;
   }, [stream.items, stream.work, stream.ready, stream.charName]);
 
-  // Read the persisted super-chat read watermark for the RESOLVED chara, then
-  // flush newly-seen super bubbles (chat.js flushSuperReads) when the turn settles
-  // + page visible. Keyed on charName because it resolves AFTER attach
-  // (info.char_name) — an empty-deps mount read would fetch the pre-attach name's
-  // watermark and never refetch for the real one.
+  // Opening the chat marks all current superchats READ ("点进去就是已读"): once
+  // attached, set the watermark to now, adopt the returned read_ts for per-bubble
+  // read styling, and refresh the roster so the board's unread mark clears at once.
+  // Keyed by the SESSION name (the route prop) — NOT stream.charName (the card
+  // display name), which resolves to a different value and targets the wrong session.
   useEffect(() => {
-    if (!stream.charName) return;
+    if (!name || !stream.ready) return;
     let on = true;
     hub
-      .call<{ read_ts?: number }>("superchat.read", { name: stream.charName, ts: 0 }, 10000)
-      .then((r) => on && setSuperReadTs(Number(r?.read_ts) || 0))
+      .call<{ read_ts?: number }>("superchat.read", { name, ts: Date.now() / 1000 }, 10000)
+      .then((r) => {
+        if (!on) return;
+        setSuperReadTs(Number(r?.read_ts) || Date.now() / 1000);
+        void refresh(); // board unread mark clears immediately
+      })
       .catch(() => {});
     return () => {
       on = false;
     };
-  }, [stream.charName, hub]);
+  }, [name, stream.ready, hub, refresh]);
 
+  // Flush newly-seen super bubbles that arrive WHILE the chat is open (turn settled
+  // + page visible), so they don't re-surface as unread on the board.
   useEffect(() => {
     if (stream.streaming || document.visibilityState !== "visible") return;
     const unread = stream.items
@@ -214,12 +231,12 @@ function ChatStreamPage({
     const maxTs = Math.max(...unread);
     const timer = setTimeout(() => {
       hub
-        .call<{ read_ts?: number }>("superchat.read", { name: stream.charName, ts: maxTs }, 10000)
+        .call<{ read_ts?: number }>("superchat.read", { name, ts: maxTs }, 10000)
         .then((r) => setSuperReadTs((prev) => Math.max(prev, Number(r?.read_ts) || maxTs)))
         .catch(() => {});
     }, 1600);
     return () => clearTimeout(timer);
-  }, [stream.items, stream.streaming, stream.charName, superReadTs, hub]);
+  }, [stream.items, stream.streaming, name, superReadTs, hub]);
 
   const work = stream.work;
   const workText = work.active
@@ -271,7 +288,6 @@ function ChatStreamPage({
               item={item}
               charName={stream.charName}
               superReadTs={superReadTs}
-              technical={technical}
               avatarUri={avatarUri}
               sandboxRoot={sandboxRoot}
               workspaceRoot={workspaceRoot}

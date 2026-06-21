@@ -95,13 +95,13 @@ from .avatars import (  # noqa: F401
     avatar_upload,
 )
 from .card_draft import (  # noqa: F401
-    _draft_goals,
+    _draft_polaris,
     _draft_world_entries,
     _invalid_draft,
     _parse_card_draft,
     _strip_text_fence,
     _theme_color,
-    _validate_seed_goals,
+    _validate_polaris,
     _validate_user_name,
     _validate_world_entries,
     draft_card_from_inspiration,

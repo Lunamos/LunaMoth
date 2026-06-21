@@ -519,6 +519,12 @@ class GatewayInfo:
     # separate from `detail` so the web can drive a diagnostic chip. `detail`
     # is retained for back-compat with existing gateway.status callers.
     error_message: str = ""
+    # Per-platform breakdown for the gateway overview: one entry per CONFIGURED
+    # platform — {"platform", "enabled", "state"} — merging the config's
+    # per-platform enabled flag with the host's live state (running/needs_login
+    # for enabled platforms, stopped otherwise). Lets the overview show one
+    # independent row per (chara, platform).
+    platforms: list = dataclasses.field(default_factory=list)
 
 
 class GatewayChild:
@@ -555,6 +561,31 @@ class GatewayChild:
             return ",".join(sorted(str(k) for k in adapters))
         return ""
 
+    def _platform_rows(self, live: Any) -> list[dict[str, Any]]:
+        """One row per CONFIGURED platform: its own `enabled` flag (an absent flag
+        inherits the legacy top-level `enabled`, so old configs keep working) plus
+        the host's live state for it (running/needs_login when up, else stopped)."""
+        cfg = self._config()
+        adapters = cfg.get("adapters")
+        if not isinstance(adapters, dict):
+            return []
+        legacy = bool(cfg.get("enabled"))
+        live_by: dict[str, dict[str, Any]] = {}
+        if isinstance(live, list):
+            for p in live:
+                if isinstance(p, dict) and p.get("platform"):
+                    live_by[str(p["platform"])] = p
+        rows: list[dict[str, Any]] = []
+        for name in sorted(str(k) for k in adapters):
+            ac = adapters.get(name)
+            ac = ac if isinstance(ac, dict) else {}
+            own = ac.get("enabled")
+            on = bool(legacy) if own is None else bool(own)
+            lv = live_by.get(name)
+            rows.append({"platform": name, "enabled": on,
+                         "state": str(lv.get("state")) if lv else "stopped"})
+        return rows
+
     def enabled(self) -> bool:
         return bool(self._config().get("enabled"))
 
@@ -579,6 +610,7 @@ class GatewayChild:
         self.info.error_message = detail if state not in ("running", "needs_login") else ""
         if st.get("platform"):
             self.info.platform = str(st.get("platform"))
+        self.info.platforms = self._platform_rows(st.get("platforms"))
 
     def _running_child(self) -> "CharaChild | None":
         child = self.supervisor.charas.get(self.name)
@@ -595,6 +627,7 @@ class GatewayChild:
             if self.info.state not in ("backoff", "fatal"):
                 self.info.state = "stopped"
         self.info.pid = int(child.proc.pid) if child and child.proc else 0
+        self.info.platforms = self._platform_rows(None)
         return dataclasses.asdict(self.info)
 
     async def status_live(self) -> dict[str, Any]:
@@ -607,6 +640,7 @@ class GatewayChild:
             self.info.state = "stopped"
             self.info.detail = self.info.error_message = ""
             self.info.pid = 0
+            self.info.platforms = self._platform_rows(None)
             return dataclasses.asdict(self.info)
         with contextlib.suppress(Exception):
             self._apply_host_status(await child.private_call("messaging.status", {}, timeout=8.0))

@@ -5,10 +5,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..session.isolation import backend as _isolation_backend
+
 # Neutral runtime environment state — character-agnostic. Roleplay flavor
 # belongs in the character card and world book, never in the engine.
+#
+# ISOLATION IS NOT STORED HERE (owner 2026-06-21): the jail a chara's tools run
+# under is owned by ONE authority — LUNAMOTH_PY_BACKEND (derived from the session
+# config's py_backend / meta.isolation), read via session.isolation.backend().
+# A second copy used to live in env_status.json defaulting to "sandbox", which
+# silently sandboxed an `admin` chara whose env file was never seeded. permissions()
+# now reads the backend authority; the legacy key is dropped on load.
 DEFAULT_STATUS = {
-    "isolation": "sandbox",          # sandbox | admin (informational)
     "network_access": True,          # ON by default (owner 2026-06-15); operator can /net off
     "writable_paths": [],            # extra dirs the terminal tool may write to
     "rest_until": 0.0,               # epoch until which the chara chose to rest (rest tool)
@@ -65,11 +73,10 @@ class EnvState:
         if "tool_access" in data:
             data.pop("tool_access", None)
             changed = True
-        data.setdefault("isolation", "sandbox")
-        # Map legacy isolation values (dir/local/docker) → admin so old
-        # env_status.json files don't surface a retired mode.
-        if data.get("isolation") in {"dir", "local", "docker"}:
-            data["isolation"] = "admin"
+        # isolation is no longer owned here — drop any legacy copy so a stale
+        # value can't mislead a reader (the backend authority is the source).
+        if "isolation" in data:
+            data.pop("isolation", None)
             changed = True
         data.setdefault("rest_until", 0.0)
         # user_present was retired — the chara is independent of attach/detach.
@@ -86,7 +93,9 @@ class EnvState:
         accessor every tool runner should use instead of re-reading the dict."""
         data = self.load()
         return Permissions(
-            isolation=str(data.get("isolation", "sandbox")),
+            # The ONE authority for the jail (LUNAMOTH_PY_BACKEND ← session config),
+            # not a per-sandbox copy — so an `admin` chara is never silently sandboxed.
+            isolation=_isolation_backend(),
             network_on=bool(data.get("network_access", False)),
             writable_paths=list(data.get("writable_paths", []) or []),
         )

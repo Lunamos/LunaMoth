@@ -36,3 +36,23 @@ def test_permissions_is_an_immutable_snapshot(tmp_path):
     except dataclasses.FrozenInstanceError:
         raised = True
     assert raised
+
+
+def test_isolation_follows_the_backend_authority_not_a_stored_copy(tmp_path, monkeypatch):
+    """REGRESSION: isolation must come from the ONE authority (LUNAMOTH_PY_BACKEND),
+    never a per-sandbox env_status.json copy. An `admin` chara whose env file was
+    never seeded (the default for network-on charas) used to be silently sandboxed."""
+    # A stale on-disk copy says "sandbox" — it must NOT win.
+    (tmp_path / "env.json").write_text('{"isolation": "sandbox", "network_access": true}', encoding="utf-8")
+    monkeypatch.setenv("LUNAMOTH_PY_BACKEND", "admin")
+    st = EnvState(tmp_path / "env.json")
+    assert st.permissions().isolation == "admin"   # authority wins over the stale copy
+    # And the legacy key is dropped from the dict on load (no misleading reader).
+    assert "isolation" not in st.load()
+
+
+def test_isolation_defaults_to_sandbox_when_backend_unset(tmp_path, monkeypatch):
+    monkeypatch.delenv("LUNAMOTH_PY_BACKEND", raising=False)
+    monkeypatch.delenv("LUNAMOSS_PY_BACKEND", raising=False)
+    st = EnvState(tmp_path / "env.json")
+    assert st.permissions().isolation == "sandbox"

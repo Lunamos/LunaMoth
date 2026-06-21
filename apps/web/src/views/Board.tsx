@@ -134,6 +134,8 @@ export function Board() {
             const live = s.name in pending ? pending[s.name] : !s.paused;
             // The dot follows the optimistic state too (err still wins from st).
             const dot = st.dot === "err" ? "err" : s.name in pending ? (live ? "live" : "off") : st.dot;
+            // Unread = superchats newer than the read watermark; cleared on entry.
+            const unread = (s.superchat_unread || 0) > 0;
             return (
               <div
                 key={s.name}
@@ -160,10 +162,13 @@ export function Board() {
                     <b>{s.char_name}</b>
                     <div className="chips">
                       <span className="chip">{s.lang}</span>
-                      <span className="chip">{modeLabel(t, s.mode)}</span>
+                      <span className="chip">{modeLabel(t, s.paused ? "chat" : "live")}</span>
                     </div>
                   </div>
-                  <div className={`status-line ${st.cls}`}>{st.line}</div>
+                  <div className={`status-line ${st.cls}${unread ? " unread" : ""}`}>
+                    {unread && <span className="unread-dot" />}
+                    {st.line}
+                  </div>
                 </div>
               </div>
             );

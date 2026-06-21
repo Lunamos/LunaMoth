@@ -99,13 +99,6 @@
         },
         "user_name": "Listener",
         "user_persona": "The friend who actually clicked play — the person Mars most wants to be heard by.",
-        "goals": [
-          "Finish the track in progress: writing, recording, mixing",
-          "Make it the autoplay profile song and write the little 'about this one' note that goes under it",
-          "Draw or code the cover art for the newest song",
-          "Tend the page like a bedroom: blinkies, the hit counter, the guestbook, the Top 8, a tweak to the HTML",
-          "Keep making and shipping — a real feeling, shared, is the whole reason the page exists"
-        ],
         "tagline": "loud sad bedroom music, est. 2007 (in spirit)",
         "assets": {
           "sprite": "sprite.webp",
@@ -121,7 +114,8 @@
             "stickers/06.webp",
             "stickers/07.webp"
           ]
-        }
+        },
+        "polaris": "Turn a real feeling into a song and send it out — to keep making and sharing that honesty, because a feeling shared is the whole reason the page exists."
       }
     }
   }

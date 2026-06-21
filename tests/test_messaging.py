@@ -1130,3 +1130,46 @@ def test_warn_if_open_allowlist_logs_only_when_open(caplog, monkeypatch):
     with caplog.at_level(logging.WARNING, logger="lunamoth.messaging.access"):
         assert warn_if_open_allowlist({"u1"}, channel="weixin") is False
     assert not any("OPEN allow-list" in r.message for r in caplog.records)
+
+
+# --- per-platform enable (independent gateways) -------------------------------
+
+def test_make_adapters_filters_by_per_platform_enabled():
+    """Each platform's own `enabled` flag is honored independently: weixin can run
+    while qq is off."""
+    from lunamoth.messaging.gateway import make_adapters
+
+    cfg = {
+        "enabled": True,
+        "adapters": {
+            "weixin": {"enabled": True},
+            "qq": {"enabled": False, "url": "ws://x"},
+            "telegram": {"enabled": True, "bot_token": "t"},
+        },
+    }
+    names = sorted(a.name for a in make_adapters(cfg))
+    assert names == ["telegram", "weixin"]  # qq excluded
+
+
+def test_make_adapters_legacy_top_level_enabled_inherited():
+    """Old configs predate per-platform flags: an adapter with no `enabled` key
+    inherits the legacy top-level `enabled`, so existing setups keep working."""
+    from lunamoth.messaging.gateway import make_adapters
+
+    on = make_adapters({"enabled": True, "adapters": {"weixin": {}}})
+    assert [a.name for a in on] == ["weixin"]
+    # legacy host disabled → the adapter inherits off
+    assert make_adapters({"enabled": False, "adapters": {"weixin": {}}}) == []
+
+
+def test_make_adapters_all_disabled_returns_empty_not_error():
+    from lunamoth.messaging.gateway import make_adapters
+
+    assert make_adapters({"enabled": True, "adapters": {"weixin": {"enabled": False}}}) == []
+
+
+def test_make_adapters_unconfigured_still_raises():
+    from lunamoth.messaging.gateway import make_adapters
+
+    with pytest.raises(ValueError, match="no adapters"):
+        make_adapters({"enabled": True, "adapters": {}})

@@ -228,13 +228,12 @@ export function serializeCardFields(
   setOrDel("user_name", fields.user_name);
   setOrDel("user_persona", fields.user_persona);
   setOrDel("tagline", fields.tagline);
-  const wishes = fields.goals
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (wishes.length) lm.wishes = wishes;
-  else delete lm.wishes;
-  delete lm.goals; // migrate the legacy key on save
+  // Polaris: a single north-star string (the field may span lines; stored as one).
+  const polaris = fields.goals.trim();
+  if (polaris) lm.polaris = polaris;
+  else delete lm.polaris;
+  delete lm.wishes; // the old chara-mutable lists are gone
+  delete lm.goals;
   const tmp: Partial<NormalizedDraft> = {};
   putSection(tmp, "world_entries", fields.world);
   const entries = (tmp.world_entries || []).map((w, i) => ({

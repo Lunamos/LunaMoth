@@ -103,6 +103,7 @@ class HubDispatcher:
             "matte.delete": self._matte_delete,
             "matte.use": self._matte_use,
             "chara.extras": lambda p: _sessions.chara_extras(_meta(p)),
+            "chara.set_polaris": lambda p: _sessions.set_polaris(_meta(p), str(p.get("text") or "")),
             "works.list": lambda p: _sessions.list_works(_meta(p)),
             "works.read": lambda p: _sessions.read_work(_meta(p), str(p.get("rel") or "")),
             "works.open": lambda p: _sessions.open_path(str(p.get("path") or ""), reveal=bool(p.get("reveal"))),
@@ -309,6 +310,9 @@ class HubDispatcher:
             raise RpcError(-32035, f"unreadable card: {exc}") from exc
         defaults = _config.load_defaults()
         _vp_model = str(defaults.get("image_prompt_model") or "")
+        # The image-prompt model runs on its OWN provider when set, else the main
+        # default (same per-task-provider pattern as read-image / card draft).
+        defaults = _config.task_defaults(defaults, str(defaults.get("image_prompt_provider") or ""))
         try:
             return {"brief": pipeline.build_brief(
                 card, lambda s, u: _pkg()._complete(defaults, s, u, model=_vp_model, temperature=0.7, max_tokens=3000))}
@@ -388,10 +392,12 @@ class HubDispatcher:
         inspiration = str(p.get("inspiration") or "").strip()
         if not inspiration:
             raise RpcError(-32602, "cards.draft needs inspiration")
-        # Card drafting uses the per-task card_model override when set, else the
-        # system default model (Settings · 模型 · 其他模态 · 生成角色卡).
+        # Card drafting uses the per-task card_model + card_provider when set, else
+        # the system default (Settings · 模型 · 其他模态 · 生成角色卡). The model runs
+        # on its OWN provider — same per-task-provider pattern as read-image.
         _d = _config.load_defaults()
-        return _card_draft.draft_card_from_inspiration(_d, inspiration, model=str(_d.get("card_model") or ""))
+        _route = _config.task_defaults(_d, str(_d.get("card_provider") or ""))
+        return _card_draft.draft_card_from_inspiration(_route, inspiration, model=str(_d.get("card_model") or ""))
 
     def _card_from_draft(self, p: dict[str, Any]) -> Any:
         draft = p.get("draft")
@@ -472,7 +478,10 @@ class HubDispatcher:
         text = str(p.get("text") or "").strip()
         if not text:
             raise RpcError(-32602, "transcribe.card needs text")
-        return _card_draft.transcribe_card(_config.load_defaults(), text)
+        # Transcribe shares card drafting's per-task model + provider (same task).
+        _d = _config.load_defaults()
+        _route = _config.task_defaults(_d, str(_d.get("card_provider") or ""))
+        return _card_draft.transcribe_card(_route, text, model=str(_d.get("card_model") or ""))
 
     @staticmethod
     def _meta(p: dict[str, Any]) -> S.SessionMeta:

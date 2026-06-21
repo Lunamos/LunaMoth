@@ -145,31 +145,27 @@ class CharacterCard:
         """The card's recommended tool pack / limits / life knobs.
 
         Lives in `extensions.lunamoth` (SillyTavern-compatible free-form field):
-            {"force_roleplay": false, "wishes": ["..."]}
+            {"force_roleplay": false, "polaris": "..."}
         The world is NOT here — it lives in the standard `character_book` field
         (the card is the ONE external file). The context window is NOT here
         either — it's the model's real window (providers.py). Cards that omit
         this block (e.g. plain SillyTavern imports) just get the global
         fallbacks — so any imported card Just Works.
 
-        Seed wishes are read from `extensions.lunamoth.wishes` first, falling
-        back to the legacy `extensions.lunamoth.goals` (one-load migration —
-        an existing card's seeds are never lost). The normalized list is
-        exposed under `wishes`.
+        POLARIS — the chara's single north-star ideal — is read from
+        `extensions.lunamoth.polaris` (a string). The normalized value is exposed
+        under `polaris`. (The old chara-mutable `wishes`/`goals` lists are gone —
+        no migration; a card simply declares a `polaris` string, or none.)
         """
         ext = self.extensions.get("lunamoth")
         if not isinstance(ext, dict):
             return {}
         out = dict(ext)
-        # wishes (new) first, then legacy goals — never lose an existing card's seeds.
-        raw = out.get("wishes")
-        if not isinstance(raw, list):
-            raw = out.get("goals")
-        out.pop("goals", None)
-        if isinstance(raw, list):
-            out["wishes"] = [str(g).strip() for g in raw if str(g).strip()]
+        polaris = out.get("polaris")
+        if isinstance(polaris, str) and polaris.strip():
+            out["polaris"] = polaris.strip()
         else:
-            out.pop("wishes", None)
+            out.pop("polaris", None)
         return out
 
     def theme_colors(self) -> dict[str, str]:

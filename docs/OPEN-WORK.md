@@ -22,108 +22,35 @@ All P1–P3 hermes-parity items (the 33-item backlog) landed and were verified b
 
 ---
 
-## Structural root-causes — the recurring smell (diagnosis 2026-06-16)
+## Structural root-causes — the recurring smell (mostly collapsed)
 
-A batch of real-trace bugs (`send_file` invisible; `execute_code` faked success;
-`ERROR: None` on a started server; `resting` ate the first-meeting greeting; the
-`workspace/workspace` double-path) were all symptoms of **two structural smells**,
-not independent defects. Fixing them one-by-one is whack-a-mole; the durable fix
-is to collapse the shared root. (Owner decision 2026-06-16: **document this round,
-do not refactor** — the bugs themselves are patched. This is the simplification
-backlog.)
+The 2026-06-16 diagnosis catalogued a family of drift bugs sharing two roots:
+Smell A "one fact owned in several places that drift" and Smell B "distinct
+meanings collapsed into one flag/shape". **Nearly all of it has LANDED** (detail
+in git history): isolation single-source — incl. the `env_status` runtime copy
+removed 2026-06-21 so an `admin` chara is no longer silently sandboxed; the tool
+allowlist collapsed to `registry ∩ pack` (`tool_access` retired); explicit tool
+status (`__tool_error__`) + real exit codes (`TerminalResult`); the macOS/Linux
+jail hardening; the attach decision (presence removed entirely); `LifeState` (a
+typed frozen dataclass); and `mode`/autonomy single-sourced (board + in-chat both
+flip `chara.set_autonomy` and read the same `paused`; the front-end superchat /
+RPC-keying drift fixed 2026-06-21). The hub + supervisor god-modules were split
+into packages, tools went default-open, and CI runs the suite + architecture
+guard (+ a macOS runner) on push.
 
-> **UPDATE 2026-06-20 (audit round — what LANDED; detail in git history, diagnosis below kept for context):**
-> P0 *isolation single-source* ✅ (`ISOLATION_TO_BACKEND` now one owner in
-> `session/sessions.py`, exposed via `SessionMeta.env()`; fg/bg/PTY all read one
-> typed `EnvState.permissions() → Permissions`). P1 *explicit tool status* ✅
-> (`tool_error` stamps `__tool_error__`; the gateway judges on it, shape-scan only
-> a fallback) and *execute_code real exit code* ✅ (`runner` returns a typed
-> `TerminalResult`; status from the actual exit code). Plus, beyond this list:
-> the **hub.py god-module was split into a `server/hub/` package + dispatch table**,
-> **tools went default-open** (`sandbox` pack = `["*"]`, hermes parity, owner
-> sign-off), and **CI** now runs the suite + architecture guard on push. Two items
-> here were already MOOT: the *attach decision table* (its present/_greeted/resting/
-> first_meeting chain was removed with presence on 2026-06-18) and the *LifeState
-> struct* (today's `LifeState` is already a frozen dataclass with per-state typed
-> fields; `CharaChild.state` is a separate process-lifecycle concern, not duplication).
-> Still genuinely open: the allowlist `tool_access` force-reset note is obsolete
-> (that owner was retired); `mode`/autonomy double-write, `execute_code` double-cd,
-> and the P2 set (patience_override, card wishes re-seed) remain.
->
-> **UPDATE 2026-06-20b (second audit round — three fresh-context reviews):**
-> ✅ macOS shell jail now denies the operator's whole `$HOME` (was: only
-> `~/.lunamoth`), so a chara's terminal/read_file can no longer read `~/.ssh`/
-> `~/.aws`; the browser jail surgically denies the same secret dirs; opted-in
-> writable paths stay read+write. ✅ Redaction unified — `execute_code` and the
-> audit `_safe_args` use the central `core.redact` (~30 shapes) not a 7-prefix
-> regex. ✅ Adversarial test batteries added for `_pathsec` (traversal/symlink/
-> null-byte) and the real `is_safe_url` (metadata/private/CGNAT; was monkeypatched).
-> ✅ messaging emits a loud warning when a gateway starts with an OPEN allow-list.
-> ✅ `server/supervisor.py` (2151 lines) and `server/hub/cards.py` (1173) split
-> into packages/sibling modules. ✅ CI gained a macOS runner so the Seatbelt/PTY
-> jail tests run on their native OS. Still open / owner-decision: adopting a Python
-> type-checker (mypy/pyright) in CI; surfacing "Landlock can't enforce /net off"
-> in the UI (it already logs an operator warning); and the product bets (packaged
-> DMG/AppImage, card market, chara-curriculum eval cards).
-
-**Smell A — one fact owned in several places that drift:**
-- **Tool allowlist has FOUR owners**, the worst offender. `FULL_TOOL_ACCESS`
-  (`core/state.py:22-34`) is a hand-kept third list beside `registry` and
-  `pack.tools`; the migration at `state.py:80-82` *force-resets* `tool_access`
-  back to it on every `load()` (so a tool missing from the list is not "forgotten"
-  but **actively deleted each load**); and `execute_code._enabled_tools`
-  (`tools/builtin/execute_code.py:346-352`) derives the sandbox's tool set from
-  `state.tool_access` alone, bypassing `registry ∩ pack` entirely. This is the
-  `send_file`-vanished root.
-- **`isolation` derived on two paths**: foreground `ctx.run_terminal`
-  (`tools/context.py:64-75`) never reads `state["isolation"]` (falls to
-  `runner.backend()`); background `terminal._run_background`
-  (`tools/builtin/terminal.py:221-224`) does — so fg/bg can run at different
-  isolation. Plus `ISOLATION_TO_BACKEND` is mirrored in 3 files.
-- **`execute_code` cwd set in two owners** (`run_terminal(workdir=)` + the
-  command's own `cd`) — the double-cd (now patched by dropping `workdir`).
-- **`mode`/autonomy double-written** to disk config + the live agent (`supervisor.py`).
-
-**Smell B — distinct meanings collapsed into one flag / shape:**
-- **Tool success/failure inferred from JSON shape** (`gateway._is_error_json`,
-  `gateway.py:279-294`) instead of an explicit status — `{"error": null}` read as
-  failure (patched, but the *judge-by-shape* root remains; five different
-  result shapes flow through it). `execute_code` status is `"success"` unless a
-  substring match — and the matched literal `"[runner: timeout after"` doesn't
-  even match runner's actual `"[timed out after"` (`runner.py:287`); a non-zero
-  script exit still reports success because the exit code is never returned.
-- **`attach` decision** (`protocol/api.py:149-237`) chains four orthogonal facts
-  (`present`/`_greeted`/`resting`/`first_meeting`) as sequential short-circuits;
-  `_greeted` (process) and `presence.met` (disk) are two owners of "have we met".
-- **`LifeState.state`** single string carries 6 meanings with an overloaded
-  `detail` field (`supervisor.py:383-460`).
-
-**The simplification plan (prioritized):**
-- **P0 (low-risk, no protocol/cache/card impact):**
-  - *Isolation single-source*: `ctx.run_terminal` passes `isolation=ctx.isolation()`;
-    `terminal._run_background` uses the `ctx` accessors; extract the one
-    `ISOLATION_TO_BACKEND` map. (`context.py`, `terminal.py`, `runner.py`)
-  - *Allowlist stop-the-bleed*: delete the `state.py:80-82` force-reset and make
-    `_effective` treat `state.tool_access` as a soft narrowing of `registry ∩ pack`
-    (missing ⇒ not narrowed), so a new tool can't be silently deleted.
-- **P1 (medium-risk, high-value):**
-  - *Explicit tool status*: `tool_error` writes a namespaced `{"__tool_error__": msg}`;
-    gateway judges on that key, not a scan for `"error"`; `runner`/`execute_code`
-    return structured status (real exit code), not parsed text. Migrate in two
-    steps (recognize both, write the new) so replayed transcripts stay valid.
-  - *attach decision table*: evaluate the four facts then a pure
-    `_decide_opening(present, greeted, resting, first)` — unit-testable, which this
-    bug family has always lacked. Pick `presence.met` as the single authority.
-- **P2 (needs owner sign-off — touches default capability / Settings schema /
-  card semantics):** allowlist white→deny-list inversion (default-open, same
-  philosophy as network-on-by-default); `patience` dropping its companion
-  `patience_override` bool; card `wishes` re-seeding on edit; `LifeState` struct.
-
-Sharpest framing: the shared root is that **`tool_access`/`isolation` are modeled
-as "raw-loaded in many places, each with its own default, with a migration that
-rewrites them"**, and **tool success is modeled as "no explicit status, guess from
-JSON shape"**. Collapse those two (single derived source + explicit status) and at
-least six known defects lose their common root instead of being patched one at a time.
+**STILL OPEN (the genuine remainder of this smell family):**
+- **`patience` precedence re-derived in 3+ owners** (`agent.effective_patience`,
+  `core/commands`, `front/tui`, `settings.load`) — the same "explicit-600 vs
+  untouched-600 vs card-default" rule computed in several places (the drift-prone
+  shape, for a non-safety fact). A full collapse touches the FROZEN TUI, so it
+  waits for a TUI-touching pass; the fix shape is one `effective_patience()` /
+  `is_explicit()` that the TUI/commands consume instead of re-deriving.
+- **A few dead i18n keys** (`emb-literal`/`emb-actor`/`p-embodiment`/`emb-fact-hint`/
+  `st-offline`) orphaned by the embodiment→force_roleplay + profile-tab refactors —
+  delete them + drop the `i18n.test.ts` count. (Left to the in-flight Settings/i18n
+  refactor owner to avoid a same-file race.)
+- **card `wishes` re-seeding on edit** (P2, needs owner sign-off) — a card edit
+  should refresh seed wishes; semantics not yet decided.
 
 ---
 
@@ -231,9 +158,11 @@ parity with `reference/hermes-agent` for commodity surfaces), confirms
 delete), then **removes the item from this list**. Anyone (incl. subagents) may
 add a diagnosed problem here with a priority. Independent items run in parallel.
 
-## SEC-low (from the 2026-06-16 security review) — image-gen blocking + key-on-disk readability
-- generate_image is synchronous: ark_generate 240s×5 + download 120s×5 can freeze the chara
-  for minutes on a flapping endpoint. Tune retries/timeouts down for image-gen.
+## SEC-low (from the 2026-06-16 security review) — Landlock ergonomics
+DONE (2026-06): generate_image is no longer synchronous — it returns immediately and
+runs the image job in a background thread, notifying the chara via the completion queue
+when the file is ready, so a flapping endpoint can't freeze a turn (the old ark 240s×5 +
+download 120s×5 stall). The chara's turn never blocks on image generation now.
 
 Remaining LOW follow-ups (clarity/ergonomics, NOT jail escape — from the 2026-06-17 review):
 - The Landlock tier grants no `/proc` (deliberate — `/proc/1/environ` leaks the supervisor token), so
@@ -332,25 +261,6 @@ The visuals pipeline + global keys + matte all shipped but were never exercised
 end-to-end: needs a real ARK image key (full card visual-set generation) and a
 downloaded matte model (the cutout path). Same shape as the WeChat/QQ messaging
 live-test (roadmap C.3). Budget one verification round with real keys.
-
-## (1) write_file ~12KB truncation — DONE (owner 2026-06-19)
-Both halves shipped. DETECTION + drop-and-split was already in (`core/llm.py`:
-`finish=="length"` → drop the truncated tool call, visible `Notice`, "write it in
-smaller pieces" note — never silently fed to the tool). DEFAULT now FOLLOWS THE MODEL
-per owner ruling (default provider is OpenRouter; "跟模型走，默认 8192，一般不 fallback"):
-`config.py` `LLM_MAX_TOKENS` default 4096 → **0 (=auto)**; `providers.max_output_tokens()`
-resolves the model's real `max_completion_tokens` from the OpenRouter catalogue (captured
-alongside `context_length` in the same fetch, cached in `openrouter_output.json`), falling
-back to **8192** (`DEFAULT_MAX_OUTPUT`, hermes' models_dev default) when unknown/offline;
-`LLM_MAX_TOKENS` >0 is an explicit operator override that wins. `_max_tokens_param()` sends
-that resolved number (param name still route-aware: max_completion_tokens on api.openai.com,
-else max_tokens). This removes the 4096 cut that severed large write_file/patch args.
-Tests: full suite green. (We deliberately send a concrete cap rather than hermes' "omit"
-because the model's real max is the truer "follow the model" and 8192 is an explicit
-documented default, not a fabricated fallback.)
-
-## (8) both web tools return empty — SUPERSEDED (web shelved; see "Web tools — FUTURE")
-Moot while the web tools are OFF; the re-enable rules live in the "Web tools — FUTURE" note.
 
 ## (2)(5)(6)(7) — deferred to the UI/feel refactor
 - **(2) send_file UX**: file cards don't re-render on chat reopen; unclear where a
@@ -490,9 +400,13 @@ Verified API shapes (the perishable part):
   (model-pane provider+model). Now that many keys coexist, add a per-row test in the
   提供商 pane → needs `key.test` to accept a named-key `label` and resolve that key's
   secret (small backend add).
-- Vision pipeline: the SIBLING wired it (`llm.py` uses `cfg.vision_model` to describe
-  an image when the main model lacks vision). My wake-cfg copy of `vision_model`
-  closes the loop — UI choice now reaches the chara.
+- Vision pipeline: DONE + reworked (2026-06). Read-image now runs on its OWN GLOBAL
+  provider (`vision_provider` + `vision_model`, resolved via
+  `session.settings.global_vision_route`), decoupled from BOTH the chara's provider and
+  the main text default — image understanding needs no prompt cache, and a per-chara
+  provider switch must not break it. `describe_image` no longer reads the chara's
+  `cfg.vision_model`. Same per-task-provider pattern as card-draft / image-prompt
+  (`config.task_defaults`); the Settings · 模型 · 读图 row picks provider + model.
 - Minor leftovers (cosmetic, owner sweep): a few dead i18n keys orphaned by the
   rewrites (set-image, image-sub, image-key-label, image-model-label, matte-no-deps,
   matte-download, matte-shared-note) and dead CSS (old `.keys-*`/`.key-row`/`.matte-deps`/

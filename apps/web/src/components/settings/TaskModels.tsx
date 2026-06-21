@@ -25,34 +25,42 @@ export interface ImageProvider {
   active: boolean;
 }
 
+export interface KeyRow { label: string; provider: string; base_url: string; has_key: boolean; active: boolean }
+
 export interface TaskModel {
   key: string;
   labelKey: TKey;
   descKey: TKey;
-  field: string; // the defaults.* field it persists to
-  source: "catalog" | "image"; // catalog = main provider's models.list; image = image.catalog
+  field: string; // the defaults.* MODEL field it persists to
+  // image = image.catalog (火山/百炼 image providers); keyprovider = its OWN text
+  // provider, picked from the keyring (read-image / card / image-prompt — and any
+  // future modality, e.g. audio — all run on their own provider+model).
+  source: "image" | "keyprovider";
+  providerField?: string; // the defaults.* PROVIDER field (keyprovider tasks only)
 }
 
-/* The functions that can run on their own model. Order = display order. */
+/* The functions that can run on their own model. Order = display order.
+   Every "keyprovider" task follows ONE pattern: pick a saved provider + a model,
+   persisting {<task>_provider, <task>_model}. Adding audio later = one more row. */
 export const TASKS: ReadonlyArray<TaskModel> = [
-  { key: "vision", labelKey: "aux-vision", descKey: "aux-vision-desc", field: "vision_model", source: "catalog" },
-  { key: "card", labelKey: "aux-card", descKey: "aux-card-desc", field: "card_model", source: "catalog" },
-  { key: "imageprompt", labelKey: "aux-imgprompt", descKey: "aux-imgprompt-desc", field: "image_prompt_model", source: "catalog" },
+  { key: "vision", labelKey: "aux-vision", descKey: "aux-vision-desc", field: "vision_model", providerField: "vision_provider", source: "keyprovider" },
+  { key: "card", labelKey: "aux-card", descKey: "aux-card-desc", field: "card_model", providerField: "card_provider", source: "keyprovider" },
+  { key: "imageprompt", labelKey: "aux-imgprompt", descKey: "aux-imgprompt-desc", field: "image_prompt_model", providerField: "image_prompt_provider", source: "keyprovider" },
   { key: "imagegen", labelKey: "aux-imagegen", descKey: "aux-imagegen-desc", field: "image_model", source: "image" },
 ];
 
 export function TaskModels({
   values,
-  catalog,
   imageCatalog,
-  onApply,
+  keys,
   onApplyImage,
+  onApplyTaskProvider,
 }: {
   values: Record<string, string | undefined>;
-  catalog: SelectOption[];
   imageCatalog: ImageProvider[];
-  onApply: (field: string, value: string) => void;
+  keys: KeyRow[];
   onApplyImage: (provider: string, model: string) => void;
+  onApplyTaskProvider: (providerField: string, modelField: string, provider: string, model: string) => void;
 }) {
   const t = useT();
   return (
@@ -70,12 +78,13 @@ export function TaskModels({
             onApply={onApplyImage}
           />
         ) : (
-          <TaskModelRow
+          <KeyProviderRow
             key={task.key}
             task={task}
-            value={values[task.field] || ""}
-            options={catalog}
-            onApply={(v) => onApply(task.field, v)}
+            provider={values[task.providerField || ""] || ""}
+            model={values[task.field] || ""}
+            keys={keys}
+            onApply={(p, m) => onApplyTaskProvider(task.providerField || "", task.field, p, m)}
           />
         ),
       )}
@@ -83,20 +92,36 @@ export function TaskModels({
   );
 }
 
-function TaskModelRow({
+/* Read-image row: pick a saved provider key (the chara's text provider is NOT
+   reused — vision needs no prompt cache), then type the vision model id. Applying
+   persists vision_provider + vision_model; "use main" clears both (no aux vision).
+   So a chara on OpenRouter can read images via, e.g., an Alibaba vision model. */
+function KeyProviderRow({
   task,
-  value,
-  options,
+  provider,
+  model,
+  keys,
   onApply,
 }: {
   task: TaskModel;
-  value: string;
-  options: SelectOption[];
-  onApply: (v: string) => void;
+  provider: string;
+  model: string;
+  keys: KeyRow[];
+  onApply: (provider: string, model: string) => void;
 }) {
   const t = useT();
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
+  const [pid, setPid] = useState(provider);
+  const [draft, setDraft] = useState(model);
+
+  const curKey = keys.find((k) => k.label === provider);
+  const editKey = keys.find((k) => k.label === pid);
+  const provOptions: SelectOption[] = keys.map((k) => ({
+    value: k.label,
+    label: k.label,
+    note: k.has_key ? "✓ " + t("img-key-ready") : t("img-key-missing"),
+  }));
+  const begin = () => { setPid(provider); setDraft(model); setEditing(true); };
 
   return (
     <div className="aux-row">
@@ -105,25 +130,34 @@ function TaskModelRow({
           <b>{t(task.labelKey)}</b>
           <span className="aux-desc">{t(task.descKey)}</span>
         </div>
-        <div className="aux-cur">{value ? <code>{value}</code> : t("aux-auto")}</div>
+        <div className="aux-cur">
+          {model ? (
+            <>
+              {curKey && <span className="img-prov-tag">{curKey.label}</span>}
+              <code>{model}</code>
+              {curKey && !curKey.has_key && <span className="img-nokey-warn">· {t("img-key-missing")}</span>}
+            </>
+          ) : (
+            t("aux-auto")
+          )}
+        </div>
       </div>
       {!editing ? (
         <div className="aux-acts">
-          {value && <button className="btn text sm" onClick={() => onApply("")}>{t("aux-use-main")}</button>}
-          <button className="btn text sm" onClick={() => { setDraft(value); setEditing(true); }}>{t("aux-change")}</button>
+          {model && <button className="btn text sm" onClick={() => onApply("", "")}>{t("aux-use-main")}</button>}
+          <button className="btn text sm" onClick={begin}>{t("aux-change")}</button>
         </div>
       ) : (
-        <div className="aux-edit">
-          <Select
-            value={draft}
-            options={options}
-            onChange={setDraft}
-            search
-            allowCustom
-            placeholder={t("model-other-ph")}
-          />
+        <div className="aux-edit img-edit">
+          <Select value={pid} options={provOptions} onChange={setPid} placeholder={t("provider")} />
+          <Select value={draft} options={[]} onChange={setDraft} search allowCustom placeholder={t("model-other-ph")} />
+          {editKey && !editKey.has_key && <div className="img-prov-hint">{t("img-prov-hint")}</div>}
           <div className="acts">
-            <button className="btn primary sm" onClick={() => { onApply(draft.trim()); setEditing(false); }}>{t("aux-apply")}</button>
+            <button
+              className="btn primary sm"
+              disabled={!pid || !draft.trim()}
+              onClick={() => { onApply(pid, draft.trim()); setEditing(false); }}
+            >{t("aux-apply")}</button>
             <button className="btn text sm" onClick={() => setEditing(false)}>{t("cancel")}</button>
           </div>
         </div>

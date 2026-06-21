@@ -17,8 +17,9 @@ from ..protocol import Notice, TextDelta, ThinkDelta, ToolEnd, ToolStart
 from .attachments import shrink_data_url, shrink_image_to_inline
 from .cache import apply_cache_control, cache_policy
 
-# Auxiliary vision model — when the main model can't see, an image is described
-# by cfg.vision_model (same route/key, different model id) and the text fed back.
+# Auxiliary vision model — when the main model can't see, an image is described by
+# the GLOBAL read-image route (session.settings.global_vision_route: its own provider
+# + model, NOT this chara's route) and the text fed back.
 # hermes' generic describe prompt (auxiliary task=vision interceptor), verbatim.
 _VISION_DESCRIBE_PROMPT = (
     "Describe everything visible in this image in thorough detail. Include any "
@@ -702,13 +703,17 @@ class LLMClient:
             time.sleep(delay)
 
     def raw_complete(self, messages: list[dict[str, Any]], max_tokens: int = 1024,
-                     timeout: float = 60.0, model: str = "", temperature: float = 0.3) -> str:
+                     timeout: float = 60.0, model: str = "", temperature: float = 0.3,
+                     *, base_url: str = "", api_key: str = "") -> str:
         """One-off NON-streaming completion for engine-internal use (compaction
-        summaries; auxiliary vision). `model` overrides the main model (an aux
-        task on a different model id, same route/key). Returns the assistant text,
-        or "" on ANY failure — engine side-tasks degrade to a no-op, never crash
-        or block the turn."""
-        if not self.is_live():
+        summaries; auxiliary vision). `model` overrides the main model id. `base_url`
+        + `api_key` override the ROUTE (auxiliary vision rides the GLOBAL default
+        provider, not this chara's). Returns the assistant text, or "" on ANY
+        failure — engine side-tasks degrade to a no-op, never crash the turn."""
+        url = (base_url or self.cfg.base_url or "").rstrip("/")
+        # An explicit route override is trusted; otherwise the chara's own client
+        # must be live (compaction path).
+        if not url or (not base_url and not self.is_live()):
             return ""
         import urllib.request
 
@@ -728,7 +733,9 @@ class LLMClient:
         }
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
-            f"{self.cfg.base_url}/chat/completions", data=data, headers=self._headers(), method="POST"
+            f"{url}/chat/completions", data=data,
+            headers=self._headers_for(url, api_key if base_url else self.cfg.api_key),
+            method="POST",
         )
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -739,14 +746,20 @@ class LLMClient:
             return ""
 
     def describe_image(self, data: bytes, mime: str, question: str = "") -> "str | None":
-        """Understand an image via the AUXILIARY vision model (cfg.vision_model)
-        when the main model has no vision — hermes' auxiliary task=vision shape.
-        The vision model shares this route's base_url/api_key; only the model id
-        differs. Returns the description, "" for an empty completion, or None when
-        no vision model is configured / not live / not an image (the caller then
-        keeps the honest 'saved to disk' note — no fabrication)."""
-        vm = (getattr(self.cfg, "vision_model", "") or "").strip()
-        if not vm or not self.is_live() or not data or not (mime or "").startswith("image/"):
+        """Understand an image via the AUXILIARY vision model when the main model
+        has no vision — hermes' auxiliary task=vision shape. The vision model rides
+        the GLOBAL DEFAULT route (Settings · 模型 · 读图 + the default provider), NOT
+        this chara's provider: image understanding needs no prompt cache, and a
+        per-chara provider switch must not break it. Returns the description, "" for
+        an empty completion, or None when no vision route is configured / not an
+        image (the caller keeps the honest 'saved to disk' note — no fabrication)."""
+        from ..session.settings import global_vision_route
+
+        route = global_vision_route()
+        vm = route.get("model", "")
+        if not vm or not route.get("base_url") or not route.get("api_key"):
+            return None
+        if not data or not (mime or "").startswith("image/"):
             return None
         if len(data) > _VISION_MAX_BYTES:  # keep the aux call cheap / within limits
             shrunk = shrink_image_to_inline(data, mime)
@@ -761,7 +774,8 @@ class LLMClient:
             {"type": "text", "text": prompt},
             {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
         ]}]
-        out = self.raw_complete(messages, max_tokens=1500, timeout=120, model=vm, temperature=0.1)
+        out = self.raw_complete(messages, max_tokens=1500, timeout=120, model=vm,
+                                temperature=0.1, base_url=route["base_url"], api_key=route["api_key"])
         return out or None
 
     def analyze_image(self, image_path: str, question: str = "") -> "str | None":
@@ -839,11 +853,14 @@ class LLMClient:
         return [{"role": "system", "content": m} for m in blocks if m and m.strip()]
 
     def _headers(self) -> dict[str, str]:
+        return self._headers_for(self.cfg.base_url, self.cfg.api_key)
+
+    def _headers_for(self, base_url: str, api_key: str) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
-        if self.cfg.api_key:
-            headers["Authorization"] = f"Bearer {self.cfg.api_key}"
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         # OpenRouter recommends these; harmless elsewhere.
-        if "openrouter.ai" in self.cfg.base_url:
+        if "openrouter.ai" in (base_url or ""):
             headers["HTTP-Referer"] = "https://github.com/Lunamos/LunaMoth"
             headers["X-Title"] = "LunaMoth"
         return headers

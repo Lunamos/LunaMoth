@@ -113,8 +113,9 @@ describe("serializeCardFields", () => {
     expect(lm.user_name).toBe("Sam");
     expect(lm.user_persona).toBe("the boss");
     expect(lm.tagline).toBe("a tagline");
-    expect(lm.wishes).toEqual(["ship the site", "learn rust"]);
-    expect("goals" in lm).toBe(false); // legacy key migrated away
+    expect(lm.polaris).toBe("ship the site\nlearn rust"); // single north-star string
+    expect("wishes" in lm).toBe(false); // the old chara-mutable lists are gone
+    expect("goals" in lm).toBe(false);
     expect(data.character_book).toEqual({
       name: "Quinn",
       entries: [
@@ -123,7 +124,7 @@ describe("serializeCardFields", () => {
     });
   });
 
-  it("falls back to charName, drops empty wishes + empty world book", () => {
+  it("falls back to charName, drops empty polaris + empty world book", () => {
     const fields = baseFields();
     fields.name = "  ";
     fields.goals = "  \n ";
@@ -131,7 +132,7 @@ describe("serializeCardFields", () => {
     const data: CardData = {};
     serializeCardFields(data, fields, "fallback");
     expect(data.name).toBe("fallback");
-    expect("wishes" in data.extensions!.lunamoth!).toBe(false);
+    expect("polaris" in data.extensions!.lunamoth!).toBe(false);
     expect("character_book" in data).toBe(false);
   });
 

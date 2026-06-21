@@ -37,9 +37,18 @@ describe("I18N strings map", () => {
   // mod-roleplay, mod-roleplay-hint, mod-website, mod-website-hint), then the
   // homepage "open full page" button added home-open-full → 560. The settings
   // module toggles' "applies on next start" hint (mod-next-start) → 561. The
-  // board's 全部启动/全部关闭 (board-start-all, board-stop-all) → 563.
-  it("preserves the full key set from the source dict (563 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(563);
+  // board's 全部启动/全部关闭 (board-start-all, board-stop-all) → 563. The chat
+  // right-panel consolidation (merge 技能/愿望/记忆 into one Profile tab, move visual
+  // editing to the deck card editor + gateway config to the Gateways page) added
+  // p-profile and removed p-visuals + vis-session-note → 562. The new-gateway
+  // redesign (one modal with 角色 + 网关 selectors, replacing the chara popover)
+  // added gw-new-title, gw-pick-chara-hint, gw-done → 565. Surfacing the QQ
+  // (OneBot v11) + Telegram gateways in the deck added 7 (gw-qq-label, gw-qq-note,
+  // gw-f-access-token, gw-telegram-label, gw-tg-note, gw-f-tg-api-base,
+  // gw-h-tg-api-base) → 572. The status pane's per-chara model + reasoning editor
+  // (model Select → /model, reasoning seg → /reasoning) added p-model-scope-note → 573.
+  it("preserves the full key set from the source dict (573 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(567);
   });
 
   it("every value is a [zh, en] string tuple", () => {

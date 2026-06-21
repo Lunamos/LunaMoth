@@ -103,8 +103,10 @@ def test_is_installed_requires_exact_size(tiny_model):
     assert matte.is_installed("test-tiny") is True
 
 
+@pytest.mark.skipif(matte.deps_available(), reason="visuals stack (rembg) installed in this env")
 def test_deps_unavailable_without_rembg():
-    # rembg is an optional extra, absent in the test env.
+    # rembg is an optional extra; this asserts the deps-ABSENT path, so it only runs
+    # when rembg is genuinely missing (CI). On a dev box with the visuals extra it skips.
     assert matte.deps_available() is False
 
 
@@ -217,7 +219,7 @@ def test_delete_removes_file(tiny_model):
 
 def test_status_shape():
     st = matte.status()
-    assert st["deps"] is False  # no rembg in the test env
+    assert st["deps"] is matte.deps_available()  # status reports the REAL dep state
     assert st["active"] == matte.DEFAULT_MODEL
     ids = {m["id"] for m in st["models"]}
     assert matte.DEFAULT_MODEL in ids
@@ -227,6 +229,7 @@ def test_status_shape():
 
 # --- cut (runtime) ------------------------------------------------------------
 
+@pytest.mark.skipif(matte.deps_available(), reason="visuals stack (rembg) installed in this env")
 def test_cut_without_deps_is_a_visible_error():
     with pytest.raises(RuntimeError, match="visuals"):
         matte.cut("whatever.png")

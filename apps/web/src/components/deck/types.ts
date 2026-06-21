@@ -42,8 +42,7 @@ export interface CardExtLunamoth {
   website?: boolean | string;
   user_name?: string;
   user_persona?: string;
-  wishes?: string[];
-  goals?: string[];
+  polaris?: string;
   theme?: { primary?: string; secondary?: string };
   theme_color?: string;
   avatar_svg?: string;

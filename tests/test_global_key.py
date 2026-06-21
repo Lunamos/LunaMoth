@@ -93,3 +93,76 @@ def test_named_key_resolved_by_route(session_env):
     # a chara on the default route resolves the default key
     _write_session(sess, {"provider": "openrouter", "base_url": ""})
     assert S.load_settings().api_key == "sk-DEFAULT"
+
+
+def test_resolve_named_key_reads_keyring(session_env):
+    """resolve_named_key returns a keyring entry's provider/base_url/api_key/model
+    (used by /provider to switch a chara's provider); empty for unknown/keyless."""
+    home, _ = session_env
+    (home / "desktop.json").write_text(json.dumps({
+        "provider": "openrouter", "api_key": "sk-TOP",
+        "keys": {
+            "alt": {"provider": "openai", "base_url": "https://api.openai.com/v1",
+                    "api_key": "sk-ALT", "model": "gpt-x"},
+            "keyless": {"provider": "x", "base_url": "y"},  # no api_key → not usable
+        },
+    }), encoding="utf-8")
+    got = S.resolve_named_key("alt")
+    assert got == {"provider": "openai", "base_url": "https://api.openai.com/v1",
+                   "api_key": "sk-ALT", "model": "gpt-x"}
+    assert S.resolve_named_key("keyless") == {}   # keyless entry is unusable
+    assert S.resolve_named_key("nope") == {}      # unknown label
+    assert S.resolve_named_key("") == {}
+
+
+def test_global_vision_route_uses_its_own_provider(session_env):
+    """读图 rides its OWN provider (vision_provider = a keyring label) + vision_model,
+    independent of the main text default — so OpenRouter text + a DashScope vision
+    model works. Falls back to the main default when vision_provider is unset."""
+    home, _ = session_env
+    (home / "desktop.json").write_text(json.dumps({
+        # main text default = OpenRouter
+        "provider": "openrouter", "base_url": "https://openrouter.ai/api/v1", "api_key": "sk-OR",
+        "vision_model": "qwen-vl-max",
+        "vision_provider": "dashscope",
+        "keys": {"dashscope": {"provider": "openai_compatible",
+                               "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                               "api_key": "sk-DASH", "model": "qwen-vl-max"}},
+    }), encoding="utf-8")
+    route = S.global_vision_route()
+    assert route["model"] == "qwen-vl-max"
+    assert route["base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"  # NOT openrouter
+    assert route["api_key"] == "sk-DASH"
+
+    # vision_provider unset → falls back to the main text default route
+    (home / "desktop.json").write_text(json.dumps({
+        "provider": "openrouter", "base_url": "https://openrouter.ai/api/v1", "api_key": "sk-OR",
+        "vision_model": "some/vlm",
+    }), encoding="utf-8")
+    fb = S.global_vision_route()
+    assert fb["base_url"] == "https://openrouter.ai/api/v1" and fb["api_key"] == "sk-OR"
+
+    # no vision_model → no aux vision at all
+    (home / "desktop.json").write_text(json.dumps({"provider": "openrouter"}), encoding="utf-8")
+    assert S.global_vision_route() == {}
+
+
+def test_task_defaults_overlays_per_task_provider(session_env):
+    """task_defaults swaps in a saved provider's route for an aux task (card /
+    image-prompt / vision …), leaving the model id to the caller; empty label or a
+    keyless entry → defaults unchanged (falls back to the main default)."""
+    from lunamoth.server.hub import config as C
+    home, _ = session_env
+    (home / "desktop.json").write_text(json.dumps({
+        "keys": {"dash": {"provider": "openai_compatible",
+                          "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                          "api_key": "sk-DASH"}},
+    }), encoding="utf-8")
+    base = {"provider": "openrouter", "base_url": "https://openrouter.ai/api/v1", "api_key": "sk-OR"}
+    routed = C.task_defaults(base, "dash")
+    assert routed["base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    assert routed["api_key"] == "sk-DASH" and routed["provider"] == "openai_compatible"
+    assert base["base_url"] == "https://openrouter.ai/api/v1"  # original untouched
+    # no label / unknown label → unchanged (main default)
+    assert C.task_defaults(base, "") is base
+    assert C.task_defaults(base, "ghost") == base

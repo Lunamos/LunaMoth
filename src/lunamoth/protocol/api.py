@@ -99,6 +99,9 @@ class StateSnapshot:
     sprite_url: str = ""
     bg_url: str = ""
     keyvisual_url: str = ""
+    # The chara's provider endpoint, so a per-chara model picker can show WHICH
+    # saved provider key is active (matched by provider+base_url). '' when unset.
+    base_url: str = ""
     # Wishes/skills/MCP listings are NOT here on purpose: the snapshot feeds a
     # status line polled several times a second, and those need disk walks.
     # Rich UIs get them from /wish /skills /mcp Reply.data on demand.
@@ -270,12 +273,13 @@ class CharaHandle:
         visuals = self._card_visuals()
         snap = StateSnapshot(
             char_name=a.char_name(), lang=a.lang, mode=a.settings.mode,
-            provider=a.settings.provider, model=a.settings.model,
+            provider=a.settings.provider, base_url=a.settings.base_url,
+            model=a.settings.model,
             reasoning=a.settings.reasoning or "medium",
             reasoning_supported=a.llm.reasoning_supported(),
             show_thinking=bool(a.settings.show_thinking),
             user_name=a.settings.user_name,
-            isolation=str(status.get("isolation", a.settings.py_backend)),
+            isolation=a.state.permissions().isolation,  # the ONE authority (backend())
             net_on=bool(status.get("network_access")),
             rest_until=float(status.get("rest_until", 0.0) or 0.0),
             quiet=int(getattr(a.settings, "quiet", 300)),

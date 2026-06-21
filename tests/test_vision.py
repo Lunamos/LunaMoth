@@ -1,17 +1,17 @@
-"""Auxiliary vision model: a non-vision main model understands an uploaded image
-by handing it to a SEPARATE vision model (cfg.vision_model) and feeding the text
-back — hermes' auxiliary task=vision shape."""
+"""Auxiliary vision model: a non-vision main model understands an uploaded image by
+handing it to a SEPARATE vision model on the GLOBAL read-image route
+(session.settings.global_vision_route) and feeding the text back — hermes' auxiliary
+task=vision shape, decoupled from the chara's own provider."""
 from lunamoth.config import LLMConfig
 from lunamoth.core.attachments import RawAttachment, ingest_attachments
 from lunamoth.core.llm import LLMClient
-from lunamoth.session.settings import Settings
 
 
-def _client(vision_model="", live=True):
+def _client(live=True):
     return LLMClient(LLMConfig(
         provider="openai_compatible" if live else "mock",
         base_url="https://x.test/v1" if live else "",
-        model="deepseek/deepseek-v4", vision_model=vision_model,
+        model="deepseek/deepseek-v4",
     ))
 
 
@@ -20,38 +20,44 @@ class _SB:
         return path  # returns the workspace-relative path, like Sandbox
 
 
-# ---- config plumbing -----------------------------------------------------------
+# ---- describe_image (the aux call) — the read-image model is GLOBAL now --------
+# (session.settings.global_vision_route: its OWN provider+model from desktop.json,
+# decoupled from the chara; there is no per-chara Settings.vision_model any more.)
 
-def test_vision_model_flows_settings_to_llmconfig():
-    cfg = Settings(vision_model="google/gemini-3-flash").to_llm_config()
-    assert cfg.vision_model == "google/gemini-3-flash"
-
-
-def test_vision_model_env_seed(monkeypatch):
-    monkeypatch.setenv("LLM_VISION_MODEL", "openai/gpt-4o")
-    from lunamoth.session import settings as S
-    # _ENV_MAP carries the seed; coercion is a plain str
-    assert "vision_model" in S._ENV_MAP
+# Vision now rides the GLOBAL DEFAULT route (Settings · 模型 · 读图 + the default
+# provider), NOT the chara's cfg — so a per-chara provider switch can't break it.
+# These tests inject that global route via session.settings.global_vision_route.
+_VIS_ROUTE = {"model": "google/gemini-3-flash", "provider": "openai_compatible",
+              "base_url": "https://vis.test/v1", "api_key": "sk-VIS"}
 
 
-# ---- describe_image (the aux call) ---------------------------------------------
+def _patch_route(monkeypatch, route=_VIS_ROUTE):
+    import lunamoth.session.settings as S
+    monkeypatch.setattr(S, "global_vision_route", lambda: dict(route))
 
-def test_describe_image_none_without_vision_model():
-    c = _client(vision_model="")
+
+def test_describe_image_none_without_vision_model(monkeypatch):
+    _patch_route(monkeypatch, {})  # no default vision model configured → no aux vision
+    c = _client()
     assert c.describe_image(b"\x89PNGfake", "image/png") is None
 
 
-def test_describe_image_none_for_non_image():
-    c = _client(vision_model="google/gemini-3-flash")
+def test_describe_image_none_for_non_image(monkeypatch):
+    _patch_route(monkeypatch)
+    c = _client()
     assert c.describe_image(b"data", "text/plain") is None
 
 
 def test_describe_image_calls_the_vision_model(monkeypatch):
-    c = _client(vision_model="google/gemini-3-flash")
+    _patch_route(monkeypatch)
+    c = _client()  # cfg.vision_model is irrelevant now — route is global
     seen = {}
 
-    def fake_raw(messages, max_tokens=1024, timeout=60.0, model="", temperature=0.3):
+    def fake_raw(messages, max_tokens=1024, timeout=60.0, model="", temperature=0.3,
+                 *, base_url="", api_key=""):
         seen["model"] = model
+        seen["base_url"] = base_url
+        seen["api_key"] = api_key
         seen["content"] = messages[0]["content"]
         return "a red square on white"
 
@@ -59,13 +65,16 @@ def test_describe_image_calls_the_vision_model(monkeypatch):
     out = c.describe_image(b"\x89PNGfake", "image/png", question="what color?")
     assert out == "a red square on white"
     assert seen["model"] == "google/gemini-3-flash"      # the SEPARATE model, not the main one
+    assert seen["base_url"] == "https://vis.test/v1"     # the GLOBAL default route, not the chara's
+    assert seen["api_key"] == "sk-VIS"
     assert any(p.get("type") == "image_url" for p in seen["content"])
     # the question is folded into the prompt (task-relevant description)
     assert any(p.get("type") == "text" and "what color?" in p["text"] for p in seen["content"])
 
 
 def test_describe_image_generic_prompt_without_question(monkeypatch):
-    c = _client(vision_model="google/gemini-3-flash")
+    _patch_route(monkeypatch)
+    c = _client()
     seen = {}
     monkeypatch.setattr(c, "raw_complete",
                         lambda messages, **k: seen.update(text=messages[0]["content"][0]["text"]) or "desc")
@@ -74,7 +83,7 @@ def test_describe_image_generic_prompt_without_question(monkeypatch):
 
 
 def test_describe_image_empty_completion_is_none(monkeypatch):
-    c = _client(vision_model="google/gemini-3-flash")
+    c = _client()
     monkeypatch.setattr(c, "raw_complete", lambda *a, **k: "")
     assert c.describe_image(b"\x89PNGfake", "image/png") is None  # "" → None (honest)
 

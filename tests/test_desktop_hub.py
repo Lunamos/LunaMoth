@@ -59,7 +59,7 @@ def draft_payload():
             {"keys": ["Orbital Garden"], "content": "A ring habitat where seasons are tuned by old mirrors.", "constant": True},
             {"keys": ["Lantern Archive"], "content": "Aster's catalogue of weather, omens, and names.", "constant": False},
         ],
-        "seed_goals": ["Map the mirror-season drift", "Welcome careful visitors"],
+        "polaris": "Map the whole mirror-season drift and welcome every careful visitor the dark sends",
         "tagline": "A gentle keeper of orbital lanterns",
         "theme_color": "#7c5cff",
     }
@@ -385,7 +385,7 @@ def test_cards_draft_happy_path_uses_default_model(monkeypatch):
     assert r["personality"] == "Gentle, patient, quietly curious."
     assert r["scenario"].startswith("Dusk in the orbital garden")
     assert r["world_entries"][0]["keys"] == ["Orbital Garden"]
-    assert r["seed_goals"] == ["Map the mirror-season drift", "Welcome careful visitors"]
+    assert r["polaris"] == "Map the whole mirror-season drift and welcome every careful visitor the dark sends"
     assert r["theme_color"] == "#7C5CFF"
     assert "avatar_svg" not in r          # the draft no longer auto-generates an avatar
     assert "embodiment" not in r          # the card field is force_roleplay (omitted when unset)
@@ -402,13 +402,13 @@ def test_cards_draft_tolerates_odd_world_and_goal_counts(monkeypatch):
     set_defaults()
     payload = draft_payload()
     payload["world_entries"] = [{"keys": ["only"], "content": "one entry", "constant": False}]  # just 1
-    payload["seed_goals"] = []                                                                    # 0
+    payload["polaris"] = ""                                                                       # empty is fine
     del payload["personality"]                                                                    # missing optional
     mock_completion(monkeypatch, json.dumps(payload))
     r = result("cards.draft", {"inspiration": "a lone keeper"})
     assert r["name"] == "Aster"
     assert len(r["world_entries"]) == 1
-    assert r["seed_goals"] == []
+    assert r["polaris"] == ""
     assert r["personality"] == ""   # missing optional defaults to empty, no error
 
 
@@ -481,7 +481,7 @@ def test_card_save_roundtrips_new_lunamoth_extension_fields():
     assert "embodiment" not in ext        # the legacy string is gone; the field is a bool
     assert "tempo" not in ext
     assert ext["tagline"] == "A gentle keeper of orbital lanterns"
-    assert ext["wishes"] == ["Map the mirror-season drift", "Welcome careful visitors"]
+    assert ext["polaris"] == "Map the whole mirror-season drift and welcome every careful visitor the dark sends"
     assert raw["data"]["character_book"]["entries"][0]["keys"] == ["Orbital Garden"]
     listed = result("cards.list")
     mine = next(c for c in listed if c["path"] == r["path"])

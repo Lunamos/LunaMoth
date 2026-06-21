@@ -92,6 +92,11 @@ export function CardEditor({
   const ext = (full.extensions && full.extensions.lunamoth ? full.extensions.lunamoth : {}) as CardExtLunamoth;
   const isJson = !!full.raw;
   const editable = !card.builtin && !card.locked && isJson;
+  // Visuals are editable on LOCKED cards too — a living chara owns a frozen card,
+  // and its art (立绘/背景/头像/keyvisual) is set through the same save_asset RPCs,
+  // which the backend allows on a locked card. Only the soul/world stay read-only
+  // when locked; builtin + PNG cards remain fully read-only.
+  const visualEditable = !card.builtin && isJson;
   const charName = full.name || card.name;
   const taglineValue = String(ext.tagline || card.tagline || "");
   const book =
@@ -106,8 +111,8 @@ export function CardEditor({
     } as NormalizedDraft,
     "world_entries",
   );
-  const wishesSrc = Array.isArray(ext.wishes) ? ext.wishes : Array.isArray(ext.goals) ? ext.goals : [];
-  const goalsText = wishesSrc.map(String).join("\n");
+  // Polaris: a single north-star string (was the old wishes/goals list).
+  const goalsText = typeof ext.polaris === "string" ? ext.polaris : "";
 
   const editorCtx = () =>
     cardCtxString({
@@ -289,7 +294,7 @@ export function CardEditor({
                   reference tray, one-click generate-all. Builtin/locked/PNG cards are
                   read-only (the editor disables its controls; fall back to read tiles). */}
               {isJson ? (
-                <VisualEditor cardPath={card.path} card={cardForVisual} disabled={!editable} onChanged={onChanged} />
+                <VisualEditor cardPath={card.path} card={cardForVisual} disabled={!visualEditable} onChanged={onChanged} />
               ) : hasAnyArt ? (
                 <div className="cv-tiles">
                   <ArtTile labelKey="cv-art-sprite" url={cardForVisual.sprite_url} name={charName} />

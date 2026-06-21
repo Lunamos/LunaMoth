@@ -46,8 +46,9 @@ def user_worlds_dir() -> Path:
 # read by lunamoth.visuals.matte.selected_model(). Not a secret.
 _DEFAULT_FIELDS = ("provider", "base_url", "api_key", "model", "ui_lang", "ui_theme",
                    "image_provider", "image_model", "matte_model",
-                   "reasoning", "vision_model",
-                   "card_model", "image_prompt_model", "model_context")
+                   "reasoning", "vision_model", "vision_provider",
+                   "card_model", "card_provider",
+                   "image_prompt_model", "image_prompt_provider", "model_context")
 # Default fields whose value is a secret: stripped from every public payload,
 # surfaced only as a has_<field> presence flag.
 _SECRET_FIELDS = ("api_key",)
@@ -151,6 +152,25 @@ def delete_key(label: str) -> list[dict[str, Any]]:
     raw["keys"] = keys
     _write_desktop_raw(raw)
     return list_keys()
+
+
+def task_defaults(defaults: dict[str, Any], provider_label: str) -> dict[str, Any]:
+    """Overlay a saved provider key's route onto `defaults` for an AUXILIARY task
+    that runs on its OWN provider — read-image, card draft, image-prompt, and any
+    future modality (audio …). `provider_label` is a keyring label; empty (or an
+    unusable/keyless entry) → `defaults` unchanged, so the task falls back to the
+    main text default. The model id stays whatever the caller passes; only the
+    route (provider/base_url/api_key) is swapped. ONE pattern for every modality."""
+    label = (provider_label or "").strip()
+    if not label:
+        return defaults
+    from ...session.settings import resolve_named_key
+
+    e = resolve_named_key(label)
+    if not (e.get("base_url") and e.get("api_key")):
+        return defaults
+    return {**defaults, "provider": e.get("provider", ""),
+            "base_url": e["base_url"], "api_key": e["api_key"]}
 
 
 def use_key(label: str) -> dict[str, Any]:

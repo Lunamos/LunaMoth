@@ -37,21 +37,14 @@ def test_panel_routing(tui_env):
                 assert app._panel_view() == expect_view, (text, app._panel_view())
 
             await cmd("/help", "help")        # help lives in the panel, not the console
-            # /goal: add as operator, list on the panel, complete — all through
-            # the CharaHandle (frontends never touch backend objects directly).
-            app.input.value = "/goal 给月蛾织一首夜曲"
+            # /polaris: the operator SETS the chara's north-star and views it — all
+            # through the CharaHandle (frontends never touch backend objects). The
+            # chara cannot change it; there is no completion/list to manage.
+            app.input.value = "/polaris 给月蛾织一首永远写不完的夜曲"
             await pilot.press("enter")
             await pilot.pause()
-            active = [g for g in app.handle.command("/goal").data if g["status"] == "active"]
-            gid = active[-1]["id"]
-            assert active[-1]["by"] == "operator"
-            await cmd("/goal", "out")         # the list lights up the panel
-            app.input.value = f"/goal done {gid}"
-            await pilot.press("enter")
-            await pilot.pause()
-            # (SANDBOX_ROOT is shared across the test run — assert only OUR goal.)
-            now_active = [g["id"] for g in app.handle.command("/goal").data if g["status"] == "active"]
-            assert gid not in now_active
+            assert app.handle.command("/polaris").data["polaris"] == "给月蛾织一首永远写不完的夜曲"
+            await cmd("/polaris", "out")      # the value lights up the panel
             await cmd("/memory", "memory")
             await cmd("/status", "out")       # one-shot command output -> OUTPUT view
             await cmd("/files", "files")

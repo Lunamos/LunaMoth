@@ -386,16 +386,27 @@ def ensure_weixin_adapter(meta: S.SessionMeta) -> None:
 def _gateway_status_from_disk(meta: S.SessionMeta) -> dict[str, Any]:
     path = meta.root / "messaging.json"
     platform = ""
+    platforms: list[dict[str, Any]] = []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         adapters = data.get("adapters") if isinstance(data, dict) else None
         if isinstance(adapters, dict):
             platform = ",".join(sorted(str(k) for k in adapters))
+            # Per-platform rows (all stopped on disk): each platform's own
+            # `enabled` flag, inheriting the legacy top-level `enabled` when absent.
+            legacy = bool(data.get("enabled")) if isinstance(data, dict) else False
+            for name in sorted(str(k) for k in adapters):
+                ac = adapters.get(name)
+                ac = ac if isinstance(ac, dict) else {}
+                own = ac.get("enabled")
+                on = bool(legacy) if own is None else bool(own)
+                platforms.append({"platform": name, "enabled": on, "state": "stopped"})
     except (OSError, json.JSONDecodeError):
         pass
     # No live supervisor: a gateway is always "stopped" on disk. Carry the
     # error_message field so the shape matches GatewayChild.status() for the web.
-    return {"platform": platform, "state": "stopped", "detail": "", "error_message": "", "pid": 0}
+    return {"platform": platform, "state": "stopped", "detail": "",
+            "error_message": "", "pid": 0, "platforms": platforms}
 
 
 def session_entry(meta: S.SessionMeta, supervisor: Any | None = None) -> dict[str, Any]:
@@ -570,11 +581,11 @@ def wake(card_path: str, name: str = "", isolation: str = "sandbox",
         # non-secret overrides, so the key isn't duplicated into every chara's dir.
         "model": model or defaults.get("model", cfg["model"]),
         "model_context": int(defaults.get("model_context") or 0),
-        # per-session model knobs the agent/llm read (Settings.reasoning /
-        # Settings.vision_model) must be copied from the global defaults at wake,
-        # else a woken chara silently ignores the Model-pane choices.
+        # per-session model knobs the agent/llm read (Settings.reasoning) must be
+        # copied from the global defaults at wake, else a woken chara silently
+        # ignores the Model-pane choice. (Read-image is GLOBAL — global_vision_route
+        # — so vision_model is NOT copied per-chara any more.)
         "reasoning": str(defaults.get("reasoning") or cfg["reasoning"]),
-        "vision_model": str(defaults.get("vision_model") or ""),
         "character_path": str(frozen),
         "py_backend": S.isolation_to_backend(meta.isolation),
     })
@@ -910,20 +921,32 @@ def _read_optional(path: Path, limit: int = 20000) -> str:
 def chara_extras(meta: S.SessionMeta) -> dict[str, Any]:
     """Drawer data the hub can read without a living process."""
     sandbox = meta.sandbox_dir
-    goals: Any = None
-    raw_goals = _read_optional(sandbox / "goals.json")
-    if raw_goals:
+    polaris = ""
+    raw = _read_optional(sandbox / "polaris.json")
+    if raw:
         try:
-            goals = json.loads(raw_goals)
+            data = json.loads(raw)
+            polaris = str(data.get("polaris") or "").strip() if isinstance(data, dict) else ""
         except json.JSONDecodeError:
-            goals = None
+            polaris = ""
     return {
         "memory": _read_optional(sandbox / "memory" / "memory.md"),
         "user_memory": _read_optional(sandbox / "memory" / "user.md"),
-        "goals": goals,
+        "polaris": polaris,
         "sandbox_root": str(sandbox),
         "workspace_root": str(sandbox / "workspace"),
     }
+
+
+def set_polaris(meta: S.SessionMeta, text: str) -> dict[str, Any]:
+    """User edit of the chara's Polaris (north-star). Writes polaris.json in the
+    sandbox — the SAME file the live agent's PolarisStore reads — so a running
+    chara picks it up next turn. The chara itself has no path to write this."""
+    text = (text or "").strip()[:1000]
+    path = meta.sandbox_dir / "polaris.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"polaris": text}, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "polaris": text}
 
 
 def open_path(path: str, reveal: bool = False) -> dict[str, Any]:

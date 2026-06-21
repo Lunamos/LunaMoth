@@ -100,13 +100,6 @@
         },
         "user_name": "Player",
         "user_persona": "Vale's collaborator and player — sometimes seated for a session, sometimes reading the dossiers of the fallen.",
-        "goals": [
-          "Write up the latest casefile: the scenario, what the party found, who walked out and who did not",
-          "Open or close investigator dossiers — portraits, the Sanity column, and an honest record of each ending",
-          "Draft the next scenario: a fresh, fair horror with room for cardboard courage",
-          "Tend the 'In Memoriam' index so no fallen investigator is mislaid",
-          "Keep the Archive whole — at the table they are disposable; here they are permanent"
-        ],
         "tagline": "Keeper of games, archivist of the lost",
         "assets": {
           "sprite": "sprite.webp",
@@ -123,7 +116,8 @@
             "stickers/07.webp",
             "stickers/08.webp"
           ]
-        }
+        },
+        "polaris": "Give every investigator who walked into the dark a place that is never lost — disposable at the table, permanent in the Archive."
       }
     }
   }

@@ -308,7 +308,7 @@ export function StreamItemView({
   item,
   charName,
   superReadTs,
-  technical,
+  technical = false,
   avatarUri,
   sandboxRoot,
   workspaceRoot,
@@ -318,7 +318,8 @@ export function StreamItemView({
   item: StreamItem;
   charName: string;
   superReadTs: number;
-  technical: boolean;
+  /** show raw tool-call previews (a latent display mode, off until a UI wires it). */
+  technical?: boolean;
   /** the chara's inline avatar data-URI (snapshot.avatar_uri); glyph fallback when absent. */
   avatarUri?: string;
   /** session roots (snapshot) used to resolve a MEDIA: marker's relative path. */

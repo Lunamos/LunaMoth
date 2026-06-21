@@ -27,4 +27,10 @@ def _isolate_config_roots(tmp_path, monkeypatch):
     monkeypatch.setenv("LUNAMOTH_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("LUNAMOTH_CONFIG_DIR", str(tmp_path / "cfg"))
     monkeypatch.setenv("LUNAMOTH_SANDBOX", str(tmp_path / "sandbox"))
+    # Isolation is now read from LUNAMOTH_PY_BACKEND (the one authority behind
+    # EnvState.permissions().isolation). A CLI test that does os.environ.update(
+    # meta.env()) leaks it across tests, so pin it clean per test — a test that
+    # needs a specific backend sets it itself (monkeypatch wins, last-write).
+    monkeypatch.delenv("LUNAMOTH_PY_BACKEND", raising=False)
+    monkeypatch.delenv("LUNAMOSS_PY_BACKEND", raising=False)
     yield

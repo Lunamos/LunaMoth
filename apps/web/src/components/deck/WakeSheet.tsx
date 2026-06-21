@@ -27,7 +27,9 @@ import type { DeckCard, ModelInfo } from "./types";
 
 const ISO_OPTS: ReadonlyArray<readonly [string, string, string]> = [
   ["sandbox", "iso-sandbox", "iso-sandbox-d"],
-  ["dir", "iso-dir", "iso-dir-d"],
+  // canonical backend name is "admin"; "dir" was the legacy value (normalized
+  // server-side) — send the real one so we don't rely on the compat shim.
+  ["admin", "iso-dir", "iso-dir-d"],
 ] as const;
 
 export function WakeSheet({ card, onClose }: { card: DeckCard; onClose: () => void }) {

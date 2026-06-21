@@ -93,24 +93,40 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     return data
 
 
+def adapter_enabled(adapter_config: dict[str, Any], *, legacy: bool) -> bool:
+    """Whether a single platform should run. Each adapter carries its OWN
+    ``enabled`` flag so the gateways are independent (weixin can run while qq is
+    off). Old configs predate per-platform flags and used a single top-level
+    ``enabled``; an adapter with no ``enabled`` key inherits that legacy flag, so
+    existing setups keep working with no rewrite (implicit migration)."""
+    own = adapter_config.get("enabled")
+    return bool(legacy) if own is None else bool(own)
+
+
 def make_adapters(config: dict[str, Any]) -> list[Adapter]:
+    """Build the Adapter for every ENABLED platform. Returns [] when platforms are
+    configured but all disabled (the host treats that as 'stopped', not an error);
+    raises only on a malformed/empty config."""
     adapters = config.get("adapters", {})
     if not isinstance(adapters, dict):
         raise ValueError("messaging.json field 'adapters' must be an object")
+    if not adapters:
+        raise ValueError("messaging.json configures no adapters")
+    legacy = bool(config.get("enabled"))
     out: list[Adapter] = []
     for name, adapter_config in adapters.items():
         if not isinstance(adapter_config, dict):
             raise ValueError(f"adapter {name!r} config must be an object")
+        if name not in ("weixin", "qq", "telegram"):
+            raise ValueError(f"unknown messaging adapter {name!r}")
+        if not adapter_enabled(adapter_config, legacy=legacy):
+            continue
         if name == "weixin":
             out.append(WeixinAdapter(adapter_config))
         elif name == "qq":
             out.append(QQAdapter(adapter_config))
         elif name == "telegram":
             out.append(TelegramAdapter(adapter_config))
-        else:
-            raise ValueError(f"unknown messaging adapter {name!r}")
-    if not out:
-        raise ValueError("messaging.json configures no adapters")
     return out
 
 

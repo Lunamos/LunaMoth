@@ -37,6 +37,8 @@ export interface WorkState {
 
 export interface Snapshot {
   model?: string;
+  provider?: string;
+  base_url?: string;
   mode?: string;
   net_on?: boolean;
   website?: boolean;

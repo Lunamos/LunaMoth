@@ -20,7 +20,7 @@ from ..obs import get_logger, setup_logging
 from ..config import SANDBOX_ROOT, ThoughtConfig
 from .context import ContextBuffer, _msg_text, estimate_tokens
 from .redact import redact_sensitive_text
-from ..tools.goals import GoalStore
+from ..tools.polaris import PolarisStore
 from .llm import LLMClient
 from ..protocol import MUSE, Notice, TextDelta
 from .attachments import (
@@ -176,12 +176,12 @@ class LunaMothAgent:
         self.memory = MemoryStore(SANDBOX_ROOT / "memory", self._memory_limits())
         self._memory_snapshot: dict[str, list[str]] = self.memory.snapshot()
         self._memory_warnings: list[str] = []  # last limit-shrink warnings (for the frontend)
-        # Charas are wish-driven: a persistent wish list (operator's ⭑ + its own)
-        # steers every turn — and gives unattended time (empty user messages) a
-        # direction without any engine-authored prompt. The store stays on disk
-        # as goals.json (legacy filename, invisible to users).
-        self.wishes = GoalStore(SANDBOX_ROOT / "goals.json")
-        self._seed_card_wishes()
+        # Polaris: the chara's ONE north-star ideal — user-authored, READ-ONLY to
+        # the chara (no tool can change or complete it), and unattainable by design.
+        # It quietly orients unattended time. Seeded from the card; persisted to
+        # polaris.json in the sandbox.
+        self.polaris = PolarisStore(SANDBOX_ROOT / "polaris.json")
+        self._seed_card_polaris()
         # Skills: know-how the chara reads on demand AND writes for itself
         # (workspace/skills/ shadows user + bundled — hermes's local-first rule).
         self.skills = SkillStore()
@@ -189,7 +189,7 @@ class LunaMothAgent:
         # MCP: operator-configured external tool servers (mcp.json); packs opt in.
         self.mcp = McpManager(config_dir=Path(os.getenv("LUNAMOTH_CONFIG_DIR", "")) if os.getenv("LUNAMOTH_CONFIG_DIR") else None)
         self.tools = ToolGateway(
-            self.sandbox, self.state, self.audit, self.memory, self.wishes,
+            self.sandbox, self.state, self.audit, self.memory, self.polaris,
             skills=self.skills, mcp=self.mcp,
         )
         self._load_toolpack()
@@ -216,7 +216,7 @@ class LunaMothAgent:
             self.audit.write("memory_shrunk", detail=w)
         self._freeze_memory()  # a reconfigure starts a fresh prompt — reload the snapshot
         self._load_toolpack()
-        self._seed_card_wishes()
+        self._seed_card_polaris()
         self._freeze_skills()
         self._invalidate_stable_prefix()
         self.llm = LLMClient(settings.to_llm_config())
@@ -234,12 +234,27 @@ class LunaMothAgent:
     def swap_model(self, model: str) -> None:
         """Session-scoped model hot-swap (/model): rebuilds only the LLM client.
 
-        Deliberately NOT persisted — a restart returns to the configured
-        model; the global default is untouched. The stable prefix is not
-        invalidated (provider prompt caches are per-model anyway)."""
+        The /model command persists this to the chara's session config (so it
+        survives a restart); the global default is untouched. The stable prefix is
+        not invalidated (provider prompt caches are per-model anyway)."""
         self.settings.model = model.strip()
         self.llm = LLMClient(self.settings.to_llm_config())
         self.audit.write("model_swap", model=self.settings.model)
+
+    def swap_provider(self, *, provider: str, base_url: str, api_key: str,
+                      model: str | None = None) -> None:
+        """Switch THIS chara's provider live (and the model, if the key carries
+        one), rebuilding the LLM client. The /provider command persists the
+        provider/base_url/model to the chara's session config; the api_key is
+        resolved from the GLOBAL keyring and is NEVER written there (SEC-2)."""
+        self.settings.provider = (provider or "").strip()
+        self.settings.base_url = (base_url or "").strip().rstrip("/")
+        self.settings.api_key = api_key or ""
+        if model:
+            self.settings.model = model.strip()
+        self.llm = LLMClient(self.settings.to_llm_config())
+        self.audit.write("provider_swap", provider=self.settings.provider,
+                         model=self.settings.model)
 
     # ---- persona / tool pack / limits (independent composable layers) -------------
 
@@ -296,11 +311,11 @@ class LunaMothAgent:
             mcp_servers=self.toolpack.mcp_servers if self.toolpack else None,
         )
 
-    def _seed_card_wishes(self) -> None:
+    def _seed_card_polaris(self) -> None:
         defaults = self.character.defaults() if self.character else {}
-        wishes = defaults.get("wishes") if isinstance(defaults, dict) else None
-        if isinstance(wishes, list):
-            self.wishes.seed_once([str(w) for w in wishes], by="card")
+        polaris = defaults.get("polaris") if isinstance(defaults, dict) else None
+        if isinstance(polaris, str):
+            self.polaris.seed_once(polaris)
 
     def _card_limit(self, key: str) -> int | None:
         """A limit declared by the card, in extensions.lunamoth or top-level extensions."""
@@ -334,21 +349,30 @@ class LunaMothAgent:
             user_chars=self._effective_limit("user_chars", 2000),
         )
 
-    def effective_patience(self) -> float:
-        """Base seconds between spontaneous cycles: operator > card > 600."""
+    def patience_resolved(self) -> "tuple[float, str]":
+        """The base pause between spontaneous cycles AND where it came from
+        ('operator' | 'card' | 'default'). This is the ONE place the
+        operator > card > 600 precedence (incl. the `abs(x-600)` explicit-source
+        rule) is computed — every caller (`effective_patience`, `/patience`)
+        reads this instead of re-deriving the source bit itself.
+
+        Settings.patience defaults to 600; the companion `patience_override` bit
+        preserves precedence when the operator explicitly sets 600, while still
+        letting a card default win over a bare, untouched Settings() default."""
         raw = getattr(self.settings, "patience", 600.0)
         override = parse_patience(raw)
-        # Settings.patience defaults to 600. The companion source bit preserves
-        # precedence when the operator explicitly sets 600 while letting a card
-        # default win over a bare, untouched Settings() default.
         explicit = bool(getattr(self.settings, "patience_override", False))
         if override is not None and (explicit or abs(override - 600.0) > 1e-9):
-            return override
+            return override, "operator"
         if self.character is not None:
             card = parse_patience(self.character.defaults().get("patience"))
             if card is not None:
-                return card
-        return override if override is not None else 600.0
+                return card, "card"
+        return (override if override is not None else 600.0), "default"
+
+    def effective_patience(self) -> float:
+        """Base seconds between spontaneous cycles: operator > card > 600."""
+        return self.patience_resolved()[0]
 
     def effective_embodiment(self) -> str:
         """Embodiment stance: operator override > card declaration > literal."""
@@ -698,7 +722,7 @@ class LunaMothAgent:
             net = "on" if status.get("network_access") else "off"
             today = datetime.now().strftime("%Y-%m-%d %a")
             msgs.append(
-                f"Environment: isolation={status.get('isolation', 'sandbox')}, network={net}, "
+                f"Environment: isolation={self.state.permissions().isolation}, network={net}, "
                 f"date={today}. workspace is your private read/write directory "
                 "(put work you want your user to see under works/); assets/ beside it is a "
                 "read-only reference shelf you can read but not write."
@@ -708,9 +732,9 @@ class LunaMothAgent:
         if world_blocks:
             msgs.append("[World Info]\n" + "\n\n".join(world_blocks))
 
-        wishes_block = self.wishes.render_block()
-        if wishes_block:
-            msgs.append(wishes_block)
+        polaris_block = self.polaris.render_block()
+        if polaris_block:
+            msgs.append(polaris_block)
 
         post_history = self._post_history_slot()
         if post_history:

@@ -28,7 +28,7 @@ class ToolContext:
     state: Any                         # core.state.EnvState (network/writable/isolation/rest)
     audit: Any                         # obs.audit.AuditLog
     memory: Any = None                 # tools.memory.MemoryStore
-    wishes: Any = None                 # tools.goals store (the renamed chara-life "goal")
+    polaris: Any = None                # tools.polaris.PolarisStore (read-only north-star; user-owned)
     skills: Any = None                 # tools.skills.SkillStore
     mcp: Any = None                    # tools.mcp.McpManager
     llm: Any = None                    # core.llm.LLMClient (web summarize / execute / delegate)

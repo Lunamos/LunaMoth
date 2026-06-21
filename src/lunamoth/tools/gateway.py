@@ -24,7 +24,7 @@ from typing import Any, Callable
 
 from ..obs.audit import AuditLog
 from ..obs import get_logger
-from .goals import GoalStore
+from .polaris import PolarisStore
 from .mcp import McpError, McpManager
 from .memory import MemoryStore
 from .skills import SkillStore
@@ -56,7 +56,7 @@ def _ensure_discovered() -> None:
 class ToolGateway:
     def __init__(
         self, sandbox: Sandbox, state: EnvState, audit: AuditLog,
-        memory: MemoryStore | None = None, goals: "GoalStore | None" = None,
+        memory: MemoryStore | None = None, polaris: "PolarisStore | None" = None,
         skills: "SkillStore | None" = None, mcp: "McpManager | None" = None,
         llm: Any = None, transcript: Any = None,
     ):
@@ -65,7 +65,7 @@ class ToolGateway:
         self.state = state
         self.audit = audit
         self.memory = memory
-        self.goals = goals
+        self.polaris = polaris
         self.skills = skills
         self.mcp = mcp
         self.llm = llm
@@ -101,7 +101,7 @@ class ToolGateway:
         if self._ctx_obj is None:
             self._ctx_obj = ToolContext(
                 sandbox=self.sandbox, state=self.state, audit=self.audit,
-                memory=self.memory, wishes=self.goals, skills=self.skills,
+                memory=self.memory, polaris=self.polaris, skills=self.skills,
                 mcp=self.mcp, llm=self.llm, transcript=self.transcript,
                 permission_hook=self.permission_hook, clarify_hook=self.clarify_hook,
                 dispatch=self._code_dispatch,

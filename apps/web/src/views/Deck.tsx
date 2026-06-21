@@ -21,7 +21,7 @@ import { CardFace } from "../components/deck/visual";
 import { CardEditor } from "../components/deck/CardEditor";
 import { WakeSheet } from "../components/deck/WakeSheet";
 import { deckToast } from "../components/ui/deckToast";
-import type { DeckCard, FullCard } from "../components/deck/types";
+import type { DeckCard } from "../components/deck/types";
 
 type Filter = "unwoken" | "woken";
 
@@ -63,16 +63,9 @@ export function Deck() {
   const duplicate = async (c: DeckCard) => {
     setBusyKey("dup:" + c.path, true);
     try {
-      const full = await hub.call<FullCard>("card.read", { path: c.path }, 20000);
-      if (!full.raw) throw new Error(t("dup-png"));
-      const zh = String(full.language || c.lang || "").toLowerCase().startsWith("zh");
-      const taken = new Set(allCards.map((x) => x.name));
-      const base = `${full.name || c.name} ${zh ? "副本" : "copy"}`;
-      let name = base;
-      for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
-      if (full.raw.data) (full.raw.data as { name?: string }).name = name;
-      full.raw.name = name;
-      await hub.call("card.save", { data: full.raw }, 20000);
+      // Backend-owned: copies the card.json AND its art-asset sidecars into a new
+      // folder, renames with a 副本/copy suffix, and lifts PNG cards to JSON.
+      await hub.call("card.duplicate", { path: c.path }, 20000);
       deckToast(t("copied"));
       await refresh();
     } catch (e) {

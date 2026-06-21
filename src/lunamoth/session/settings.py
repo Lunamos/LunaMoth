@@ -71,6 +71,54 @@ def global_api_key(provider: str = "", base_url: str = "") -> str:
     return ""
 
 
+def global_vision_route() -> dict[str, str]:
+    """The DEFAULT vision route: the read-image model (Settings · 模型 · 读图 →
+    ``vision_model``) on its OWN provider (``vision_provider`` = a saved keyring
+    label), independent of BOTH the chara's provider and the main text default —
+    so a chara on OpenRouter can read images via, say, an Alibaba (DashScope)
+    vision model. Vision needs no prompt cache, so it never rides the chara.
+    Falls back to the main default provider when ``vision_provider`` is unset (old
+    setups keep working). {} when no vision_model is configured."""
+    try:
+        raw = json.loads((_global_home() / "desktop.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    model = str(raw.get("vision_model") or "").strip()
+    if not model:
+        return {}
+    # Vision's OWN provider (a keyring label) wins; else the main text default.
+    label = str(raw.get("vision_provider") or "").strip()
+    if label:
+        entry = resolve_named_key(label)
+        if entry.get("base_url") and entry.get("api_key"):
+            return {"model": model, "provider": entry.get("provider", ""),
+                    "base_url": entry["base_url"], "api_key": entry["api_key"]}
+    provider = str(raw.get("provider") or "").strip()
+    base_url = str(raw.get("base_url") or "").strip().rstrip("/")
+    return {"model": model, "provider": provider, "base_url": base_url,
+            "api_key": global_api_key(provider, base_url)}
+
+
+def resolve_named_key(label: str) -> dict[str, str]:
+    """Resolve a NAMED keyring entry (~/.lunamoth/desktop.json `keys`) to its
+    {provider, base_url, api_key, model}. Used by /provider to switch a chara's
+    provider to a saved key. Empty dict when the label is absent or keyless."""
+    label = (label or "").strip()
+    if not label:
+        return {}
+    try:
+        raw = json.loads((_global_home() / "desktop.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    keys = raw.get("keys") if isinstance(raw, dict) and isinstance(raw.get("keys"), dict) else {}
+    item = keys.get(label)
+    if not isinstance(item, dict) or not item.get("api_key"):
+        return {}
+    return {k: str(item.get(k) or "") for k in ("provider", "base_url", "api_key", "model")}
+
+
 def _is_session_config() -> bool:
     """True when CONFIG_PATH points at a per-session config (…/sessions/<name>/),
     not the global config — used to keep the secret out of session files."""
@@ -128,9 +176,8 @@ class Settings:
     reasoning: str = "medium"
     # Auxiliary vision model id (e.g. "google/gemini-3-flash", "openai/gpt-4o").
     # When the main model has no vision, an uploaded image is described by this
-    # model and the text fed back. Empty => no auxiliary vision. Shares the main
-    # base_url/api_key (any OpenRouter id reaches other providers).
-    vision_model: str = ""
+    # (AUXILIARY read-image is GLOBAL, not a per-chara field — see
+    # global_vision_route below.)
     # Show the thinking TEXT in the transcript (dimmed)? Default off: you get a
     # Claude-style "✶ thinking…" indicator instead, and the text leaves no trace.
     show_thinking: bool = False
@@ -174,7 +221,6 @@ class Settings:
             temperature=float(self.temperature),
             max_tokens=int(self.max_tokens),
             reasoning=(self.reasoning or "medium").strip().lower(),
-            vision_model=(self.vision_model or "").strip(),
         )
 
 
@@ -223,7 +269,6 @@ _ENV_MAP: dict[str, tuple[str, ...]] = {
     "user_chars": ("LUNAMOTH_USER_CHARS",),
     "mode": ("LUNAMOTH_MODE", "LUNAMOTH_PRESENCE"),
     "reasoning": ("LLM_REASONING",),
-    "vision_model": ("LLM_VISION_MODEL",),
     "patience": ("LUNAMOTH_PATIENCE",),
     "embodiment_override": ("LUNAMOTH_EMBODIMENT",),
     "website_override": ("LUNAMOTH_WEBSITE",),

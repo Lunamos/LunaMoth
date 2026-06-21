@@ -400,6 +400,38 @@ def test_card_duplicate_missing_is_an_error():
     assert rpc_error("card.duplicate", {"path": "/nope/missing.json"})["code"] == -32035
 
 
+def test_card_duplicate_copies_art_assets():
+    # A card is a folder (card.json + sidecar art); duplicating must bring the
+    # art across so the copy isn't pointing at the original's files (or broken).
+    src_dir = H.user_cards_dir() / "Arty"
+    src_dir.mkdir(parents=True)
+    (src_dir / "Arty.avatar.png").write_bytes(b"PNG-AVATAR")
+    (src_dir / "Arty.sprite.png").write_bytes(b"PNG-SPRITE")
+    card = {
+        "spec": "chara_card_v3", "spec_version": "3.0", "version": "1.0",
+        "data": {
+            "name": "Arty", "description": "an artist",
+            "extensions": {"lunamoth": {
+                "avatar_file": "Arty.avatar.png",
+                "assets": {"sprite": "Arty.sprite.png"},
+            }},
+        },
+    }
+    (src_dir / "card.json").write_text(json.dumps(card), encoding="utf-8")
+
+    out = result("card.duplicate", {"path": str(src_dir / "card.json")})
+    dup_path = Path(out["path"])
+    dup = json.loads(dup_path.read_text(encoding="utf-8"))
+    lm = dup["data"]["extensions"]["lunamoth"]
+    # the copy declares the same relative names AND the files exist beside it
+    assert lm["avatar_file"] == "Arty.avatar.png"
+    assert lm["assets"]["sprite"] == "Arty.sprite.png"
+    assert (dup_path.parent / "Arty.avatar.png").read_bytes() == b"PNG-AVATAR"
+    assert (dup_path.parent / "Arty.sprite.png").read_bytes() == b"PNG-SPRITE"
+    # the copy lives in its OWN folder, not the source's
+    assert dup_path.parent != src_dir
+
+
 # ---- named keys (webui-needs #10) --------------------------------------------------
 
 def test_keys_roundtrip_never_echoes_secrets():
@@ -548,21 +580,30 @@ def test_card_visual_brief(monkeypatch):
 def test_matte_status_use_and_guards(monkeypatch):
     # R11: matte.status reports models + deps; matte.use persists the active id to
     # desktop.json (read by visuals.matte.selected_model); guards reject bad input.
+    from lunamoth.visuals import matte as M
     monkeypatch.setenv("U2NET_HOME", str(os.path.join(os.environ["LUNAMOTH_HOME"], "u2net")))
+    # A real model install would pip-install rembg INTO the test interpreter and hit
+    # the network — which both fails offline and pollutes deps_available() for the
+    # other matte tests in this process. Stub the background job so this stays a pure
+    # wiring test; the install/download mechanics are covered in test_matte.py.
+    started: list[str] = []
+    monkeypatch.setattr(M, "download_async", lambda mid: started.append(mid) or {"state": "preparing"})
+
     st = result("matte.status")
     assert "models" in st and st["deps"] in (True, False)
-    # an unknown model id is a clear param error
+    # an unknown model id is a clear param error (rejected before the job starts)
     assert rpc_error("matte.download", {"model": "ghost"})["code"] == -32602
     assert rpc_error("matte.use", {"model": "ghost"})["code"] == -32602
+    assert started == []  # the rejected download never reached download_async
     # picking a valid model persists matte_model into the global defaults store
     st = result("matte.use", {"model": "birefnet-general-lite"})
     assert st["active"] == "birefnet-general-lite"
     raw = json.loads(H.desktop_config_path().read_text(encoding="utf-8"))
     assert raw["matte_model"] == "birefnet-general-lite"
-    # without the optional visuals stack installed, download is a visible error
-    from lunamoth.visuals import matte as M
-    if not M.deps_available():
-        assert rpc_error("matte.download", {"model": "birefnet-general"})["code"] == -32050
+    # one-click install: a valid download kicks off the background job and returns
+    # the status payload — there is no separate deps step / -32050 error any more.
+    st = result("matte.download", {"model": "birefnet-general"})
+    assert "models" in st and started == ["birefnet-general"]
 
 
 def test_use_key_activates_and_delete_removes():
@@ -638,7 +679,7 @@ def test_generation_helpers_use_system_default_model(monkeypatch):
     canned = json.dumps({"name": "N", "user_name": "friend", "description": "x" * 200, "first_mes": "hi",
                          "world_entries": [{"keys": ["a"], "content": "c", "constant": False},
                                            {"keys": ["b"], "content": "d", "constant": False}],
-                         "seed_goals": ["g"], "tagline": "t", "theme_color": "#5B9FD4"})
+                         "polaris": "g", "tagline": "t", "theme_color": "#5B9FD4"})
     monkeypatch.setattr(H, "_complete", lambda *a, **k: (seen.append(k.get("model", "")) or canned))
     result("cards.draft", {"inspiration": "a moth", "model": "ignored/now"})
     assert seen == [""]

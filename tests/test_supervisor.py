@@ -355,7 +355,10 @@ def test_gateway_info_shape_has_state_enum_and_error_message():
 
     info = GatewayInfo(platform="qq", state="backoff", detail="x", error_message="boom", pid=7)
     d = dataclasses.asdict(info)
-    assert set(d) == {"platform", "state", "detail", "error_message", "pid"}
+    # `platforms` (per-platform overview rows) joined the shape when gateways
+    # became independently toggleable; it defaults to an empty list.
+    assert set(d) == {"platform", "state", "detail", "error_message", "pid", "platforms"}
+    assert d["platforms"] == []
     json.dumps(d)
 
 
@@ -571,6 +574,60 @@ def test_set_autonomy_and_the_board_agree_via_mode(tmp_path, monkeypatch):
     call("chara.set_autonomy", {"name": meta.name, "on": True})
     assert Supervisor.is_autonomous(meta) is True
     assert call("sessions.list", {})[0]["paused"] is False   # board: autonomy on
+
+
+def test_set_autonomy_off_interrupts_self_work_but_not_a_chat(monkeypatch):
+    """Turning autonomy OFF halts an in-flight self-work turn (sends `interrupt`
+    so the tool chain stops at the next safe boundary), but leaves an operator
+    chat reply (a live client stream) alone. Turning ON never interrupts."""
+    import asyncio
+
+    import lunamoth.server.supervisor.core as core
+    from lunamoth.server.supervisor import CharaChild, Supervisor
+    from lunamoth.session.sessions import SessionMeta
+
+    monkeypatch.setattr(Supervisor, "set_mode_on_disk", staticmethod(lambda meta, mode: None))
+    sup = Supervisor(host="127.0.0.1", http_port=0, ws_port=0, token="t")
+    child = CharaChild(SessionMeta(name="t"), supervisor=sup)
+    monkeypatch.setattr(core.S, "load_session", lambda name: child.meta)
+
+    class _Proc:
+        returncode = None
+        pid = 4321
+
+    child.proc = _Proc()
+    child._emit_life = lambda *a, **k: None
+
+    async def fake_snapshot(silent=False):
+        return {}
+
+    child.snapshot = fake_snapshot
+    sup.charas["t"] = child
+
+    calls: list[str] = []
+
+    async def fake_private_call(method, params=None, timeout=10.0):
+        calls.append(method)
+        return {}
+
+    child.private_call = fake_private_call
+
+    # OFF, no client stream → the self-work turn is interrupted
+    child._client_stream_ids = set()
+    asyncio.run(sup.set_autonomy("t", False))
+    assert "interrupt" in calls
+
+    # OFF, a live client stream (operator chat) → reply is NOT cut
+    calls.clear()
+    child._client_stream_ids = {"rid"}
+    asyncio.run(sup.set_autonomy("t", False))
+    assert "interrupt" not in calls
+
+    # ON → never interrupts
+    calls.clear()
+    child._client_stream_ids = set()
+    asyncio.run(sup.set_autonomy("t", True))
+    assert "interrupt" not in calls
 
 
 # ---- #28 shutdown forensics + resource canary -------------------------------
@@ -815,3 +872,27 @@ def test_asset_route_never_leaks_session_secrets(tmp_path, monkeypatch):
         assert get(sb / "workspace" / "config.json")[0] == 404
     finally:
         srv.shutdown()
+
+
+def test_gateway_platform_rows_merge_config_and_live(tmp_path):
+    """The overview gets one row per CONFIGURED platform: its own enabled flag
+    (legacy-inherited when absent) merged with the host's live per-platform state.
+    A configured-but-disabled platform still shows up (enabled False, stopped)."""
+    gw = _make_gateway(tmp_path, _FakeSupervisor(None))
+    cfg = {
+        "enabled": True,
+        "adapters": {
+            "weixin": {"enabled": True},
+            "qq": {"enabled": False, "url": "ws://x"},
+            "telegram": {},  # no per-platform flag → inherits legacy top-level enabled
+        },
+    }
+    (tmp_path / "messaging.json").write_text(json.dumps(cfg), encoding="utf-8")
+    live = [
+        {"platform": "weixin", "state": "running"},
+        {"platform": "telegram", "state": "needs_login"},
+    ]
+    rows = {r["platform"]: r for r in gw._platform_rows(live)}
+    assert rows["weixin"] == {"platform": "weixin", "enabled": True, "state": "running"}
+    assert rows["qq"] == {"platform": "qq", "enabled": False, "state": "stopped"}
+    assert rows["telegram"] == {"platform": "telegram", "enabled": True, "state": "needs_login"}

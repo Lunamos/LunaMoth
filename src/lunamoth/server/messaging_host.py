@@ -61,7 +61,12 @@ class MessagingHost:
         self._allowed: set[str] = set()
         self._refusal = DEFAULT_REFUSAL
         self._inbox: "queue.Queue[_Envelope]" = queue.Queue()
-        self._threads: list[threading.Thread] = []
+        # Per-adapter threads, keyed by platform name, so one platform can be
+        # added/removed without touching the others (no blip on a sibling toggle).
+        self._threads_by_name: dict[str, threading.Thread] = {}
+        # Names being torn down on PURPOSE — so _run_adapter doesn't mistake an
+        # intentional single-platform stop for a crash and log a false error.
+        self._intentional: set[str] = set()
         self._relay: threading.Thread | None = None
         self._stop = threading.Event()
         self._dedup = MessageDeduplicator()
@@ -69,6 +74,10 @@ class MessagingHost:
         self._platform = ""
         self._state = "stopped"
         self._detail = ""
+        # Per-platform live state for the gateway overview (one row per platform):
+        # ready→running, pending→needs_login. Rebuilt on every start/reconcile.
+        self._ready_names: list[str] = []
+        self._pending_names: list[str] = []
         self._ack: str | None = None  # cached "got it" receipt (char name + lang)
         # Proactive superchat buffer: a chara's idle/self-work `speak` (an idle
         # turn the SUPERVISOR drives, never this host) is observed via the
@@ -101,89 +110,169 @@ class MessagingHost:
 
     def start(self) -> dict[str, Any]:
         with self._lock:
-            if self._state == "running":
-                return self.status()
+            # Reconcile to the config WITHOUT a full teardown: a per-platform toggle
+            # adds/removes only the platform that changed, so the platforms that stay
+            # enabled keep their live connection (no reconnect blip on a sibling).
             try:
                 cfg = load_config(self._config_path)
             except (OSError, ValueError):
                 # No config / unreadable → nothing to run; not an error.
+                self._teardown()
                 self._state, self._detail = "stopped", ""
                 return self.status()
             if not cfg.get("enabled"):
+                # Host turned off entirely → stop every platform.
+                self._teardown()
                 self._state, self._detail = "stopped", ""
                 return self.status()
-            # make_adapters raises on a bad config — surfaced, never faked.
+            # make_adapters builds only ENABLED platforms; [] = all disabled →
+            # stopped (not an error). It raises only on a malformed config.
             adapters = make_adapters(cfg)
+            if not adapters:
+                self._teardown()
+                self._state, self._detail = "stopped", ""
+                return self.status()
             allowed = cfg.get("allowed_senders", [])
             self._allowed = {str(x) for x in allowed} if isinstance(allowed, list) else set()
-            warn_if_open_allowlist(self._allowed, channel=self._platform or "messaging")
             self._refusal = str(cfg.get("refusal_text") or DEFAULT_REFUSAL)
-            self._adapters = adapters
-            self._platform = ",".join(sorted(a.name for a in adapters))
-            self._stop.clear()
-            self._inbox = queue.Queue()
-            # Only start adapters that are ready: one still needing an interactive
-            # login (a WeChat QR scan) is left PENDING — never spun up — so the
-            # host never opens a second QR session competing with the app's QR
-            # flow on the same account (the bug that made the QR die instantly).
-            ready = [a for a in adapters if not a.needs_login()]
-            pending = [a for a in adapters if a.needs_login()]
-            self._threads = []
-            if ready:
-                # The shared agent needs a session; the supervisor attaches the
-                # child in the background, but be defensive when started direct.
-                self._dispatcher.ensure_attached()
-                for adapter in ready:
-                    th = threading.Thread(
-                        target=self._run_adapter, args=(adapter,),
-                        name=f"lunamoth-{adapter.name}-adapter", daemon=True,
-                    )
-                    th.start()
-                    self._threads.append(th)
-                self._relay = threading.Thread(
-                    target=self._relay_loop, name="lunamoth-messaging-relay", daemon=True,
-                )
-                self._relay.start()
-                # Observe the chara's PROACTIVE turns (supervisor idle/self-work)
-                # so a superchat reaches the gateway, not just the desktop window.
-                with contextlib.suppress(Exception):
-                    self._dispatcher.set_stream_observer(self._on_stream_event)
-            if ready:
-                self._state = "running"
-                self._detail = (
-                    "" if not pending
-                    else f"awaiting login: {','.join(a.name for a in pending)}"
-                )
-            elif pending:
-                # Honest status: enabled & configured, but waiting for the QR.
-                self._state = "needs_login"
-                self._detail = ",".join(a.name for a in pending)
-            else:
-                self._state = "stopped"
-                self._detail = ""
+            self._reconcile(adapters)
+            warn_if_open_allowlist(self._allowed, channel=self._platform or "messaging")
             _log.info("messaging host start: state=%s platform=%s", self._state, self._platform)
             return self.status()
 
+    def _reconcile(self, desired: "list[Adapter]") -> None:
+        """Bring the live adapter set to `desired` by DIFF, not rebuild: stop the
+        platforms that left, start the ones that arrived, and leave the unchanged
+        ones running untouched. A platform still needing an interactive login (a
+        WeChat QR scan) is left PENDING — never spun up — exactly as before."""
+        desired_by = {a.name: a for a in desired}
+        live_names = {a.name for a in self._adapters}
+        # 1. stop platforms no longer enabled — independently, others keep running.
+        for name in live_names - set(desired_by):
+            self._stop_one(name)
+        self._pending_names = [n for n in self._pending_names if n in desired_by]
+        # 2. add the newly-enabled (or promote a pending one that just logged in).
+        for name, adapter in desired_by.items():
+            if name in live_names:
+                continue  # already running → untouched (the no-blip path)
+            if name in self._pending_names:
+                if adapter.needs_login():
+                    continue  # still waiting on its QR
+                self._pending_names.remove(name)  # logged in since → promote
+            if adapter.needs_login():
+                if name not in self._pending_names:
+                    self._pending_names.append(name)
+            else:
+                self._start_one(adapter)
+        self._recompute_state()
+
+    def _ensure_relay(self) -> None:
+        """Start the shared relay loop + proactive observer once; subsequent
+        adapters reuse it (so adding a platform doesn't reset the inbox)."""
+        if self._relay is not None and self._relay.is_alive():
+            return
+        self._stop.clear()
+        self._inbox = queue.Queue()
+        # The shared agent needs a session; the supervisor attaches the child in
+        # the background, but be defensive when started direct.
+        self._dispatcher.ensure_attached()
+        self._relay = threading.Thread(
+            target=self._relay_loop, name="lunamoth-messaging-relay", daemon=True,
+        )
+        self._relay.start()
+        # Observe the chara's PROACTIVE turns (supervisor idle/self-work) so a
+        # superchat reaches the gateway, not just the desktop window.
+        with contextlib.suppress(Exception):
+            self._dispatcher.set_stream_observer(self._on_stream_event)
+
+    def _start_one(self, adapter: "Adapter") -> None:
+        self._ensure_relay()
+        th = threading.Thread(
+            target=self._run_adapter, args=(adapter,),
+            name=f"lunamoth-{adapter.name}-adapter", daemon=True,
+        )
+        th.start()
+        self._adapters.append(adapter)
+        self._threads_by_name[adapter.name] = th
+        if adapter.name not in self._ready_names:
+            self._ready_names.append(adapter.name)
+
+    def _stop_one(self, name: str) -> None:
+        # Mark intentional FIRST so the adapter thread's exit isn't logged as a
+        # crash (and it skips the lock it would otherwise take — no deadlock with
+        # the join below).
+        self._intentional.add(name)
+        adapter = next((a for a in self._adapters if a.name == name), None)
+        if adapter is not None:
+            try:
+                adapter.close()
+            except Exception:
+                _log.exception("closing adapter %s failed", name)
+        self._adapters = [a for a in self._adapters if a.name != name]
+        self._ready_names = [n for n in self._ready_names if n != name]
+        th = self._threads_by_name.pop(name, None)
+        if th is not None:
+            th.join(timeout=2.0)
+        self._intentional.discard(name)
+        if not self._adapters:
+            self._stop_relay()  # last platform out → stop the shared relay
+
+    def _stop_relay(self) -> None:
+        self._stop.set()
+        with contextlib.suppress(Exception):
+            self._dispatcher.set_stream_observer(None)
+        self._proactive_say.clear()
+        self._relay = None
+
+    def _recompute_state(self) -> None:
+        self._platform = ",".join(sorted(
+            [a.name for a in self._adapters] + list(self._pending_names)))
+        if self._adapters:
+            self._state = "running"
+            self._detail = ("" if not self._pending_names
+                            else f"awaiting login: {','.join(sorted(self._pending_names))}")
+        elif self._pending_names:
+            self._state = "needs_login"
+            self._detail = ",".join(sorted(self._pending_names))
+        else:
+            self._state, self._detail = "stopped", ""
+
+    def _teardown(self) -> None:
+        """Full stop: tear down every adapter/thread (used by stop() and when the
+        host is turned off entirely). Holds the lock via its callers."""
+        self._stop.set()
+        with contextlib.suppress(Exception):
+            self._dispatcher.set_stream_observer(None)
+        self._proactive_say.clear()
+        for adapter in self._adapters:
+            try:
+                adapter.close()
+            except Exception:
+                _log.exception("closing adapter %s failed", adapter.name)
+        self._adapters = []
+        self._threads_by_name = {}
+        self._intentional = set()
+        self._relay = None
+        self._ready_names = []
+        self._pending_names = []
+
     def stop(self) -> dict[str, Any]:
         with self._lock:
-            self._stop.set()
-            with contextlib.suppress(Exception):
-                self._dispatcher.set_stream_observer(None)
-            self._proactive_say.clear()
-            for adapter in self._adapters:
-                try:
-                    adapter.close()
-                except Exception:
-                    _log.exception("closing adapter %s failed", adapter.name)
-            self._adapters = []
-            self._threads = []
-            self._relay = None
+            self._teardown()
             self._state, self._detail = "stopped", ""
             return self.status()
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            return {"state": self._state, "platform": self._platform, "detail": self._detail}
+            # platforms = one entry per LIVE platform (running or waiting on a QR);
+            # the child (GatewayChild) merges these with the configured-but-disabled
+            # platforms so the overview can show one row per (chara, platform).
+            platforms = (
+                [{"platform": n, "state": "running", "detail": ""} for n in self._ready_names]
+                + [{"platform": n, "state": "needs_login", "detail": ""} for n in self._pending_names]
+            )
+            return {"state": self._state, "platform": self._platform,
+                    "detail": self._detail, "platforms": platforms}
 
     # ---- relay --------------------------------------------------------------
 
@@ -191,7 +280,11 @@ class MessagingHost:
         try:
             adapter.run(_AdapterSink(adapter, self._inbox))  # type: ignore[arg-type]
         except Exception:
-            if not self._stop.is_set():
+            # A crash, NOT a clean shutdown: skip when the whole host is stopping
+            # (self._stop) or this one platform is being stopped on purpose
+            # (self._intentional) — otherwise a deliberate toggle would log a
+            # false error and a lock-join would deadlock.
+            if not self._stop.is_set() and adapter.name not in self._intentional:
                 _log.exception("messaging adapter %s stopped with an error", adapter.name)
                 with self._lock:
                     self._detail = f"adapter {adapter.name} stopped"

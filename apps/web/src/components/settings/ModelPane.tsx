@@ -193,10 +193,10 @@ export function ModelPane() {
       {defaults.has_key && (
         <TaskModels
           values={defaults as unknown as Record<string, string | undefined>}
-          catalog={modelOptions}
           imageCatalog={imageCatalog}
-          onApply={(field, v) => void persist({ [field]: v })}
+          keys={keys}
           onApplyImage={(provider, model) => void persist({ image_provider: provider, image_model: model })}
+          onApplyTaskProvider={(pf, mf, provider, model) => void persist({ [pf]: provider, [mf]: model })}
         />
       )}
 

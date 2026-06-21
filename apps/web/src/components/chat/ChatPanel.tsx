@@ -1,31 +1,27 @@
-/* The right-side chat panel — tabbed: status | skills | wishes(愿望) | memory |
- * gateway | settings. Ported from chat.js renderStatusPane / renderSkillsPage /
- * renderGoalsPage / renderMemoryPage / renderSettingsPane / renderGatewayPane.
- *
- * The STATUS tab is the priority (the live snapshot the owner reads at a glance);
- * skills/wishes/memory/settings are functional via command()/hub extras; the
- * GATEWAY tab (WeChat QR login + adapter config + enable/disable) lives in
- * GatewayPane. */
+/* The right-side chat panel — tabbed: status | profile | settings. Ported from
+ * chat.js renderStatusPane / renderSettingsPane; the PROFILE tab consolidates what
+ * were three separate tabs — 愿望(wishes) · 技能(skills) · 记忆(memory) — into one
+ * scrollable pane (in that order). Visual editing moved to the deck card editor
+ * (it can now edit a living chara's locked card); gateway config moved to the
+ * Gateways overview page. */
 
 import { useEffect, useState } from "react";
-import { useT } from "../../i18n";
+import { useT, type TKey } from "../../i18n";
 import { useHubApi, useHubState } from "../../state/hub";
+import type { BoardSession } from "../../state/hub";
 import { deckToast } from "../ui/deckToast";
 import { rpcErrText } from "../../lib/status";
-import { GatewayPane } from "./GatewayPane";
-import { VisualEditor } from "../deck/VisualEditor";
-import type { DeckCard } from "../deck/types";
+import { Select, type SelectOption } from "../settings/Select";
+import type { ModelInfo } from "../deck/types";
 import type { CharaStream, Snapshot } from "../../hooks/useCharaStream";
 
-type PanelTab = "status" | "skills" | "goals" | "memory" | "visuals" | "gateway" | "settings";
+const REASONING = ["off", "low", "medium", "high"] as const;
+
+type PanelTab = "status" | "profile" | "settings";
 
 const TABS: { key: PanelTab; label: string }[] = [
   { key: "status", label: "pg-status" },
-  { key: "skills", label: "p-skills" },
-  { key: "goals", label: "p-goals" },
-  { key: "memory", label: "p-memory" },
-  { key: "visuals", label: "p-visuals" },
-  { key: "gateway", label: "p-gateway" },
+  { key: "profile", label: "p-profile" },
   { key: "settings", label: "pg-settings" },
 ];
 
@@ -43,13 +39,9 @@ export function ChatPanel({ stream, name }: { stream: CharaStream; name: string 
       </div>
       <div className="panel-panes">
         <div className="panel-pane on">
-          {tab === "status" && <StatusPane stream={stream} onTab={setTab} />}
-          {tab === "skills" && <SkillsPane stream={stream} name={name} />}
-          {tab === "goals" && <WishesPane name={name} />}
-          {tab === "memory" && <MemoryPane name={name} />}
-          {tab === "visuals" && <VisualsPane stream={stream} name={name} />}
-          {tab === "gateway" && <GatewayPane name={name} />}
-          {tab === "settings" && <SettingsPane stream={stream} />}
+          {tab === "status" && <StatusPane stream={stream} name={name} onTab={setTab} />}
+          {tab === "profile" && <ProfilePane stream={stream} name={name} />}
+          {tab === "settings" && <SettingsPane stream={stream} name={name} />}
         </div>
       </div>
     </aside>
@@ -111,19 +103,24 @@ function Prow({
   );
 }
 
-function StatusPane({ stream, onTab }: { stream: CharaStream; onTab: (t: PanelTab) => void }) {
+function StatusPane({ stream, name, onTab }: { stream: CharaStream; name: string; onTab: (t: PanelTab) => void }) {
   const t = useT();
-  const { hub } = useHubApi();
+  const { hub, refresh } = useHubApi();
+  const { snapshot: hubSnap } = useHubState();
   const snap = stream.snapshot as Snapshot | null;
-  // Autonomy (自主运行) — the SAME on/off switch as the board, calling the SAME
-  // RPC (chara.set_autonomy). on = mode live (autonomous); off = mode chat
-  // (replies only). It never kills the chat you're in. Optimistic: flip at once,
-  // reconcile when the snapshot's mode agrees, revert + surface on failure.
-  const snapLive = String(snap?.mode || "live") === "live";
+  // Autonomy (自主运行) — the SAME on/off switch as the board, reading the SAME
+  // variable: the roster entry's `paused` (push-refreshed on life.state). Sourcing
+  // both views from one place is why inner and outer can never disagree. on = mode
+  // live (autonomous); off = mode chat (replies only); it never kills the chat.
+  // Optimistic: flip at once, reconcile when the roster agrees, revert on failure.
+  // The hub RPC is keyed by SESSION name (the route `name`), never the card's
+  // display name (stream.charName) — those differ and would target the wrong session.
+  const entry = (hubSnap?.sessions as BoardSession[] | undefined)?.find((s) => s.name === name);
+  const rosterLive = entry ? !entry.paused : String(snap?.mode || "live") === "live";
   const [livePending, setLivePending] = useState<boolean | null>(null);
   useEffect(() => {
-    if (livePending !== null && snapLive === livePending) setLivePending(null);
-  }, [snapLive, livePending]);
+    if (livePending !== null && rosterLive === livePending) setLivePending(null);
+  }, [rosterLive, livePending]);
   if (!snap) return <div className="placeholder-pane">{t("st-connecting")}</div>;
   const num = (v: unknown) => Number(v) || 0;
   const ctxMax = num(snap.context_max);
@@ -132,25 +129,23 @@ function StatusPane({ stream, onTab }: { stream: CharaStream; onTab: (t: PanelTa
   const memMax = num(snap.memory_max);
   const memCh = num(snap.memory_chars);
   const pctMem = memMax ? Math.round((100 * memCh) / memMax) : 0;
-  const liveOn = livePending ?? snapLive;
+  const liveOn = livePending ?? rosterLive;
   const toggleLive = () => {
     const next = !liveOn;
     setLivePending(next); // optimistic flip
-    hub.call("chara.set_autonomy", { name: stream.charName, on: next }, 30000).catch((e) => {
-      setLivePending(null); // failed → revert to the real state
-      deckToast(rpcErrText(t, e as { message?: string }), true);
-    });
+    hub
+      .call("chara.set_autonomy", { name, on: next }, 30000)
+      .then(() => refresh()) // pull the roster so the board + header dot agree at once
+      .catch((e) => {
+        setLivePending(null); // failed → revert to the real state
+        deckToast(rpcErrText(t, e as { message?: string }), true);
+      });
   };
 
   return (
     <div className="pgroup">
       <Prow label={t("p-autonomy")} sub={t("p-autonomy-sub")} switchOn={liveOn} onSwitch={toggleLive} />
-      <Prow label={t("p-model")} val={<code>{String(snap.model || "—")}</code>} chev />
-      <Prow
-        label={t("p-effort")}
-        val={t("eff-" + (snap.reasoning ? String(snap.reasoning) : "medium")) + (snap.reasoning_supported ? "" : " ⌀")}
-        chev
-      />
+      <ModelEffort stream={stream} snap={snap} />
       <div className="ctx-sec">
         <div className="ctx-sec-label">{t("p-context")}</div>
         <div className="ctx-big">
@@ -168,21 +163,170 @@ function StatusPane({ stream, onTab }: { stream: CharaStream; onTab: (t: PanelTa
         bar={pctMem}
         val={`${memCh} / ${memMax}`}
         chev
-        onClick={() => onTab("memory")}
-      />
-      <Prow
-        label={t("p-gateway")}
-        val={t("gw-stopped")}
-        chev
-        onClick={() => onTab("gateway")}
+        onClick={() => onTab("profile")}
       />
     </div>
   );
 }
 
-function SkillsPane({ stream, name }: { stream: CharaStream; name: string }) {
+/* Per-chara model + reasoning — the same controls as Settings · 模型, scoped to THIS
+ * chara through the live /model + /reasoning commands. /model is a session hot-swap
+ * (a restart returns to the configured default — the scope note says so); /reasoning
+ * persists. Reasoning is greyed when the route ignores it (snapshot.reasoning_supported).
+ * Both are optimistic: reflect the choice at once, reconcile when the snapshot agrees,
+ * revert + toast on failure. */
+interface KeyRow { label: string; provider: string; base_url: string; has_key: boolean; active: boolean }
+
+function ModelEffort({ stream, snap }: { stream: CharaStream; snap: Snapshot }) {
   const t = useT();
+  const { hub } = useHubApi();
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [keys, setKeys] = useState<KeyRow[]>([]);
+  useEffect(() => {
+    let on = true;
+    hub.call<ModelInfo[]>("models.list", {}, 30000).then((m) => on && setModels(Array.isArray(m) ? m : [])).catch(() => {});
+    hub.call<KeyRow[]>("keys.list", {}, 15000).then((k) => on && setKeys(Array.isArray(k) ? k : [])).catch(() => {});
+    return () => {
+      on = false;
+    };
+  }, [hub]);
+
+  // Provider — which SAVED key this chara is on, matched by its endpoint
+  // (base_url, then provider name). Switching it runs /provider, which swaps the
+  // chara's provider live and persists it (the key itself stays in the keyring).
+  const norm = (u: string) => u.trim().replace(/\/+$/, "").toLowerCase();
+  const liveBase = norm(String(snap.base_url || ""));
+  const liveProv = String(snap.provider || "").toLowerCase();
+  const activeKey =
+    keys.find((k) => k.base_url && norm(k.base_url) === liveBase) ||
+    keys.find((k) => (k.provider || "").toLowerCase() === liveProv);
+  const activeLabel = activeKey?.label || "";
+  const [provPending, setProvPending] = useState<string | null>(null);
+  useEffect(() => {
+    if (provPending !== null && activeLabel === provPending) setProvPending(null);
+  }, [activeLabel, provPending]);
+  const providerVal = provPending ?? activeLabel;
+  const providerOptions: SelectOption[] = keys
+    .filter((k) => k.has_key)
+    .map((k) => ({ value: k.label, label: k.label, note: k.provider || undefined }));
+  const swapProvider = (label: string) => {
+    if (!label || label === activeLabel) return;
+    setProvPending(label); // optimistic
+    void stream.runCommand(`/provider ${label}`).then((r) => {
+      if (r === null) {
+        setProvPending(null);
+        deckToast(t("save-failed"), true);
+      }
+    });
+  };
+
+  const liveModel = String(snap.model || "");
+  const [modelPending, setModelPending] = useState<string | null>(null);
+  useEffect(() => {
+    if (modelPending !== null && liveModel === modelPending) setModelPending(null);
+  }, [liveModel, modelPending]);
+  const model = modelPending ?? liveModel;
+
+  const liveReason = snap.reasoning ? String(snap.reasoning) : "medium";
+  const [reasonPending, setReasonPending] = useState<string | null>(null);
+  useEffect(() => {
+    if (reasonPending !== null && liveReason === reasonPending) setReasonPending(null);
+  }, [liveReason, reasonPending]);
+  const reason = reasonPending ?? liveReason;
+  const reasonSupported = snap.reasoning_supported !== false;
+
+  const modelOptions: SelectOption[] = models
+    .map((m) => m.id)
+    .sort((a, b) => a.localeCompare(b))
+    .map((id) => ({ value: id, label: id, group: id.includes("/") ? id.split("/")[0] : undefined }));
+
+  const swapModel = (id: string) => {
+    const v = id.trim();
+    if (!v || v === liveModel) return;
+    setModelPending(v); // optimistic
+    void stream.runCommand(`/model ${v}`).then((r) => {
+      if (r === null) {
+        setModelPending(null);
+        deckToast(t("save-failed"), true);
+      }
+    });
+  };
+  const setReason = (r: string) => {
+    if (r === liveReason) return;
+    setReasonPending(r); // optimistic
+    void stream.runCommand(`/reasoning ${r}`).then((res) => {
+      if (res === null) {
+        setReasonPending(null);
+        deckToast(t("save-failed"), true);
+      }
+    });
+  };
+
+  return (
+    <div className="model-boxes" style={{ margin: "4px 0 2px" }}>
+      {providerOptions.length > 0 && (
+        <label className="model-box">
+          <span className="mb-lbl">{t("provider")}</span>
+          <Select
+            value={providerVal}
+            options={providerOptions}
+            onChange={swapProvider}
+            placeholder={String(snap.provider || t("provider"))}
+          />
+        </label>
+      )}
+      <label className="model-box">
+        <span className="mb-lbl">{t("p-model")}</span>
+        <Select value={model} options={modelOptions} onChange={swapModel} placeholder={t("p-model")} search allowCustom />
+      </label>
+      <div className="model-box">
+        <span className="mb-lbl">{t("p-effort")}</span>
+        <div className="seg">
+          {REASONING.map((r) => (
+            <span key={r} className={reason === r ? "on" : ""} onClick={() => setReason(r)}>
+              {t(("eff-" + r) as TKey)}
+            </span>
+          ))}
+        </div>
+        {!reasonSupported && <span className="reason-hint">{t("p-effort-ignored")}</span>}
+      </div>
+      <div className="av-note">{t("p-model-scope-note")}</div>
+    </div>
+  );
+}
+
+interface Extras {
+  polaris?: string;
+  memory?: string;
+  user_memory?: string;
+}
+
+/* The PROFILE tab — 愿望 · 技能 · 记忆 in one scrollable pane. The three were once
+ * three tabs; consolidating them also collapses the two duplicate chara.extras
+ * fetches (wishes + memory) into one. Skills still come from the live agent via
+ * /skills. Order is deliberate: wishes first (what it's reaching for), then skills
+ * (what it can do), then memory (what it's holding). */
+function ProfilePane({ stream, name }: { stream: CharaStream; name: string }) {
+  const t = useT();
+  const { hub } = useHubApi();
+  const [ex, setEx] = useState<Extras | null>(null);
   const [skills, setSkills] = useState<string | null>(null);
+  // Polaris: the chara's north-star — USER-editable here (the chara can't change
+  // it). `pol === null` ⇒ not yet touched, show the loaded value; once edited it sticks.
+  const [pol, setPol] = useState<string | null>(null);
+  const [savingPol, setSavingPol] = useState(false);
+
+  useEffect(() => {
+    let on = true;
+    hub
+      .call<Extras>("chara.extras", { name }, 20000)
+      .then((r) => on && setEx(r))
+      .catch(() => on && setEx({}));
+    return () => {
+      on = false;
+    };
+  }, [hub, name]);
+
   useEffect(() => {
     let on = true;
     (async () => {
@@ -194,145 +338,77 @@ function SkillsPane({ stream, name }: { stream: CharaStream; name: string }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name]);
+
+  // Polaris value shown in the editor: the user's in-progress edit if any, else
+  // the loaded value. Saving writes chara.set_polaris (the live agent reads it next turn).
+  const polValue = pol ?? ex?.polaris ?? "";
+  const savePolaris = async () => {
+    setSavingPol(true);
+    try {
+      await hub.call("chara.set_polaris", { name, text: polValue }, 20000);
+      deckToast(t("saved"));
+    } catch (e) {
+      deckToast(rpcErrText(t, e as { message?: string }), true);
+    } finally {
+      setSavingPol(false);
+    }
+  };
+
   return (
-    <div>
-      <div className="dsec">
-        <h4>Skills</h4>
-        {skills ? (
+    <div className="profile-pane">
+      <section className="dsec">
+        <h4>{t("p-polaris")}</h4>
+        <div className="why">{t("polaris-hint")}</div>
+        {ex === null ? (
+          <div className="placeholder-pane">…</div>
+        ) : (
+          <div className="ctl" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+            <textarea
+              className="polaris-input"
+              rows={3}
+              value={polValue}
+              placeholder={t("polaris-ph")}
+              onChange={(e) => setPol(e.target.value)}
+            />
+            <button className="btn soft sm" disabled={savingPol} style={{ alignSelf: "flex-end" }} onClick={() => void savePolaris()}>
+              {savingPol ? <span className="spin" /> : t("save")}
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="dsec">
+        <h4>{t("p-skills")}</h4>
+        {skills === null ? (
+          <div className="placeholder-pane">…</div>
+        ) : skills ? (
           <div className="memory-text">{skills.slice(0, 2000)}</div>
         ) : (
           <div className="placeholder-pane">{t("d-empty-skills")}</div>
         )}
-      </div>
+      </section>
+
+      <section className="dsec">
+        <h4>{t("p-memory")}</h4>
+        {ex === null ? (
+          <div className="placeholder-pane">…</div>
+        ) : (
+          <>
+            <div className="av-note">{t("d-mem-own")}</div>
+            <div className="memory-text">{ex.memory || t("d-empty-mem")}</div>
+            <div className="av-note" style={{ marginTop: 10 }}>{t("d-mem-user")}</div>
+            <div className="memory-text">{ex.user_memory || t("d-empty-mem")}</div>
+          </>
+        )}
+      </section>
     </div>
   );
 }
 
-interface Extras {
-  goals?: unknown;
-  memory?: string;
-  user_memory?: string;
-}
-
-function WishesPane({ name }: { name: string }) {
-  const t = useT();
-  const { hub } = useHubApi();
-  const [goals, setGoals] = useState<{ text: string; status: string }[] | null>(null);
-  useEffect(() => {
-    let on = true;
-    (async () => {
-      try {
-        const ex = await hub.call<Extras>("chara.extras", { name }, 20000);
-        const raw = ex?.goals;
-        const list = Array.isArray(raw)
-          ? raw
-          : raw && typeof raw === "object" && Array.isArray((raw as { goals?: unknown }).goals)
-            ? (raw as { goals: unknown[] }).goals
-            : [];
-        const norm = list.map((g) => {
-          if (typeof g === "string") return { text: g, status: "active" };
-          const o = g as { text?: string; title?: string; status?: string };
-          return { text: o.text || o.title || JSON.stringify(g), status: o.status || "active" };
-        });
-        if (on) setGoals(norm);
-      } catch {
-        if (on) setGoals([]);
-      }
-    })();
-    return () => {
-      on = false;
-    };
-  }, [hub, name]);
-  if (goals === null) return <div className="placeholder-pane">…</div>;
-  if (!goals.length) return <div className="placeholder-pane">{t("d-empty-goals")}</div>;
-  const rank: Record<string, number> = { active: 0, done: 1, dropped: 2 };
-  const ordered = [...goals].sort((a, b) => (rank[a.status] ?? 0) - (rank[b.status] ?? 0));
-  return (
-    <div className="dsec">
-      {ordered.slice(0, 30).map((g, i) => (
-        <div key={i} className={`goal goal-${g.status}`}>
-          <i />
-          <span>{g.text.slice(0, 200)}</span>
-          {g.status !== "active" && <span className={`goal-badge ${g.status}`}>{t("goal-" + g.status)}</span>}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function MemoryPane({ name }: { name: string }) {
-  const t = useT();
-  const { hub } = useHubApi();
-  const [ex, setEx] = useState<Extras | null>(null);
-  useEffect(() => {
-    let on = true;
-    hub
-      .call<Extras>("chara.extras", { name }, 20000)
-      .then((r) => on && setEx(r))
-      .catch(() => on && setEx({}));
-    return () => {
-      on = false;
-    };
-  }, [hub, name]);
-  if (!ex) return <div className="placeholder-pane">…</div>;
-  return (
-    <div>
-      <div className="dsec">
-        <h4>{t("d-mem-own")}</h4>
-        <div className="memory-text">{ex.memory || t("d-empty-mem")}</div>
-      </div>
-      <div className="dsec">
-        <h4>{t("d-mem-user")}</h4>
-        <div className="memory-text">{ex.user_memory || t("d-empty-mem")}</div>
-      </div>
-    </div>
-  );
-}
-
-/* Visuals tab — edit the ACTIVE chara's立绘/背景/头像 from inside the chat.
- * The living chara owns a FROZEN session card; its art assets are set via the
- * SAME hub RPCs the deck's VisualEditor uses (card.save_asset / card.asset_delete /
- * card.visual_generate). We locate that card via the hub roster: the LOCKED deck
- * entry whose `owner` is this chara (hub._session_card_entry sets owner = session
- * name). After an edit we refresh the chat snapshot so the backdrop / sprite /
- * avatar update without a reload. keyvisual is shown (upload/clear only — the image
- * pipeline can't generate it). */
-const SESSION_VIS_KINDS = ["background", "sprite", "keyvisual", "avatar"] as const;
-
-function VisualsPane({ stream, name }: { stream: CharaStream; name: string }) {
-  const t = useT();
-  const { snapshot } = useHubState();
-  const cards = (snapshot?.cards as DeckCard[] | undefined) || [];
-  // The frozen session card: the locked deck entry owned by this chara.
-  const sessionCard = cards.find((c) => c.locked && c.owner === name);
-
-  if (!sessionCard) {
-    // Roster not yet loaded, or this chara has no frozen card on disk.
-    return <div className="placeholder-pane">{snapshot ? t("cv-no-art") : "…"}</div>;
-  }
-  return (
-    <div className="vis-session">
-      <div className="av-note" style={{ marginBottom: 12 }}>{t("vis-session-note")}</div>
-      <VisualEditor
-        cardPath={sessionCard.path}
-        card={sessionCard}
-        disabled={false}
-        kinds={SESSION_VIS_KINDS}
-        onChanged={() => {
-          // Reflect the new art in the live chat (backdrop / sprite / avatar) without
-          // a reload — the chat reads bg_url / sprite_url / avatar_uri off the snapshot.
-          void stream.refreshSnapshot();
-        }}
-      />
-    </div>
-  );
-}
-
-function SettingsPane({ stream }: { stream: CharaStream }) {
+function SettingsPane({ stream, name }: { stream: CharaStream; name: string }) {
   const t = useT();
   const { hub } = useHubApi();
   const snap = (stream.snapshot as Snapshot | null) || {};
-  const name = stream.charName;
   const quiet = Number(snap.quiet) || 300;
   const patience = Number(snap.patience) || 600;
   const [resetting, setResetting] = useState(false);

@@ -9,6 +9,8 @@ import type { TFn, TKey } from "../../i18n";
  *  in the deck today; the rest exist in messaging/ but aren't wired here yet. */
 const PLATFORM_LABEL: Record<string, TKey> = {
   weixin: "gw-weixin-label",
+  qq: "gw-qq-label",
+  telegram: "gw-telegram-label",
 };
 
 export function gwPlatLabel(t: TFn, platform: string | null | undefined): string {

@@ -132,4 +132,21 @@ describe("statusOf", () => {
     );
     expect(statusOf(en, { status: "running" }, NOW).line).toBe("Living its own day");
   });
+
+  it("headlines the latest superchat over life/preview (read or unread)", () => {
+    const out = statusOf(
+      en,
+      { status: "running", speaks: [{ text: "hi from me", ts: 100 }], life: { state: "working" } },
+      NOW,
+    );
+    expect(out.line).toBe("hi from me");
+    expect(out.cls).toBe("msg");
+    expect(out.dot).toBe("live");
+  });
+
+  it("a paused chara still shows its latest superchat, but the dot is off", () => {
+    const out = statusOf(en, { status: "running", paused: true, speaks: [{ text: "later", ts: 1 }] }, NOW);
+    expect(out.line).toBe("later");
+    expect(out.dot).toBe("off");
+  });
 });

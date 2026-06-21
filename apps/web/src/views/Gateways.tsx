@@ -1,60 +1,76 @@
-/* Gateways — the gateway overview (all charas × their gateways), faithful to
- * index.html #view-gateways + app.js renderGateways (444) / gatewayCard (466).
- * Each configured gateway shows its platform, run-state chip, the bound chara,
- * an enable switch (gateway.start/stop) and a Manage deep-link into the chara's
- * gateway tab.
+/* Gateways — the gateway overview. Now ONE row per (chara, platform): each chara's
+ * gateway breaks into its CONFIGURED platforms (gateway.platforms), and every
+ * platform gets its own state chip + independent enable switch + Manage button.
  *
- * Binding UI rule: the enable switch flips immediately (optimistic) and reverts
- * + surfaces the error on failure; the refresh button shows a working state.
- * The WeChat QR login flow lives in the chara's gateway tab (Chat track), so
- * Manage navigates there. */
+ * Both「新建网关」and「管理」open the GatewayModal — one card with a 角色 + 网关
+ * selector at the top and the config (WeChat QR login, adapter fields, enable
+ * switch) below. New: chara is choosable. Manage: chara + the row's platform are
+ * pre-selected (the chara box is locked).
+ *
+ * Binding UI rule: each platform switch flips immediately (optimistic) and reverts
+ * + surfaces the error on failure; the refresh button shows a working state. */
 
 import { useCallback, useEffect, useState } from "react";
 import { useT } from "../i18n";
 import { useHub, type BoardSession } from "../state/hub";
-import { useNavigate } from "../hooks/useHashRoute";
 import { rpcErrText } from "../lib/status";
 import { gwPlatLabel, gwStatusBits } from "../components/gateways/status";
-import { CharaPicker } from "../components/gateways/CharaPicker";
+import { GatewayModal } from "../components/gateways/GatewayModal";
 import { deckToast } from "../components/ui/deckToast";
+import { togglePlatform, type GwPlatformRow, type MessagingConfig } from "../components/gateways/gatewayModel";
 
 interface GatewayRow {
   name: string;
   enabled?: boolean;
-  gateway?: { platform?: string; state?: string; detail?: string };
+  gateway?: { platform?: string; state?: string; detail?: string; platforms?: GwPlatformRow[] };
+}
+
+/** A flat per-(chara, platform) row for the overview. */
+interface PlatRow {
+  name: string; // chara session name
+  platform: string;
+  enabled: boolean;
+  state: string;
+}
+
+/** Reconstruct a minimal MessagingConfig from a chara's platform breakdown, so a
+ *  single-platform toggle can re-derive the top-level enabled against the OTHER
+ *  platforms' current states. Each platform's `enabled` is stored explicitly (no
+ *  legacy inherit needed — the backend already resolved it into the row). */
+function cfgFromPlatforms(platforms: GwPlatformRow[]): MessagingConfig {
+  const adapters: Record<string, Record<string, unknown>> = {};
+  for (const p of platforms) {
+    if (p.platform) adapters[p.platform] = { enabled: !!p.enabled };
+  }
+  return { adapters };
 }
 
 export function Gateways() {
   const t = useT();
-  const nav = useNavigate();
   const { hub, snapshot } = useHub();
   const [rows, setRows] = useState<GatewayRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<Set<string>>(new Set());
-  const [picking, setPicking] = useState(false);
+  // The gateway-config modal: which chara + platform, and whether the chara binding
+  // is locked (manage = locked to the row; new = choosable). null = closed.
+  const [modal, setModal] = useState<{ name: string; platform?: string; lock: boolean } | null>(null);
 
   const sessions = (snapshot?.sessions as BoardSession[] | undefined) || [];
   const byName: Record<string, BoardSession> = {};
   for (const s of sessions) byName[s.name] = s;
 
-  // A new gateway always binds to a chara (app.js openNewGateway): no chara → a
-  // toast; exactly one → straight to its gateway tab; many → the picker popover.
+  // A new gateway always binds to a chara: no chara → a toast; otherwise open the
+  // modal with the chara box choosable (pre-filled when there's only one).
   const newGateway = () => {
     if (!sessions.length) {
       deckToast(t("gw-no-chara"), true);
       return;
     }
-    if (sessions.length === 1) {
-      nav(`#/chara/${encodeURIComponent(sessions[0].name)}`);
-      return;
-    }
-    setPicking((p) => !p);
+    setModal({ name: sessions.length === 1 ? sessions[0].name : "", lock: false });
   };
-  const pickChara = (name: string) => {
-    setPicking(false);
-    nav(`#/chara/${encodeURIComponent(name)}`);
-  };
+
+  const manage = (pr: PlatRow) => setModal({ name: pr.name, platform: pr.platform, lock: true });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,25 +89,57 @@ export function Gateways() {
     void load();
   }, [load]);
 
-  const configured = rows.filter((r) => r.enabled || (r.gateway && r.gateway.platform));
+  // Flatten to one row per (chara, platform): each chara's gateway breaks into its
+  // configured platforms. A chara with zero configured platforms contributes none.
+  const platRows: PlatRow[] = [];
+  for (const r of rows) {
+    const platforms = (r.gateway && r.gateway.platforms) || [];
+    for (const p of platforms) {
+      if (!p.platform) continue;
+      platRows.push({ name: r.name, platform: p.platform, enabled: !!p.enabled, state: String(p.state || "stopped") });
+    }
+  }
+  const rowKey = (name: string, plat: string) => `${name}/${plat}`;
 
-  const toggle = async (r: GatewayRow) => {
-    if (busy.has(r.name)) return;
-    const turnOn = !r.enabled;
-    // optimistic: flip the row's switch at once
-    setRows((prev) => prev.map((x) => (x.name === r.name ? { ...x, enabled: turnOn } : x)));
-    setBusy((prev) => new Set(prev).add(r.name));
+  // Toggle ONE platform: messaging.save (this platform's enabled + re-derived
+  // top-level) then reconcile (gateway.start if any platform lands on, else
+  // gateway.stop). Optimistic flip + revert, exactly as the pane does.
+  const toggle = async (pr: PlatRow) => {
+    const key = rowKey(pr.name, pr.platform);
+    if (busy.has(key)) return;
+    const turnOn = !pr.enabled;
+    // optimistic: flip just this platform's switch
+    setRows((prev) =>
+      prev.map((x) => {
+        if (x.name !== pr.name || !x.gateway) return x;
+        const platforms = (x.gateway.platforms || []).map((p) =>
+          p.platform === pr.platform ? { ...p, enabled: turnOn } : p,
+        );
+        return { ...x, gateway: { ...x.gateway, platforms } };
+      }),
+    );
+    setBusy((prev) => new Set(prev).add(key));
     try {
-      await hub.call(turnOn ? "gateway.start" : "gateway.stop", { name: r.name }, 30000);
+      const cur = rows.find((x) => x.name === pr.name);
+      const cfg = cfgFromPlatforms((cur && cur.gateway && cur.gateway.platforms) || []);
+      await togglePlatform({ hub, name: pr.name, plat: pr.platform, next: turnOn, cfg });
       await load();
     } catch (e) {
       // revert
-      setRows((prev) => prev.map((x) => (x.name === r.name ? { ...x, enabled: !turnOn } : x)));
+      setRows((prev) =>
+        prev.map((x) => {
+          if (x.name !== pr.name || !x.gateway) return x;
+          const platforms = (x.gateway.platforms || []).map((p) =>
+            p.platform === pr.platform ? { ...p, enabled: !turnOn } : p,
+          );
+          return { ...x, gateway: { ...x.gateway, platforms } };
+        }),
+      );
       deckToast(rpcErrText(t, e as { message?: string }), true);
     } finally {
       setBusy((prev) => {
         const next = new Set(prev);
-        next.delete(r.name);
+        next.delete(key);
         return next;
       });
     }
@@ -102,61 +150,50 @@ export function Gateways() {
       <div className="toolbar">
         <h1>
           <span>{t("nav-gateways")}</span>
-          <span className="count">{configured.length ? String(configured.length) : ""}</span>
+          <span className="count">{platRows.length ? String(platRows.length) : ""}</span>
         </h1>
         <div className="grow" />
         <button className="btn soft" disabled={loading} onClick={() => void load()}>
           {loading ? <span className="spin" /> : t("gw-refresh")}
         </button>
-        {/* ＋新建网关 → a chara-picker popover that deep-links to the chara's
-            gateway tab (app.js openNewGateway). */}
-        <div style={{ position: "relative" }}>
-          <button className="btn primary" onClick={newGateway}>
-            {t("gw-new")}
-          </button>
-          {picking && (
-            <CharaPicker sessions={sessions} onPick={pickChara} onClose={() => setPicking(false)} />
-          )}
-        </div>
+        <button className="btn primary" onClick={newGateway}>
+          {t("gw-new")}
+        </button>
       </div>
 
       <div className="gw-overview">
         {err ? (
           <div className="gw-error">{err}</div>
-        ) : !configured.length ? (
-          <div className="empty-state" style={{ position: "relative" }}>
+        ) : !platRows.length ? (
+          <div className="empty-state">
             <p>{t("gw-empty")}</p>
             <button className="btn primary" onClick={newGateway}>
               {t("gw-new")}
             </button>
-            {picking && (
-              <CharaPicker sessions={sessions} onPick={pickChara} onClose={() => setPicking(false)} />
-            )}
           </div>
         ) : (
-          configured.map((r) => {
-            const gw = r.gateway || {};
-            const bits = gwStatusBits(t, gw);
-            const sess = byName[r.name] || ({ char_name: r.name } as BoardSession);
+          platRows.map((pr) => {
+            const bits = gwStatusBits(t, { state: pr.state });
+            const sess = byName[pr.name] || ({ char_name: pr.name } as BoardSession);
+            const key = rowKey(pr.name, pr.platform);
             return (
-              <div className="gw-card" key={r.name}>
+              <div className="gw-card" key={key}>
                 <div className="gw-card-head">
-                  <span className="gw-plat-name">{gwPlatLabel(t, gw.platform)}</span>
+                  <span className="gw-plat-name">{gwPlatLabel(t, pr.platform)}</span>
                   <span className={"gw-chip " + bits.cls}>{bits.text}</span>
                 </div>
                 <div className="gw-card-sub">
-                  {t("gw-bound")}：{sess.char_name || r.name}
+                  {t("gw-bound")}：{sess.char_name || pr.name}
                 </div>
-                {gw.detail && <div className="gw-card-detail">{gw.detail}</div>}
                 <div className="gw-card-foot">
                   <button
-                    className={"switch" + (r.enabled ? " on" : "")}
-                    disabled={busy.has(r.name)}
-                    onClick={() => void toggle(r)}
+                    className={"switch" + (pr.enabled ? " on" : "")}
+                    disabled={busy.has(key)}
+                    onClick={() => void toggle(pr)}
                   />
-                  <span className="enable-lbl">{r.enabled ? t("gw-enabled") : t("gw-disabled")}</span>
+                  <span className="enable-lbl">{pr.enabled ? t("gw-enabled") : t("gw-disabled")}</span>
                   <div className="grow" />
-                  <button className="btn soft" onClick={() => nav(`#/chara/${encodeURIComponent(r.name)}`)}>
+                  <button className="btn soft" onClick={() => manage(pr)}>
                     {t("gw-manage")}
                   </button>
                 </div>
@@ -165,6 +202,19 @@ export function Gateways() {
           })
         )}
       </div>
+
+      {modal && (
+        <GatewayModal
+          sessions={sessions}
+          initialName={modal.name}
+          initialPlatform={modal.platform}
+          lockChara={modal.lock}
+          onClose={() => {
+            setModal(null);
+            void load(); // reflect any run-state / config change in the overview
+          }}
+        />
+      )}
     </div>
   );
 }

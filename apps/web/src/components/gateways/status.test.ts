@@ -9,6 +9,8 @@ const t: TFn = (key, vars) => (vars ? `${String(key)}:${JSON.stringify(vars)}` :
 describe("gwPlatLabel", () => {
   it("maps a known platform to its i18n label key", () => {
     expect(gwPlatLabel(t, "weixin")).toBe("gw-weixin-label");
+    expect(gwPlatLabel(t, "qq")).toBe("gw-qq-label");
+    expect(gwPlatLabel(t, "telegram")).toBe("gw-telegram-label");
   });
   it("falls back to gw-none when no platform", () => {
     expect(gwPlatLabel(t, "")).toBe("gw-none");
@@ -16,8 +18,7 @@ describe("gwPlatLabel", () => {
     expect(gwPlatLabel(t, undefined)).toBe("gw-none");
   });
   it("returns the raw id for an unknown platform", () => {
-    expect(gwPlatLabel(t, "qq")).toBe("qq");
-    expect(gwPlatLabel(t, "telegram")).toBe("telegram");
+    expect(gwPlatLabel(t, "slack")).toBe("slack");
   });
 });
 

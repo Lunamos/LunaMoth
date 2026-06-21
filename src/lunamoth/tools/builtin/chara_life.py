@@ -88,59 +88,8 @@ registry.register(
 )
 
 
-# ---- wish (the renamed "goal") ----------------------------------------------------
-
-def add_wish(args, ctx) -> str:
-    """Record a wish — something you live for, not a task someone set you."""
-    if ctx.wishes is None:
-        return tool_error("wishes not available")
-    text = str(args.get("text") or "").strip()
-    if not text:
-        return tool_error("a wish needs `text`")
-    wish = ctx.wishes.add(text, by="chara")
-    return tool_result(ok=True, id=wish["id"], text=wish["text"])
-
-
-def set_wish_status(args, ctx) -> str:
-    if ctx.wishes is None:
-        return tool_error("wishes not available")
-    wish_id = str(args.get("wish_id") or args.get("goal_id") or "")
-    status = str(args.get("status") or "")
-    if not wish_id or not status:
-        return tool_error("set_wish_status needs `wish_id` and `status`")
-    wish = ctx.wishes.set_status(wish_id, status)
-    return tool_result(ok=True, id=wish["id"], status=wish["status"], text=wish["text"])
-
-
-registry.register(
-    "add_wish", "chara-life",
-    {
-        "description": (
-            "Add a wish — something you genuinely want, that you live toward in your own "
-            "time. A wish is yours; it is not a task anyone forces you to finish (for that, "
-            "use the todo tool). Wishes shape how you spend unattended time."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {"text": {"type": "string", "description": "The wish, in your own words."}},
-            "required": ["text"],
-        },
-    },
-    add_wish, emoji="✨",
-)
-
-registry.register(
-    "set_wish_status", "chara-life",
-    {
-        "description": "Update a wish you hold: active, done (you reached it), or dropped (you let it go).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "wish_id": {"type": "string", "description": "The wish id."},
-                "status": {"type": "string", "enum": ["active", "done", "dropped"]},
-            },
-            "required": ["wish_id", "status"],
-        },
-    },
-    set_wish_status, emoji="✨",
-)
+# Polaris (the chara's north-star) is USER-owned and READ-ONLY to the chara — it
+# is injected into the prompt each turn but there is deliberately NO tool to add,
+# edit, or complete it. (The old chara-mutable add_wish/set_wish_status tools were
+# removed: a chara no longer manages a goal list; its one aim is the user's Polaris,
+# which by design is never finished.)

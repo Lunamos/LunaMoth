@@ -25,6 +25,8 @@ import {
   GW_PLATFORMS,
   GW_MASK,
   buildSaveConfig,
+  platformEnabled,
+  togglePlatform,
   requiredFilled,
   allowedToString,
   type GwField,
@@ -32,9 +34,11 @@ import {
   type GatewayStatus,
 } from "./gatewayModel";
 
-const PLAT_KEYS = Object.keys(GW_PLATFORMS);
-
-export function GatewayPane({ name }: { name: string }) {
+// `platform` is CONTROLLED by the parent (the gateway modal's 网关 selector), so a
+// chara + platform pair is chosen at the top of the modal, consistent with the
+// model pane's provider + model boxes. GatewayPane renders only the config body for
+// that pair.
+export function GatewayPane({ name, platform: plat }: { name: string; platform: string }) {
   const t = useT();
   const { hub } = useHubApi();
 
@@ -42,7 +46,6 @@ export function GatewayPane({ name }: { name: string }) {
   const [status, setStatus] = useState<GatewayStatus>({ state: "stopped", platform: "", detail: "" });
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [plat, setPlat] = useState<string>(PLAT_KEYS[0]);
   const [enabled, setEnabled] = useState(false);
   const [switching, setSwitching] = useState(false);
 
@@ -69,14 +72,11 @@ export function GatewayPane({ name }: { name: string }) {
     } catch {
       /* keep the stopped default; messaging.get already succeeded */
     }
-    const adapters = nextCfg.adapters || {};
-    const active = PLAT_KEYS.find((k) => adapters[k]) || PLAT_KEYS[0];
     setCfg(nextCfg);
     setStatus(nextStatus);
-    setPlat(active);
-    setEnabled(!!nextCfg.enabled);
+    setEnabled(platformEnabled(nextCfg, plat)); // THIS platform's effective on-state
     setLoading(false);
-  }, [hub, name, t]);
+  }, [hub, name, t, plat]);
 
   useEffect(() => {
     void load();
@@ -90,6 +90,9 @@ export function GatewayPane({ name }: { name: string }) {
     allowedRef.current = cfg ? allowedToString(cfg) : "";
   }, [cfg, plat]);
 
+  // Field auto-save: persists edited fields and re-asserts THIS platform's current
+  // enabled flag (so a blur never clobbers the on/off the switch set), with the
+  // top-level enabled re-derived from the live cfg.
   const saveConfig = useCallback(async () => {
     const config = buildSaveConfig({
       plat,
@@ -97,10 +100,11 @@ export function GatewayPane({ name }: { name: string }) {
       allowedText: allowedRef.current,
       current: inputsRef.current,
       initial: initialRef.current,
+      cfg: cfg || {},
     });
     const r = await hub.call<{ config?: MessagingConfig }>("messaging.save", { name, config }, 20000);
     if (r && r.config) setCfg(r.config);
-  }, [hub, name, plat, enabled]);
+  }, [hub, name, plat, enabled, cfg]);
 
   const saveOnBlur = useCallback(() => {
     saveConfig()
@@ -108,29 +112,44 @@ export function GatewayPane({ name }: { name: string }) {
       .catch((e) => deckToast(rpcErrText(t, e as { message?: string }), true));
   }, [saveConfig, t]);
 
+  // The switch flips THIS platform: messaging.save (this platform's enabled + the
+  // re-derived top-level) then reconcile (gateway.start if any platform lands on,
+  // else gateway.stop). In-flight field edits ride along via togglePlatform.
   const toggleEnable = useCallback(async () => {
     if (switching) return;
     const turnOn = !enabled;
     setEnabled(turnOn); // optimistic
     setSwitching(true);
     try {
-      await saveConfig(); // persist edits + the new enabled flag
-      const st = await hub.call<GatewayStatus>(turnOn ? "gateway.start" : "gateway.stop", { name }, 30000);
-      setStatus(st || { state: turnOn ? "needs_login" : "stopped" });
+      const r = await togglePlatform({
+        hub,
+        name,
+        plat,
+        next: turnOn,
+        cfg: cfg || {},
+        allowedText: allowedRef.current,
+        current: inputsRef.current,
+        initial: initialRef.current,
+      });
+      if (r.config) setCfg(r.config);
+      setStatus(r.status || { state: turnOn ? "needs_login" : "stopped" });
     } catch (e) {
       setEnabled(!turnOn); // revert
       deckToast(rpcErrText(t, e as { message?: string }), true);
     } finally {
       setSwitching(false);
     }
-  }, [enabled, switching, saveConfig, hub, name, t]);
+  }, [enabled, switching, hub, name, plat, cfg, t]);
 
   if (loading && !cfg) return <div className="placeholder-pane">…</div>;
   if (err && !cfg) return <div className="gw-error">{err}</div>;
 
   const conf = cfg || {};
   const spec = GW_PLATFORMS[plat];
-  const st = status.state || "stopped";
+  // Run-state for THIS platform: read its row from status.platforms, falling back
+  // to the aggregate gateway state when the per-platform breakdown isn't present.
+  const platRow = (status.platforms || []).find((p) => p.platform === plat);
+  const st = (platRow && platRow.state) || status.state || "stopped";
   const runText = st === "running" ? t("gw-running") : st === "needs_login" ? t("gw-needs-login") : t("gw-stopped");
   const runCls = st === "running" ? "ok" : st === "needs_login" ? "warn" : "";
   const filled = requiredFilled(conf, plat);
@@ -144,14 +163,6 @@ export function GatewayPane({ name }: { name: string }) {
     <div>
       <div className="sub" style={{ marginBottom: 12 }}>
         {t("gw-sub")}
-      </div>
-
-      <div className="gw-plats">
-        {PLAT_KEYS.map((k) => (
-          <button key={k} className={k === plat ? "on" : ""} onClick={() => setPlat(k)}>
-            {t(GW_PLATFORMS[k].label)}
-          </button>
-        ))}
       </div>
 
       <div className="gw-chips">

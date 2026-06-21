@@ -360,3 +360,76 @@ def test_dispatcher_observer_wires_idle_say_to_the_host():
     )
     assert any("a real superchat" in s for s in adapter.sent)
     assert not any("inner" in s for s in adapter.sent)
+
+
+class _BlockingAdapter(_Adapter):
+    """run() blocks until close(), like a real adapter holding a connection — so
+    we can prove an unchanged platform is NOT torn down on a sibling toggle."""
+
+    def __init__(self, name="weixin"):
+        super().__init__(name)
+        import threading
+
+        self._gate = threading.Event()
+        self.run_count = 0
+        self.closed = False
+
+    def needs_login(self):
+        return False
+
+    def run(self, inbox):
+        self.run_count += 1
+        self._gate.wait(5.0)  # hold the "connection" open until close()
+
+    def close(self):
+        self.closed = True
+        self._gate.set()
+
+
+def test_reconcile_toggles_one_platform_without_restarting_others(tmp_path, monkeypatch):
+    """Disabling qq while weixin stays on must stop ONLY qq — weixin keeps its same
+    running adapter/thread (run_count unchanged), so there is no reconnect blip."""
+    import lunamoth.server.messaging_host as mh
+
+    handle = _Handle()
+    frames: list[dict] = []
+    dispatch = JsonRpcDispatcher(frames.append, handle=handle)
+    cfg = tmp_path / "messaging.json"
+    cfg.write_text(
+        '{"enabled": true, "adapters": {"weixin": {"enabled": true}, "qq": {"enabled": true}}}',
+        encoding="utf-8",
+    )
+    host = MessagingHost(dispatch, cfg)
+
+    wx = _BlockingAdapter("weixin")
+    qq = _BlockingAdapter("qq")
+
+    def fake_make(c):
+        ad = c.get("adapters", {})
+        out = []
+        if ad.get("weixin", {}).get("enabled"):
+            out.append(wx)
+        if ad.get("qq", {}).get("enabled"):
+            out.append(qq)
+        return out
+
+    monkeypatch.setattr(mh, "make_adapters", fake_make)
+
+    try:
+        st = host.start()
+        assert st["state"] == "running"
+        assert sorted(p["platform"] for p in st["platforms"]) == ["qq", "weixin"]
+        assert wx.run_count == 1 and qq.run_count == 1
+
+        # Disable qq, keep weixin → reconcile (not a full rebuild).
+        cfg.write_text(
+            '{"enabled": true, "adapters": {"weixin": {"enabled": true}, "qq": {"enabled": false}}}',
+            encoding="utf-8",
+        )
+        st2 = host.start()
+        assert [p["platform"] for p in st2["platforms"]] == ["weixin"]
+        assert qq.closed is True        # qq was stopped
+        assert wx.closed is False       # weixin untouched...
+        assert wx.run_count == 1        # ...and NOT restarted (no blip)
+    finally:
+        host.stop()

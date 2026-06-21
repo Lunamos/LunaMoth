@@ -220,9 +220,14 @@ zero internal deps; `obs/` imports only `config`.
     hermes-style. `agent.py` also writes `sandbox/logs/requests.jsonl` — the
     faithful request log (last 200 turns: exact system+messages+tools sent).
   - `providers.py` — model's REAL context window. `state.py` — `EnvState`
-    (env_status.json: isolation/network/writable/rest_until) + `Permissions`, the
-    ONE typed snapshot (`EnvState.permissions()`) every tool runner reads via
+    (env_status.json: network/writable/rest_until) + `Permissions`, the ONE typed
+    snapshot (`EnvState.permissions()`) every tool runner reads via
     `ctx.permissions()` so fg/bg/PTY can't resolve env facts differently.
+    ISOLATION is NOT stored in env_status (2026-06-21): it's the ONE authority
+    `session.isolation.backend()` (← `LUNAMOTH_PY_BACKEND` ← session config), which
+    `permissions().isolation` + the snapshot + the prompt tail all read. A stale
+    env_status copy used to silently sandbox an `admin` chara; the key is now dropped
+    on load.
 - `protocol/` — **the contract layer**; frontends import this and nothing deeper:
   - `events.py` — frozen dataclasses; `TextDelta.channel` say|muse (muse = the
     chara's own life; messaging frontends deliver say only).
@@ -372,8 +377,8 @@ zero internal deps; `obs/` imports only `config`.
   其他模态, Hermes' auxiliary-models pattern): each function defaults to the main
   model but can be overridden by a per-task default field — `card.draft` → `card_model`,
   `card.visual_brief` (生图 prompt) → `image_prompt_model`, `generate_image` →
-  `image_model`, vision/读图 → `vision_model` (STORED but its routing pipeline is a
-  deferred follow-up — selecting it is a no-op for now). Avatar generation + field
+  `image_model`, vision/读图 → `vision_model` (WIRED: `core/agent.py` + `core/llm.py`
+  route image-understanding through the chosen vision model). Avatar generation + field
   rewrite still use the system default model. Avatars are NEVER auto-generated (upload
   or an explicit generate → sidecar, stored separately from the card)),
   `supervisor/` (a PACKAGE since 2026-06-20, split from the 2151-line module:
@@ -473,10 +478,14 @@ into the session's card, key stripped.)
   control (board toggle, in-chat panel switch, `/mode`, TUI) — there is NO
   separate pause flag. `live` = autonomous (the full lifecycle below); `chat` =
   a plain chat agent that NEVER works on its own. The supervisor's idle loop
-  fires cycles ONLY when `mode == live`. The board's start/stop sets mode AND
-  starts/stops the resident child (off saves tokens); the in-chat switch flips
-  mode via `chara.set_autonomy` without killing the chat you're in. The board's
-  `paused` field = `mode != live`. Never reintroduce a second autonomy concept.
+  fires cycles ONLY when `mode == live`. BOTH the board toggle AND the in-chat
+  switch flip autonomy via the SAME RPC `chara.set_autonomy` (one green-slider UI,
+  not a power button) and read the SAME `paused` (= `mode != live`), so inner/outer
+  can never disagree. It never kills the chat you're in: `off` = mode chat (the
+  idle loop skips → no autonomous token burn; the resident child stays up) AND
+  interrupts any in-flight self-work turn at the next safe boundary; `on` starts
+  the child if it was stopped. The board also has 全部启动/全部关闭 (batch
+  set_autonomy). Never reintroduce a second autonomy concept.
 - **The autonomous lifecycle (mode=live):** startup → the card's `first_mes`
   (shown once on an empty transcript epoch — see `presence/` below) →
   CONVERSATION mode (it just spoke or was spoken to within `quiet` → "waiting ·

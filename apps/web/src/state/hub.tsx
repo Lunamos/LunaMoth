@@ -18,9 +18,11 @@ import type { SessionSnapshot } from "../lib/status";
 export interface BoardSession extends SessionSnapshot {
   name: string;
   char_name: string;
-  mode: string;
   lang: string;
-  speaks?: string[];
+  // `mode` is NOT a field: it's the same fact as `paused` (mode != live), so the
+  // board derives the mode chip from `paused` rather than carrying two copies.
+  // speaks + superchat_unread are inherited from SessionSnapshot (the board
+  // headlines speaks[0] and shows an unread mark when superchat_unread > 0).
 }
 
 /** hub.state response — only the fields the board reads are typed; the rest is

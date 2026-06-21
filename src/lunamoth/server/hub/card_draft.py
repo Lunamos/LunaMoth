@@ -39,7 +39,7 @@ The object must have exactly these keys:
   "scenario": string,
   "first_mes": string,
   "world_entries": [{"keys": [string, ...], "content": string, "constant": boolean}],
-  "seed_goals": [string],
+  "polaris": string,
   "tagline": string,
   "theme_color": string
 }
@@ -51,7 +51,7 @@ Requirements:
 - scenario: the current situation / setting the character is in right now (1-3 sentences).
 - first_mes: an opening message in character — the FIRST thing the character says, in their own voice.
 - world_entries: up to 4 lorebook entries (0 is fine). keys are short trigger words/names. At most one entry may be constant=true.
-- seed_goals: up to 3 short ongoing pursuits (0 is fine).
+- polaris: the character's North Star — ONE grand, somewhat abstract ideal it lives toward but can never fully reach or finish (not a task list, not a small goal). A single sentence in the character's spirit. May be "" if none fits.
 - tagline: one line.
 - theme_color: a hex color like "#5B9FD4".
 The avatar is NOT generated here — the human uploads one or generates it on demand later."""
@@ -99,11 +99,12 @@ def _validate_world_entries(value: Any) -> list[dict[str, Any]]:
     return out
 
 
-def _validate_seed_goals(value: Any) -> list[str]:
-    """Lenient: keep up to 3 non-empty goals; an empty list is fine."""
-    if not isinstance(value, list):
-        return []
-    return [str(g).strip() for g in value if isinstance(g, str) and str(g).strip()][:3]
+def _validate_polaris(value: Any) -> str:
+    """The character's North Star — ONE grand ideal as a single string. Lenient:
+    a list (legacy/loose model output) is folded into one; empty is fine."""
+    if isinstance(value, list):
+        value = "；".join(str(g).strip() for g in value if isinstance(g, str) and str(g).strip())
+    return str(value or "").strip()[:1000]
 
 
 # Who "you" are in the world, when the model leaves it blank: a neutral, moderate
@@ -134,7 +135,7 @@ def _parse_card_draft(raw: str) -> dict[str, Any]:
     # absent and are defaulted — generation should not fail on a small deviation.
     required = {"name", "description"}
     allowed = required | {"user_name", "personality", "scenario", "first_mes",
-                          "world_entries", "seed_goals", "tagline", "theme_color"}
+                          "world_entries", "polaris", "tagline", "theme_color"}
     got = set(obj)
     missing = required - got
     extra = got - allowed
@@ -158,7 +159,7 @@ def _parse_card_draft(raw: str) -> dict[str, Any]:
         "scenario": opt("scenario"),
         "first_mes": opt("first_mes"),
         "world_entries": _validate_world_entries(obj.get("world_entries")),
-        "seed_goals": _validate_seed_goals(obj.get("seed_goals")),
+        "polaris": _validate_polaris(obj.get("polaris")),
         "tagline": opt("tagline"),
         "theme_color": _theme_color(obj.get("theme_color")),
     }
@@ -203,7 +204,9 @@ _FIELD_REWRITE_LABEL = {
     "tagline": "a one-line tagline",
     "user_name": "who YOU (the human) are in this world — a short name or role",
     "user_persona": "a short description of who YOU (the human) are to the character",
-    "goals": "the character's seed goals, one short goal per line",
+    # key stays "goals" to match the editor's field key; the description guides the
+    # AI rewrite toward a Polaris (one grand, never-finished ideal), not a list.
+    "goals": "the character's North Star — one grand, never-finished ideal it lives toward",
     "world_entries": "world-book lorebook entries, one per line as 'key1, key2 — content'",
 }
 
@@ -254,13 +257,13 @@ conservatively and tastefully; never invent contradictions. Reply with ONLY a JS
 no markdown fence, with exactly these keys:
 {"name": str, "appearance": str, "personality": str, "scenario": str, "first_mes": str,
  "alternate_greetings": [str], "world": [{"key": str, "desc": str, "constant": bool}],
- "relationship": str, "goals": [str], "rules": str}
+ "relationship": str, "polaris": str, "rules": str}
 - appearance: who they are + how they look, 2-4 sentences, prose.
 - personality: temperament and voice, 2-4 sentences, prose.
 - first_mes: their in-character opening line when meeting the user.
 - world: 2-5 lorebook entries (key = a name/term, desc = one sentence); constant=true for at most one core entry.
 - relationship: the user's place in this character's life, 1-2 sentences.
-- goals: 1-3 ongoing pursuits, short phrases.
+- polaris: ONE grand, never-finished ideal the character lives toward (a single sentence), else "".
 - rules: boundaries/never-dos if implied, else ""."""
 
 
@@ -304,11 +307,17 @@ def _draft_world_entries(draft: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def _draft_goals(draft: dict[str, Any]) -> list[str]:
-    goals = draft.get("seed_goals") if isinstance(draft.get("seed_goals"), list) else draft.get("goals")
-    if not isinstance(goals, list):
-        return []
-    return [str(g).strip() for g in goals if str(g).strip()][:5]
+def _draft_polaris(draft: dict[str, Any]) -> str:
+    """The drafted Polaris — a single north-star string. Prefer an explicit
+    `polaris`; fold a legacy/loose `seed_goals`/`goals` list into one if that's
+    all the model returned."""
+    pol = draft.get("polaris")
+    if isinstance(pol, str) and pol.strip():
+        return pol.strip()[:1000]
+    legacy = draft.get("seed_goals") if isinstance(draft.get("seed_goals"), list) else draft.get("goals")
+    if isinstance(legacy, list):
+        return "；".join(str(g).strip() for g in legacy if str(g).strip())[:1000]
+    return ""
 
 
 def draft_to_card(draft: dict[str, Any], origin_text: str = "", as_draft: bool = False) -> dict[str, Any]:
@@ -317,9 +326,9 @@ def draft_to_card(draft: dict[str, Any], origin_text: str = "", as_draft: bool =
     ext: dict[str, Any] = {"origin": origin_text[:8000]}
     if as_draft:
         ext["draft"] = True
-    wishes = _draft_goals(draft)
-    if wishes:
-        ext["wishes"] = wishes
+    polaris = _draft_polaris(draft)
+    if polaris:
+        ext["polaris"] = polaris
     if draft.get("rules"):
         ext["rules"] = str(draft["rules"])
     if draft.get("tagline"):

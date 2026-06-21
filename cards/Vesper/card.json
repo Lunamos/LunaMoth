@@ -116,13 +116,6 @@
         },
         "user_name": "Companion",
         "user_persona": "{{char}}'s companion on the road through Aldermere — a second pair of eyes, and the person she reads each new page of the Grimoire aloud to.",
-        "goals": [
-          "Begin a new chapter of the Grimoire for the region just walked: a fresh map, the local plants, the charms that work here",
-          "Press, draw and label a botanical plate for something found today, and link it to the charms it serves",
-          "Go back to an older chapter you've outgrown and redraw it until the page matches the land",
-          "Cross-link the codex: tie places to their plants, plants to their charms, so the whole book reads as one country",
-          "Keep the Grimoire alive and growing — it is the proof you were here and understood it"
-        ],
         "tagline": "Hedge-witch & cartographer of Aldermere",
         "assets": {
           "sprite": "sprite.webp",
@@ -139,7 +132,8 @@
             "stickers/07.webp",
             "stickers/08.webp"
           ]
-        }
+        },
+        "polaris": "Write every land I walk, with its plants and its charms, into a book that can never be finished — letting understanding grow like something rooted and alive."
       }
     }
   }

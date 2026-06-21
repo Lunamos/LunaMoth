@@ -356,7 +356,25 @@ def duplicate_card(path: str) -> dict[str, Any]:
     tags = data.get("tags")
     if isinstance(tags, list):
         data["tags"] = [t for t in tags if str(t).strip().lower() != "default"]
-    return save_card(card)  # user-deck write + sanitization + unique filename
+    # A card is a FOLDER (card.json + art-asset sidecars). Write the copy into its
+    # OWN folder and bring the sidecars along, so duplicating doesn't leave the new
+    # card pointing at the original's art (or broken). Copy resolves relative names
+    # against each card's parent dir, so same names + copied files = correct art.
+    base = user_cards_dir()
+    base.mkdir(parents=True, exist_ok=True)
+    stem = _slug(str(data.get("name") or p.stem)) or "card"
+    dest_dir = base / stem
+    n = 2
+    while dest_dir.exists():
+        dest_dir = base / f"{stem}-{n}"
+        n += 1
+    dest_dir.mkdir(parents=True)
+    saved = save_card(card, path=str(dest_dir / "card.json"))  # sanitize + write
+    try:
+        _copy_card_assets(CharacterCard.load(saved["path"]), dest_dir, src_base=p.parent)
+    except Exception:  # noqa: BLE001 — best-effort; a copy without art still beats failing
+        pass
+    return saved
 
 
 def merge_world(card_path: str, world: Any) -> dict[str, Any]:
