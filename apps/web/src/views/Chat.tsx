@@ -166,13 +166,27 @@ function ChatStreamPage({
     "--chat-sprite-opacity": String(prefs.spriteOpacity / 100),
   } as CSSProperties;
 
-  // Auto-scroll to bottom on new items when already near the bottom.
+  // Scroll behavior. Two distinct jobs that were wrongly collapsed into one
+  // near-bottom guard (which is always false on first paint of a tall log, so
+  // entry stayed pinned at the TOP and new replies landed below the fold):
+  //   1. First load / chara switch → jump to the newest message UNCONDITIONALLY.
+  //   2. Steady state → follow new items only when already near the bottom.
+  const lastChara = useRef<string>("");
   useEffect(() => {
     const sc = scrollRef.current;
     if (!sc) return;
+    if (stream.ready && lastChara.current !== stream.charName) {
+      lastChara.current = stream.charName;
+      sc.scrollTop = sc.scrollHeight;
+      // A second pass next frame catches late layout (avatars/images resizing).
+      requestAnimationFrame(() => {
+        sc.scrollTop = sc.scrollHeight;
+      });
+      return;
+    }
     const nearBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 160;
     if (nearBottom) sc.scrollTop = sc.scrollHeight;
-  }, [stream.items, stream.work]);
+  }, [stream.items, stream.work, stream.ready, stream.charName]);
 
   // Read the persisted super-chat read watermark for the RESOLVED chara, then
   // flush newly-seen super bubbles (chat.js flushSuperReads) when the turn settles

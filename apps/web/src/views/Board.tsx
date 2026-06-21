@@ -4,8 +4,10 @@ import { useNavigate } from "../hooks/useHashRoute";
 import { useHub, type BoardSession } from "../state/hub";
 import { useOverlay } from "../state/overlay";
 import { statusOf, rpcErrText } from "../lib/status";
-import { modeLabel, paletteClass, glyphOf } from "../lib/format";
+import { modeLabel, paletteClass } from "../lib/format";
 import { deckToast } from "../components/ui/deckToast";
+import { CardFace } from "../components/deck/visual";
+import type { DeckCard } from "../components/deck/types";
 
 /* Board — the roster of living charas. Faithful to index.html #view-board +
    app.js renderBoard: a grid of chara cards, each with a power toggle
@@ -21,9 +23,14 @@ export function Board() {
   const nav = useNavigate();
   const overlay = useOverlay();
   const { hub, snapshot, refresh } = useHub();
-  const [busy, setBusy] = useState<Set<string>>(new Set());
+  // Optimistic autonomy override per chara (name → desired on/off): the slider
+  // flips at once, reverts on failure (binding "no dead clicks" rule).
+  const [pending, setPending] = useState<Record<string, boolean>>({});
 
   const sessions: BoardSession[] = snapshot?.sessions ?? [];
+  // The art lives on each chara's FROZEN card (the locked deck entry owned by it),
+  // not on the roster row — match by owner to show the avatar/sprite on the board.
+  const cards = (snapshot?.cards as DeckCard[] | undefined) || [];
 
   // First-run: once the hub snapshot has loaded and there are no charas, show the
   // welcome overlay a single time per browser (app.js openFirstRun on empty boot).
@@ -47,26 +54,52 @@ export function Board() {
     overlay.open({ kind: "firstrun" });
   }, [snapshot, sessions.length, overlay]);
 
-  const setBusyName = (name: string, on: boolean) =>
-    setBusy((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(name);
-      else next.delete(name);
-      return next;
-    });
-
-  const togglePower = async (s: BoardSession, live: boolean) => {
-    if (busy.has(s.name)) return;
-    setBusyName(s.name, true); // optimistic: button shows a spinner at once
+  // The board's on/off IS the chara's autonomy — the SAME switch as the in-chat
+  // status toggle, calling the SAME RPC (chara.set_autonomy). It never kills the
+  // chat you're in: on = mode live (autonomous), off = mode chat (replies only,
+  // no idle token burn). Entering/leaving a chara has no effect on its context.
+  const toggleAutonomy = async (s: BoardSession, next: boolean) => {
+    if (s.name in pending) return; // a flip is already in flight
+    setPending((p) => ({ ...p, [s.name]: next })); // optimistic flip
     try {
-      await hub.call(live ? "session.stop" : "session.start", { name: s.name }, 30000);
+      await hub.call("chara.set_autonomy", { name: s.name, on: next }, 30000);
       await refresh();
     } catch (e) {
-      // binding UI rule: surface the failure (the spinner clears in finally and
-      // the card reverts to its real state on the next refresh).
       deckToast(rpcErrText(t, e as { message?: string }), true);
     } finally {
-      setBusyName(s.name, false);
+      setPending((p) => {
+        const n = { ...p };
+        delete n[s.name];
+        return n;
+      });
+    }
+  };
+
+  // 全部启动 / 全部关闭: flip EVERY chara's autonomy at once. All sliders slide
+  // immediately (optimistic), then we fire one set_autonomy per chara.
+  const [allBusy, setAllBusy] = useState(false);
+  const setAllAutonomy = async (on: boolean) => {
+    if (allBusy || sessions.length === 0) return;
+    const names = sessions.map((s) => s.name);
+    setAllBusy(true);
+    setPending((p) => {
+      const n = { ...p };
+      names.forEach((nm) => (n[nm] = on));
+      return n;
+    });
+    try {
+      await Promise.all(names.map((nm) => hub.call("chara.set_autonomy", { name: nm, on }, 30000)));
+      await refresh();
+    } catch (e) {
+      deckToast(rpcErrText(t, e as { message?: string }), true);
+      await refresh(); // partial success: re-sync so the succeeded charas don't revert
+    } finally {
+      setPending((p) => {
+        const n = { ...p };
+        names.forEach((nm) => delete n[nm]);
+        return n;
+      });
+      setAllBusy(false);
     }
   };
 
@@ -78,6 +111,16 @@ export function Board() {
           <span className="count">{sessions.length ? `· ${sessions.length}` : ""}</span>
         </h1>
         <div className="grow" />
+        {sessions.length > 0 && (
+          <>
+            <button className="btn" disabled={allBusy} onClick={() => void setAllAutonomy(true)}>
+              {t("board-start-all")}
+            </button>
+            <button className="btn" disabled={allBusy} onClick={() => void setAllAutonomy(false)}>
+              {t("board-stop-all")}
+            </button>
+          </>
+        )}
         <button className="btn primary" onClick={() => nav("#/deck")}>
           {t("new-chara")}
         </button>
@@ -86,31 +129,32 @@ export function Board() {
       <div className="board">
         <div className="grid" id="board-grid">
           {sessions.map((s) => {
-            const live = (s.status === "running" || s.status === "attached") && !s.paused;
             const st = statusOf(t, s);
-            const isBusy = busy.has(s.name);
+            // on/off == autonomy (!paused), with the optimistic override applied.
+            const live = s.name in pending ? pending[s.name] : !s.paused;
+            // The dot follows the optimistic state too (err still wins from st).
+            const dot = st.dot === "err" ? "err" : s.name in pending ? (live ? "live" : "off") : st.dot;
             return (
               <div
                 key={s.name}
-                className={`chara-card${st.dot === "off" ? " offline" : ""}`}
+                className={`chara-card${!live && dot !== "err" ? " offline" : ""}`}
                 onClick={() => nav(`#/chara/${encodeURIComponent(s.name)}`)}
               >
-                <div className={`portrait ${paletteClass(s.char_name)}`}>
-                  <div className="glyph">{glyphOf(s.char_name)}</div>
-                  <span className={`dot ${st.dot}`} />
-                  <div className="hover-acts">
-                    <button
-                      title={live ? t("act-sleep") : t("act-wake-up")}
-                      disabled={isBusy}
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        void togglePower(s, live);
-                      }}
-                    >
-                      {isBusy ? <span className="spin" /> : "⏻"}
-                    </button>
-                  </div>
-                </div>
+                <CardFace
+                  card={cards.find((c) => c.locked && c.owner === s.name) ?? ({ name: s.char_name } as DeckCard)}
+                  cls={`portrait ${paletteClass(s.char_name)}`}
+                >
+                  <span className={`dot ${dot}`} />
+                  <button
+                    className={`switch${live ? " on" : ""}`}
+                    title={live ? t("act-sleep") : t("act-wake-up")}
+                    style={{ position: "absolute", top: 12, right: 12, zIndex: 3 }}
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      void toggleAutonomy(s, !live);
+                    }}
+                  />
+                </CardFace>
                 <div className="card-body">
                   <div className="card-name">
                     <b>{s.char_name}</b>

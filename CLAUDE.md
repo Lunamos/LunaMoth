@@ -143,9 +143,9 @@ example) and Quinn 小Q (the default).)
 
 ```bash
 uv sync --extra dev --extra server   # plain `uv sync` REMOVES pytest — always use extras
-uv run lunamoth            # the CLI (editable; reflects the working tree)
-uv run lunamoth --plain    # legacy plain terminal (native cursor + IME; good for CJK)
-uv run lunamoth desktop    # web/desktop hub; --daemon = resident lunamothd (stop/status: `lunamoth daemon`)
+uv run lunamoth            # bare = opens the webui desktop (web/desktop hub); the editable CLI reflects the working tree
+uv run lunamoth tui        # the terminal roster (resume-first launcher); --plain = legacy plain terminal (native cursor + IME; good for CJK)
+uv run lunamoth desktop    # explicit web/desktop hub; --daemon = resident lunamothd (stop/status: `lunamoth daemon`)
 uv run lunamoth serve NAME --stdio   # one chara over JSON-RPC (wire format)
 uv run lunamoth run NAME -p "hi" [--stream-json]   # headless one-shot
 uv run python -m pytest -q # tests live in tests/, confined via pyproject testpaths

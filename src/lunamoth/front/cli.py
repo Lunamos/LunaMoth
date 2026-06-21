@@ -1,6 +1,7 @@
 """The `lunamoth` command — a roster of persistent agents, not throwaway sessions.
 
-    lunamoth                 open the roster (resume-first launcher)
+    lunamoth                 open the webui desktop (web renderer + hub gateway)
+    lunamoth tui             open the terminal roster (resume-first launcher)
     lunamoth new NAME        create an agent (--isolation sandbox|admin)
     lunamoth ls              list agents and their status
     lunamoth attach NAME     open an agent in the TUI (adopts its background loop)
@@ -182,11 +183,12 @@ def _launch_tui(meta: S.SessionMeta, args: argparse.Namespace) -> int:
 # ---- subcommands -----------------------------------------------------------
 
 
-def cmd_default(args: argparse.Namespace) -> int:
+def cmd_tui(args: argparse.Namespace) -> int:
     """Resume-first launcher: show the roster of charas, act on the choice, repeat.
 
     There is NO default session — every session is a chara, deliberately created.
-    `lunamoth` with no args opens the roster (pick or summon a chara)."""
+    `lunamoth tui` opens the roster (pick or summon a chara). Bare `lunamoth`
+    opens the webui desktop instead — see main()."""
     if not sys.stdin.isatty():
         # Headless with no chara named: nothing to open (no default 'home').
         print("no chara specified — try `lunamoth ls`, `lunamoth attach NAME`, "
@@ -879,15 +881,23 @@ def _maybe_update_hint() -> None:
 # ---- parser ----------------------------------------------------------------
 
 
-def _add_tui_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--patience", "--cooldown", dest="patience", type=float, default=None,
+def _add_tui_flags(p: argparse.ArgumentParser, *, suppress: bool = False) -> None:
+    # The same TUI flags live on the top-level parser AND on the `tui` subparser,
+    # so they work in either position (`lunamoth --plain tui` and `lunamoth tui
+    # --plain`). On the subparser the defaults are SUPPRESS: an absent flag then
+    # leaves the attribute untouched instead of clobbering a value the top-level
+    # parser already set (the classic argparse parent/subparser default trap).
+    none_def = argparse.SUPPRESS if suppress else None
+    str_def = argparse.SUPPRESS if suppress else ""
+    false_def = argparse.SUPPRESS if suppress else False
+    p.add_argument("--patience", "--cooldown", dest="patience", type=float, default=none_def,
                    help="override pause between the chara's spontaneous cycles, in seconds")
-    p.add_argument("--mode", choices=["live", "chat"], default="",
+    p.add_argument("--mode", choices=["live", "chat"], default=str_def,
                    help="override the chara's interaction mode for this attach (live: keeps creating while you watch; chat: only replies)")
-    p.add_argument("--no-forever", action="store_true", help=argparse.SUPPRESS)  # pre-rename alias for --mode chat
-    p.add_argument("--plain", action="store_true", help="legacy plain terminal instead of the TUI")
-    p.add_argument("--clean-on-exit", action="store_true", help="wipe the session sandbox on shutdown (default: persist)")
-    p.add_argument("--debug", action="store_true", help="DEBUG-level diagnostics in the chara's sandbox/logs/")
+    p.add_argument("--no-forever", action="store_true", default=false_def, help=argparse.SUPPRESS)  # pre-rename alias for --mode chat
+    p.add_argument("--plain", action="store_true", default=false_def, help="legacy plain terminal instead of the TUI")
+    p.add_argument("--clean-on-exit", action="store_true", default=false_def, help="wipe the session sandbox on shutdown (default: persist)")
+    p.add_argument("--debug", action="store_true", default=false_def, help="DEBUG-level diagnostics in the chara's sandbox/logs/")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -967,6 +977,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--debug", action="store_true", help="DEBUG-level diagnostics")
     sp.set_defaults(func=cmd_desktop)
 
+    sp = sub.add_parser("tui", help="open the terminal roster (the resume-first launcher); bare `lunamoth` opens the webui")
+    _add_tui_flags(sp, suppress=True)  # accept --plain/--mode/etc. after `tui` too
+    sp.set_defaults(func=cmd_tui)
+
     sp = sub.add_parser("connect", help="reach a remote chara over an SSH tunnel: connect ssh://[user@]host[:port]")
     sp.add_argument("target", help="ssh target, e.g. ssh://user@host:22 (encryption + auth via SSH; the remote stays bound to 127.0.0.1)")
     sp.add_argument("--no-open", action="store_true", help="don't open the browser")
@@ -998,8 +1012,15 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     func = getattr(args, "func", None)
     if func is None:
+        # Bare `lunamoth` opens the webui desktop (the primary face); `lunamoth tui`
+        # opens the terminal roster. Seed the desktop defaults the `desktop`
+        # subparser would have supplied, so cmd_desktop can read them uniformly.
         _maybe_update_hint()
-        return cmd_default(args)
+        for k, v in (("host", "127.0.0.1"), ("allow_host", ""), ("port", 0),
+                     ("ws_port", 0), ("token", ""), ("no_open", False), ("daemon", False)):
+            if not hasattr(args, k):
+                setattr(args, k, v)
+        return cmd_desktop(args)
     return func(args)
 
 

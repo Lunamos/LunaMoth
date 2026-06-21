@@ -35,9 +35,11 @@ describe("I18N strings map", () => {
   // The personal-website feature (homepage tab + the two wake/create module
   // toggles replacing the embodiment grid) added 6 (tab-home, home-iframe-title,
   // mod-roleplay, mod-roleplay-hint, mod-website, mod-website-hint), then the
-  // homepage "open full page" button added home-open-full → 560.
-  it("preserves the full key set from the source dict (560 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(560);
+  // homepage "open full page" button added home-open-full → 560. The settings
+  // module toggles' "applies on next start" hint (mod-next-start) → 561. The
+  // board's 全部启动/全部关闭 (board-start-all, board-stop-all) → 563.
+  it("preserves the full key set from the source dict (563 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(563);
   });
 
   it("every value is a [zh, en] string tuple", () => {

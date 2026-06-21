@@ -476,7 +476,8 @@ def _write_home_scaffold(meta: "S.SessionMeta") -> None:
 
 def wake(card_path: str, name: str = "", isolation: str = "sandbox",
          model: str = "", toolpack: str = "", embodiment: str = "",
-         website: str = "", key: str = "",
+         website: str = "", key: str = "", mode: str = "live",
+         network: bool = True,
          card_data: "dict[str, Any] | None" = None) -> dict[str, Any]:
     """Instantiate a card: create the session, freeze a card copy, write config.
 
@@ -589,6 +590,9 @@ def wake(card_path: str, name: str = "", isolation: str = "sandbox",
     if web:
         # personal_website module wake-time choice; absent → card declaration > off.
         cfg["website_override"] = web
+    # Autonomy (mode) is the ONE on/off switch the board + in-chat panel share.
+    # Wake defaults it live (autonomous); the operator can wake straight into chat.
+    cfg["mode"] = "chat" if str(mode).lower() == "chat" else "live"
     # Always lay down a neutral homepage scaffold so the website tab has something
     # to show from the start (the module toggle only controls the prompt guidance).
     _write_home_scaffold(meta)
@@ -597,6 +601,18 @@ def wake(card_path: str, name: str = "", isolation: str = "sandbox",
         meta.config_path.chmod(0o600)
     except OSError:
         pass
+    # Network is ON by default at runtime (env_status.json); only when the operator
+    # wakes with network OFF do we pre-seed the env-state file so the very first run
+    # starts cut off. (Written as a literal here — server/ must not import core/.)
+    if not network:
+        env_path = meta.sandbox_dir / "env_status.json"
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        env_path.write_text(json.dumps({
+            "isolation": meta.isolation if meta.isolation in ("sandbox", "admin") else "sandbox",
+            "network_access": False,
+            "writable_paths": [],
+            "rest_until": 0.0,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
     return session_entry(meta)
 
 

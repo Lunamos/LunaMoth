@@ -108,10 +108,12 @@ describe("statusOf", () => {
     expect(out.line).toBe(line);
   });
 
-  it("idle shows offline + relative time", () => {
+  it("idle but autonomous (not paused) reads as on/live", () => {
+    // on/off == autonomy, not process state: a non-paused chara is "on" even
+    // when its child isn't resident, so the board shows it living its day.
     const out = statusOf(en, { status: "idle", last_active: NOW / 1000 - 600 }, NOW);
-    expect(out.dot).toBe("off");
-    expect(out.line).toBe("Offline · 10 min ago");
+    expect(out.dot).toBe("live");
+    expect(out.line).toBe("Living its own day");
   });
 
   it("an awaiting preview wins over life", () => {

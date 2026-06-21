@@ -244,6 +244,8 @@ class HubDispatcher:
             embodiment=str(p.get("embodiment") or ""),
             website=str(p.get("website") or ""),
             key=str(p.get("key") or ""),
+            mode=str(p.get("mode") or "live"),
+            network=bool(p.get("network", True)),
             card_data=cd if isinstance(cd, dict) else None,
         )
 

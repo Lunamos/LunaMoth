@@ -90,8 +90,10 @@ export function CardFace({
   const style = themeStyle(card);
   const src = avatarSrc(card);
   const spriteUrl = assetUrl(card.sprite_url || card.keyvisual_url || "");
+  // has-sprite lets the CSS fade the avatar OUT on hover only when there's a 立绘
+  // underneath to reveal (no sprite → the avatar stays put on hover).
   return (
-    <div className={cls} style={style}>
+    <div className={cls + (spriteUrl ? " has-sprite" : "")} style={style}>
       {spriteUrl && (
         <>
           <div

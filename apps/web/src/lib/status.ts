@@ -7,7 +7,7 @@
  * The `now` epoch (ms) is injectable so the time-relative branches are testable. */
 
 import type { TFn } from "../i18n";
-import { fmtClock, timeAgo } from "./format";
+import { fmtClock } from "./format";
 
 /** A chara's live-state snapshot (supervisor life.state). Only the fields these
  *  derivers read are typed; unknown fields are tolerated. */
@@ -128,9 +128,10 @@ export function statusOf(t: TFn, s: SessionSnapshot, now: number = Date.now()): 
   if (s.status === "crashed") return { dot: "err", line: s.error || "crashed", cls: "err" };
   if (s.error && (s.error_kind === "auth" || (s.status !== "attached" && s.status !== "running")))
     return { dot: "err", line: t("st-error"), cls: "err" };
+  // OFF = autonomy off (mode chat). That is the ONLY "offline" the board shows:
+  // the chara's on/off state IS its autonomy, decoupled from any process/PID. A
+  // non-paused chara is "on" (living its day) even if its child isn't resident yet.
   if (s.paused) return { dot: "off", line: t("st-paused"), cls: "" };
-  if (s.status === "idle")
-    return { dot: "off", line: `${t("st-offline")} · ${timeAgo(t, s.last_active, now)}`, cls: "" };
   if (s.preview && s.preview.awaiting)
     return { dot: "live", line: s.preview.text || "", cls: "msg" };
   if (s.life && s.life.state) return { dot: "live", line: lifeText(t, s.life, now), cls: "" };

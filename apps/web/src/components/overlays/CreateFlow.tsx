@@ -277,7 +277,8 @@ function ShapeStep({
   const [forceRoleplay, setForceRoleplay] = useState(
     draft.force_roleplay === true || draft.embodiment === "actor",
   );
-  const [personalSite, setPersonalSite] = useState(!!draft.website);
+  // New charas default the website module ON (opt out, not in).
+  const [personalSite, setPersonalSite] = useState(draft.website !== false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [landing, setLanding] = useState(false);
   const [landed, setLanded] = useState<{ path: string; name: string } | null>(null);

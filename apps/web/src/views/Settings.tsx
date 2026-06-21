@@ -8,7 +8,8 @@
  * theme/lang persist to the backend (defaults.set) best-effort; the model pane
  * carries its own working states. */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { navTo } from "../hooks/useHashRoute";
 import { useT, useLang } from "../i18n";
 import { useHub } from "../state/hub";
 import { applyTheme, currentThemePref, type ThemePref } from "../theme";
@@ -29,6 +30,13 @@ const PANES: ReadonlyArray<readonly [Pane, string]> = [
   ["about", "set-about"],
 ] as const;
 
+// Deep-link the pane via the hash sub-segment (`#/settings/keys`), so e.g. the
+// Model pane's "add a key" prompt can jump straight to the Providers pane.
+function paneFromHash(): Pane {
+  const seg = (location.hash.split("/")[2] || "") as Pane;
+  return PANES.some(([k]) => k === seg) ? seg : "model";
+}
+
 function currentDisplay(): Display {
   try {
     return localStorage.getItem("lm-display") === "technical" ? "technical" : "product";
@@ -41,7 +49,12 @@ export function Settings() {
   const t = useT();
   const { lang, setLang } = useLang();
   const { hub, snapshot } = useHub();
-  const [pane, setPane] = useState<Pane>("model");
+  const [pane, setPane] = useState<Pane>(paneFromHash);
+  useEffect(() => {
+    const on = () => setPane(paneFromHash());
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
   const [theme, setTheme] = useState<ThemePref>(currentThemePref());
   const [display, setDisplay] = useState<Display>(currentDisplay());
 
@@ -84,7 +97,11 @@ export function Settings() {
       <div className="settings-root">
         <nav className="settings-nav">
           {PANES.map(([key, label]) => (
-            <button key={key} className={pane === key ? "on" : ""} onClick={() => setPane(key)}>
+            <button
+              key={key}
+              className={pane === key ? "on" : ""}
+              onClick={() => { setPane(key); navTo(key === "model" ? "#/settings" : `#/settings/${key}`); }}
+            >
               {t(label)}
             </button>
           ))}

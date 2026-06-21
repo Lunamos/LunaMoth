@@ -44,7 +44,7 @@ The one-line installer (a prebuilt wheel, no Node build), then open the UI in yo
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Lunamos/LunaMoth/main/install.sh | bash
-lunamoth desktop      # serves the UI and opens your browser  (lunamoth = the terminal UI; lunamoth doctor checks your setup)
+lunamoth              # opens the webui in your browser  (lunamoth tui = terminal UI; lunamoth doctor checks your setup)
 ```
 
 Or run the full desktop app from a clone (this is how we develop it) — needs [uv](https://docs.astral.sh/uv/) + Node:
@@ -81,7 +81,7 @@ A LunaMoth character isn't a chat session you open and throw away. It's a **char
 - **Real agency, real fences.** Tools run inside a per-session OS jail that confines writes to the workspace and hides your secrets — and *refuses* to run rather than quietly dropping the jail (see [Tools & the sandbox](#tools--the-sandbox)).
 - **Memory you can trust.** Durable memory is a token-capped file the chara edits through tools, not a bottomless log. Every tool call is written to `sandbox/logs/audit.jsonl`.
 
-The desktop app (a thin Electron window over the local server) is the main way to use it. A resident `lunamothd` supervisor keeps charas alive in the background and notifies you when one wants to talk. There's also a frozen-but-working terminal UI (`lunamoth`) for headless use.
+The desktop app (a thin Electron window over the local server) is the main way to use it. A resident `lunamothd` supervisor keeps charas alive in the background and notifies you when one wants to talk. There's also a frozen-but-working terminal UI (`lunamoth tui`) for headless use.
 
 ## A model
 
@@ -158,10 +158,10 @@ Carrying a long `#token=` URL on a phone is awkward, so a non-loopback bind also
 <details>
 <summary>The chara CLI (headless / over SSH)</summary>
 
-`lunamoth` with no args opens a roster of your charas (resume-first), not a fresh session.
+Bare `lunamoth` opens the webui desktop; `lunamoth tui` opens a roster of your charas (resume-first), not a fresh session.
 
 ```bash
-lunamoth                  # roster: pick a chara to attach, or press n to create one
+lunamoth tui              # roster: pick a chara to attach, or press n to create one
 lunamoth ls               # name / character / status / isolation / last active
 lunamoth attach muse      # attach (you adopt its background loop while attached)
 lunamoth start muse       # let it live in the background

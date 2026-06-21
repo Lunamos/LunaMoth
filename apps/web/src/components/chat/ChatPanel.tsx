@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { useT } from "../../i18n";
 import { useHubApi, useHubState } from "../../state/hub";
 import { deckToast } from "../ui/deckToast";
+import { rpcErrText } from "../../lib/status";
 import { GatewayPane } from "./GatewayPane";
 import { VisualEditor } from "../deck/VisualEditor";
 import type { DeckCard } from "../deck/types";
@@ -112,16 +113,17 @@ function Prow({
 
 function StatusPane({ stream, onTab }: { stream: CharaStream; onTab: (t: PanelTab) => void }) {
   const t = useT();
-  // Optimistic net toggle: the switch must flip on click, not after the round-trip
-  // (the binding "no dead clicks" rule). netPending overrides the snapshot until the
-  // snapshot agrees; a failure reverts and surfaces (runCommand is NOT quiet here, so
-  // the error lands as a visible system line).
+  const { hub } = useHubApi();
   const snap = stream.snapshot as Snapshot | null;
-  const snapNet = !!snap?.net_on;
-  const [netPending, setNetPending] = useState<boolean | null>(null);
+  // Autonomy (自主运行) — the SAME on/off switch as the board, calling the SAME
+  // RPC (chara.set_autonomy). on = mode live (autonomous); off = mode chat
+  // (replies only). It never kills the chat you're in. Optimistic: flip at once,
+  // reconcile when the snapshot's mode agrees, revert + surface on failure.
+  const snapLive = String(snap?.mode || "live") === "live";
+  const [livePending, setLivePending] = useState<boolean | null>(null);
   useEffect(() => {
-    if (netPending !== null && snapNet === netPending) setNetPending(null);
-  }, [snapNet, netPending]);
+    if (livePending !== null && snapLive === livePending) setLivePending(null);
+  }, [snapLive, livePending]);
   if (!snap) return <div className="placeholder-pane">{t("st-connecting")}</div>;
   const num = (v: unknown) => Number(v) || 0;
   const ctxMax = num(snap.context_max);
@@ -130,17 +132,19 @@ function StatusPane({ stream, onTab }: { stream: CharaStream; onTab: (t: PanelTa
   const memMax = num(snap.memory_max);
   const memCh = num(snap.memory_chars);
   const pctMem = memMax ? Math.round((100 * memCh) / memMax) : 0;
-  const netOn = netPending ?? snapNet;
-  const toggleNet = () => {
-    const next = !netOn;
-    setNetPending(next); // optimistic flip
-    void stream.runCommand(next ? "/net on" : "/net off").then((r) => {
-      if (r === null) setNetPending(null); // failed → revert (error already surfaced)
+  const liveOn = livePending ?? snapLive;
+  const toggleLive = () => {
+    const next = !liveOn;
+    setLivePending(next); // optimistic flip
+    hub.call("chara.set_autonomy", { name: stream.charName, on: next }, 30000).catch((e) => {
+      setLivePending(null); // failed → revert to the real state
+      deckToast(rpcErrText(t, e as { message?: string }), true);
     });
   };
 
   return (
     <div className="pgroup">
+      <Prow label={t("p-autonomy")} sub={t("p-autonomy-sub")} switchOn={liveOn} onSwitch={toggleLive} />
       <Prow label={t("p-model")} val={<code>{String(snap.model || "—")}</code>} chev />
       <Prow
         label={t("p-effort")}
@@ -165,12 +169,6 @@ function StatusPane({ stream, onTab }: { stream: CharaStream; onTab: (t: PanelTa
         val={`${memCh} / ${memMax}`}
         chev
         onClick={() => onTab("memory")}
-      />
-      <Prow
-        label={t("p-net")}
-        sub={t("p-net-sub")}
-        switchOn={netOn}
-        onSwitch={toggleNet}
       />
       <Prow
         label={t("p-gateway")}
@@ -332,11 +330,47 @@ function VisualsPane({ stream, name }: { stream: CharaStream; name: string }) {
 
 function SettingsPane({ stream }: { stream: CharaStream }) {
   const t = useT();
+  const { hub } = useHubApi();
   const snap = (stream.snapshot as Snapshot | null) || {};
+  const name = stream.charName;
   const quiet = Number(snap.quiet) || 300;
   const patience = Number(snap.patience) || 600;
-  const emb = snap.embodiment === "actor" ? "actor" : "literal";
   const [resetting, setResetting] = useState(false);
+
+  // 网络 — instant (the /net command hits the live agent immediately).
+  const snapNet = !!snap.net_on;
+  const [netPending, setNetPending] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (netPending !== null && snapNet === netPending) setNetPending(null);
+  }, [snapNet, netPending]);
+  const netOn = netPending ?? snapNet;
+  const toggleNet = () => {
+    const next = !netOn;
+    setNetPending(next);
+    void stream.runCommand(next ? "/net on" : "/net off").then((r) => {
+      if (r === null) setNetPending(null);
+    });
+  };
+
+  // 网站 + 强化角色扮演 — prompt MODULES: the change is written now but applies on
+  // the NEXT start (a module rides the cache-stable prefix). The toggle reflects
+  // the DESIRED state (sticky once touched); a hint shows while it differs from
+  // what's live. set_modules is a hub RPC (name-keyed), not a chat command.
+  const activeSite = !!snap.website;
+  const activeRp = snap.embodiment === "actor";
+  const [siteWant, setSiteWant] = useState<boolean | null>(null);
+  const [rpWant, setRpWant] = useState<boolean | null>(null);
+  const siteOn = siteWant ?? activeSite;
+  const rpOn = rpWant ?? activeRp;
+  const setModule = (mod: "website" | "force_roleplay", next: boolean) => {
+    const setLocal = mod === "website" ? setSiteWant : setRpWant;
+    setLocal(next); // optimistic, sticky (it's the pending next-start value)
+    hub.call("session.set_modules", { name, [mod]: next }, 30000).catch((e) => {
+      setLocal(null); // revert to the live value
+      deckToast(rpcErrText(t, e as { message?: string }), true);
+    });
+  };
+
   const doReset = async () => {
     if (resetting || !confirm(t("reset-confirm"))) return;
     setResetting(true); // visible working state, blocks a double-reset
@@ -354,18 +388,26 @@ function SettingsPane({ stream }: { stream: CharaStream }) {
         onSave={(v) => stream.runCommand(`/patience ${v}`)}
       />
       <div className="pfield" style={{ marginTop: 16 }}>
-        <label>{t("p-embodiment")}</label>
-        <div className="why">{t("emb-" + emb)}</div>
-        <div className="ctl">
-          <span className="fact">{emb}</span>
-          <span className="fact-hint">{t("emb-fact-hint")}</span>
-        </div>
-      </div>
-      <div className="pfield" style={{ marginTop: 16 }}>
         <label>{t("mod-website")}</label>
         <div className="why">{t("mod-website-hint")}</div>
         <div className="ctl">
-          <span className="fact">{snap.website ? "on" : "off"}</span>
+          <button className={"switch" + (siteOn ? " on" : "")} onClick={() => setModule("website", !siteOn)} />
+          {siteOn !== activeSite && <span className="fact-hint">{t("mod-next-start")}</span>}
+        </div>
+      </div>
+      <div className="pfield" style={{ marginTop: 16 }}>
+        <label>{t("p-net")}</label>
+        <div className="why">{t("p-net-sub")}</div>
+        <div className="ctl">
+          <button className={"switch" + (netOn ? " on" : "")} onClick={toggleNet} />
+        </div>
+      </div>
+      <div className="pfield" style={{ marginTop: 16 }}>
+        <label>{t("mod-roleplay")}</label>
+        <div className="why">{t("mod-roleplay-hint")}</div>
+        <div className="ctl">
+          <button className={"switch" + (rpOn ? " on" : "")} onClick={() => setModule("force_roleplay", !rpOn)} />
+          {rpOn !== activeRp && <span className="fact-hint">{t("mod-next-start")}</span>}
         </div>
       </div>
       <div className="pgroup" style={{ marginTop: 22 }}>
