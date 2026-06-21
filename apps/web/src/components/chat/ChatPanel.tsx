@@ -311,10 +311,7 @@ function ProfilePane({ stream, name }: { stream: CharaStream; name: string }) {
   const { hub } = useHubApi();
   const [ex, setEx] = useState<Extras | null>(null);
   const [skills, setSkills] = useState<string | null>(null);
-  // Polaris: the chara's north-star — USER-editable here (the chara can't change
-  // it). `pol === null` ⇒ not yet touched, show the loaded value; once edited it sticks.
-  const [pol, setPol] = useState<string | null>(null);
-  const [savingPol, setSavingPol] = useState(false);
+  // Polaris is DISPLAY-ONLY here — it is changed only with the `/polaris` command.
 
   useEffect(() => {
     let on = true;
@@ -339,21 +336,6 @@ function ProfilePane({ stream, name }: { stream: CharaStream; name: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name]);
 
-  // Polaris value shown in the editor: the user's in-progress edit if any, else
-  // the loaded value. Saving writes chara.set_polaris (the live agent reads it next turn).
-  const polValue = pol ?? ex?.polaris ?? "";
-  const savePolaris = async () => {
-    setSavingPol(true);
-    try {
-      await hub.call("chara.set_polaris", { name, text: polValue }, 20000);
-      deckToast(t("saved"));
-    } catch (e) {
-      deckToast(rpcErrText(t, e as { message?: string }), true);
-    } finally {
-      setSavingPol(false);
-    }
-  };
-
   return (
     <div className="profile-pane">
       <section className="dsec">
@@ -361,19 +343,10 @@ function ProfilePane({ stream, name }: { stream: CharaStream; name: string }) {
         <div className="why">{t("polaris-hint")}</div>
         {ex === null ? (
           <div className="placeholder-pane">…</div>
+        ) : ex.polaris ? (
+          <div className="memory-text">{ex.polaris}</div>
         ) : (
-          <div className="ctl" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
-            <textarea
-              className="polaris-input"
-              rows={3}
-              value={polValue}
-              placeholder={t("polaris-ph")}
-              onChange={(e) => setPol(e.target.value)}
-            />
-            <button className="btn soft sm" disabled={savingPol} style={{ alignSelf: "flex-end" }} onClick={() => void savePolaris()}>
-              {savingPol ? <span className="spin" /> : t("save")}
-            </button>
-          </div>
+          <div className="placeholder-pane">{t("polaris-empty")}</div>
         )}
       </section>
 

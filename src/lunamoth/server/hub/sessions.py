@@ -938,17 +938,6 @@ def chara_extras(meta: S.SessionMeta) -> dict[str, Any]:
     }
 
 
-def set_polaris(meta: S.SessionMeta, text: str) -> dict[str, Any]:
-    """User edit of the chara's Polaris (north-star). Writes polaris.json in the
-    sandbox — the SAME file the live agent's PolarisStore reads — so a running
-    chara picks it up next turn. The chara itself has no path to write this."""
-    text = (text or "").strip()[:1000]
-    path = meta.sandbox_dir / "polaris.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"polaris": text}, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"ok": True, "polaris": text}
-
-
 def open_path(path: str, reveal: bool = False) -> dict[str, Any]:
     """Hand a file to the OS (design: we present existence, the system opens it)."""
     p = Path(path)

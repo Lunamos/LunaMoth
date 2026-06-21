@@ -103,7 +103,6 @@ class HubDispatcher:
             "matte.delete": self._matte_delete,
             "matte.use": self._matte_use,
             "chara.extras": lambda p: _sessions.chara_extras(_meta(p)),
-            "chara.set_polaris": lambda p: _sessions.set_polaris(_meta(p), str(p.get("text") or "")),
             "works.list": lambda p: _sessions.list_works(_meta(p)),
             "works.read": lambda p: _sessions.read_work(_meta(p), str(p.get("rel") or "")),
             "works.open": lambda p: _sessions.open_path(str(p.get("path") or ""), reveal=bool(p.get("reveal"))),

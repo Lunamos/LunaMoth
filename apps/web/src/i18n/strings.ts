@@ -148,7 +148,7 @@ export const I18N = {
   "p-skills": ["技能", "Skills"],
   "p-polaris": ["北极星", "Polaris"],
   "polaris-hint": ["TA 永远追寻、却永不抵达的远大理想——由你设定，TA 无法更改或完成。", "A grand ideal it forever pursues but can never reach — you set it; it cannot change or finish it."],
-  "polaris-ph": ["例如：理解「活着」意味着什么", "e.g. understand what it means to be alive"],
+  "polaris-empty": ["还没设定 · 用 /polaris 设定", "Not set yet · set it with /polaris"],
   "p-profile": ["档案", "Profile"],
   "p-model-scope-note": ["供应商、模型与思考强度都为这个角色单独保存，重启后依然生效。供应商密钥仍统一存放在 设置·提供商。", "Provider, model and reasoning are saved per character and survive a restart. Provider keys still live in Settings · Providers."],
   "clarify-other": ["输入你自己的回答…", "Type your own answer…"],
