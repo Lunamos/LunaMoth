@@ -365,6 +365,10 @@ def _openrouter_bytes(base: str, key: str, model: str, prompt: str,
     for r in (refs or []):
         content.append({"type": "image_url", "image_url": {"url": str(r)}})
     url = base.rstrip("/") + "/chat/completions"
+    # OpenRouter app attribution (name + icon) so generated-image usage groups
+    # under the same app as chat/auxiliary calls.
+    from ...config import openrouter_attribution_headers
+    headers = {**_auth_headers(key), **openrouter_attribution_headers(url)}
 
     def _call(modalities: list[str]) -> dict:
         body = {
@@ -373,7 +377,7 @@ def _openrouter_bytes(base: str, key: str, model: str, prompt: str,
             "modalities": modalities,
         }
         return _request_json(url, data=json.dumps(body).encode("utf-8"),
-                             headers=_auth_headers(key), method="POST", timeout=240, tries=5)
+                             headers=headers, method="POST", timeout=240, tries=5)
 
     # Most image models output both image+text; image-only models (e.g. grok-imagine)
     # reject that pairing — fall back to image-only when the endpoint says so. This

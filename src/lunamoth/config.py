@@ -8,6 +8,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SANDBOX_ROOT = Path(os.getenv("LUNAMOTH_SANDBOX", os.getenv("LUNAMOSS_SANDBOX", ROOT / "sandbox"))).resolve()
 
+# OpenRouter app attribution. When a request goes to openrouter.ai we send these
+# two headers so all LunaMoth usage groups under one app on openrouter.ai/apps
+# and in the per-key Activity view. OpenRouter derives the app's display NAME from
+# X-Title and its ICON from the favicon of the HTTP-Referer URL — so to show a
+# LunaMoth icon (not GitHub's), point the referer at a public page that serves the
+# LunaMoth favicon. Both are env-overridable for a deployer's own site, no code edit.
+OPENROUTER_REFERER = os.getenv("LUNAMOTH_OPENROUTER_REFERER", "https://lunamoth.ai/")
+OPENROUTER_TITLE = os.getenv("LUNAMOTH_OPENROUTER_TITLE", "LunaMoth")
+
+
+def openrouter_attribution_headers(base_url: str | None) -> dict[str, str]:
+    """The HTTP-Referer / X-Title attribution headers, but only when the request
+    targets OpenRouter (harmless elsewhere, but we keep them scoped). Shared by the
+    chat path (core/llm.py), the hub's auxiliary completions (server/hub/models.py),
+    and the OpenRouter image adapter (tools/builtin/_image_gen.py) so EVERY token of
+    LunaMoth usage is attributed to the same app — same name, same icon."""
+    if "openrouter.ai" in (base_url or ""):
+        return {"HTTP-Referer": OPENROUTER_REFERER, "X-Title": OPENROUTER_TITLE}
+    return {}
+
 
 def content_dir(name: str) -> Path:
     """Resolve a bundled-content dir (``cards`` / ``toolpacks``).
