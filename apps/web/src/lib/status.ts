@@ -26,7 +26,6 @@ export interface SessionSnapshot {
   error_kind?: string;
   paused?: boolean;
   last_active?: number;
-  preview?: { awaiting?: boolean; text?: string };
   life?: LifeSnapshot;
   /** newest-first `speak`-tool utterances (the Super Chat feed); speaks[0] is the
    *  latest superchat the board headlines. */
@@ -133,19 +132,19 @@ export function statusOf(t: TFn, s: SessionSnapshot, now: number = Date.now()): 
   if (s.status === "crashed") return { dot: "err", line: s.error || "crashed", cls: "err" };
   if (s.error && (s.error_kind === "auth" || (s.status !== "attached" && s.status !== "running")))
     return { dot: "err", line: t("st-error"), cls: "err" };
-  // The board headlines the LATEST superchat (the chara's deliberate `speak` to
-  // you) whenever one exists — shown consistently, read or unread (the card adds
-  // an unread mark from superchat_unread). This replaces the old preview.awaiting
-  // branch that only showed the line until you replied, then dropped it.
-  // The dot still reflects autonomy: off = paused (mode chat), else live.
+  // The board headlines the LATEST `speak` ONLY (the chara's deliberate utterance
+  // to you, newest-first via s.speaks; the card adds an unread mark from
+  // superchat_unread). Nothing else becomes a message line — in particular NOT
+  // the last transcript line, which would surface the card's opening `first_mes`
+  // (a kind='chat' row) on a chara that has only greeted and never actually
+  // spoken. With no speak, fall through to the factual life/idle status. The dot
+  // still reflects autonomy: off = paused (mode chat), else live.
   const dot = s.paused ? "off" : "live";
   const sc = s.speaks && s.speaks[0];
   if (sc && sc.text) return { dot, line: sc.text, cls: "msg" };
   // OFF = autonomy off (mode chat). That is the ONLY "offline" the board shows:
   // the chara's on/off state IS its autonomy, decoupled from any process/PID.
   if (s.paused) return { dot: "off", line: t("st-paused"), cls: "" };
-  if (s.preview && s.preview.awaiting)
-    return { dot: "live", line: s.preview.text || "", cls: "msg" };
   if (s.life && s.life.state) return { dot: "live", line: lifeText(t, s.life, now), cls: "" };
   return { dot: "live", line: t("st-idle-live"), cls: "" };
 }

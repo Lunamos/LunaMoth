@@ -140,7 +140,6 @@ from .sessions import (  # noqa: F401
     _read_optional,
     _speak_texts_from_struct,
     _transcript_export_jsonl,
-    _transcript_preview,
     _transcript_speaks,
     _unmask_secrets,
     _weixin_config,

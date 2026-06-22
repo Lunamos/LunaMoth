@@ -116,14 +116,14 @@ describe("statusOf", () => {
     expect(out.line).toBe("Living its own day");
   });
 
-  it("an awaiting preview wins over life", () => {
-    const out = statusOf(
-      en,
-      { status: "running", preview: { awaiting: true, text: "hey" }, life: { state: "working" } },
-      NOW,
-    );
-    expect(out.cls).toBe("msg");
-    expect(out.line).toBe("hey");
+  it("never headlines the opening line / last chat — only a real speak does", () => {
+    // Regression guard for the removed preview.awaiting branch: a chara that has
+    // only shown its card greeting (first_mes, a kind='chat' row) and never used
+    // the `speak` tool must read as living its day — NOT echo the opener as a
+    // message line on the board. With no speaks, life/idle wins, cls is not "msg".
+    const out = statusOf(en, { status: "running", life: { state: "working" } }, NOW);
+    expect(out.line).toBe("Working on its own");
+    expect(out.cls).toBe("");
   });
 
   it("falls through to the life line, then the living-its-day default", () => {
@@ -133,7 +133,7 @@ describe("statusOf", () => {
     expect(statusOf(en, { status: "running" }, NOW).line).toBe("Living its own day");
   });
 
-  it("headlines the latest superchat over life/preview (read or unread)", () => {
+  it("headlines the latest superchat over life (read or unread)", () => {
     const out = statusOf(
       en,
       { status: "running", speaks: [{ text: "hi from me", ts: 100 }], life: { state: "working" } },

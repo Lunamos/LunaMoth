@@ -45,33 +45,6 @@ def _read_config(meta: S.SessionMeta) -> dict[str, Any]:
         return {}
 
 
-def _transcript_preview(meta: S.SessionMeta) -> dict[str, Any] | None:
-    """Last conversational line, read-only, straight from the transcript DB.
-
-    Returns {role, text, ts, awaiting} where awaiting=True means the last chat
-    line is the chara's (it spoke and nobody answered — '等你回话')."""
-    db = meta.sandbox_dir / "transcript.db"
-    if not db.exists():
-        return None
-    try:
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1.0)
-        try:
-            row = conn.execute(
-                "SELECT role, content, ts FROM messages "
-                "WHERE kind='chat' AND role IN ('user','assistant') "
-                "ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-        finally:
-            conn.close()
-    except sqlite3.Error:
-        return None
-    if not row:
-        return None
-    role, content, ts = row
-    text = " ".join(str(content).split())
-    return {"role": role, "text": text[:160], "ts": ts, "awaiting": role == "assistant"}
-
-
 def _speak_texts_from_struct(content: str) -> list[str]:
     try:
         msg = json.loads(content)
@@ -446,7 +419,6 @@ def session_entry(meta: S.SessionMeta, supervisor: Any | None = None) -> dict[st
         "mode": cfg.get("mode", "live"),
         "created_at": meta.created_at,
         "last_active": meta.last_active or meta.created_at,
-        "preview": _transcript_preview(meta),
         "speaks": _transcript_speaks(meta),
         "life": life,
         "gateway": gateway,
