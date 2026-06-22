@@ -44,10 +44,12 @@ from ..tools.gateway import ToolGateway
 from .transcript import TranscriptStore
 from ..content.worldinfo import apply_macros
 from ..content.knobs import (
+    DEFAULT_PATIENCE,
     normalize_embodiment,
     normalize_force_roleplay,
     normalize_website,
     parse_patience,
+    patience_is_explicit,
 )
 
 _log = get_logger("agent")
@@ -352,26 +354,28 @@ class LunaMothAgent:
     def patience_resolved(self) -> "tuple[float, str]":
         """The base pause between spontaneous cycles AND where it came from
         ('operator' | 'card' | 'default'). This is the ONE place the
-        operator > card > 600 precedence (incl. the `abs(x-600)` explicit-source
-        rule) is computed — every caller (`effective_patience`, `/patience`)
-        reads this instead of re-deriving the source bit itself.
+        operator > card > default precedence is computed — every caller
+        (`effective_patience`, `/patience`) reads this instead of re-deriving the
+        source bit itself. The default value + the explicit-source rule are
+        single-sourced in `knobs.{DEFAULT_PATIENCE,patience_is_explicit}`.
 
-        Settings.patience defaults to 600; the companion `patience_override` bit
-        preserves precedence when the operator explicitly sets 600, while still
-        letting a card default win over a bare, untouched Settings() default."""
-        raw = getattr(self.settings, "patience", 600.0)
+        Settings.patience defaults to DEFAULT_PATIENCE; the companion
+        `patience_override` bit preserves precedence when the operator explicitly
+        sets the default value, while still letting a card default win over a bare,
+        untouched Settings() default."""
+        raw = getattr(self.settings, "patience", DEFAULT_PATIENCE)
         override = parse_patience(raw)
         explicit = bool(getattr(self.settings, "patience_override", False))
-        if override is not None and (explicit or abs(override - 600.0) > 1e-9):
+        if override is not None and (explicit or patience_is_explicit(override)):
             return override, "operator"
         if self.character is not None:
             card = parse_patience(self.character.defaults().get("patience"))
             if card is not None:
                 return card, "card"
-        return (override if override is not None else 600.0), "default"
+        return (override if override is not None else DEFAULT_PATIENCE), "default"
 
     def effective_patience(self) -> float:
-        """Base seconds between spontaneous cycles: operator > card > 600."""
+        """Base seconds between spontaneous cycles: operator > card > default."""
         return self.patience_resolved()[0]
 
     def effective_embodiment(self) -> str:

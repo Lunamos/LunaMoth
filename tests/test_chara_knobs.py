@@ -94,6 +94,18 @@ def test_patience_parses_positive_numerics_only():
     assert parse_patience("garbage") is None
 
 
+def test_patience_is_explicit_single_sources_the_default_rule():
+    from lunamoth.content.knobs import DEFAULT_PATIENCE, patience_is_explicit
+
+    assert DEFAULT_PATIENCE == 600.0
+    # the bare default is NOT explicit (so a card default can still win)…
+    assert patience_is_explicit(DEFAULT_PATIENCE) is False
+    # …but any other positive value is.
+    assert patience_is_explicit(42.0) is True
+    assert patience_is_explicit(900.0) is True
+    assert patience_is_explicit(0) is False
+
+
 def test_card_patience_precedence_and_command_persists(agent_factory, tmp_path):
     from lunamoth.core import commands
 

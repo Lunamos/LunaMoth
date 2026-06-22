@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import ROOT, LLMConfig
+from ..content.knobs import DEFAULT_PATIENCE, patience_is_explicit
 
 
 # Runtime config lives in the project, NOT inside the sandbox (the sandbox is
@@ -195,9 +196,10 @@ class Settings:
     max_tool_steps: int = 80
     # Base seconds between spontaneous cycles. Card defaults may
     # supply this; operator commands/env/config persist an override.
-    patience: float = 600.0
-    # Internal source bit: distinguishes the default 600 from an operator
-    # intentionally setting 600, so card defaults can still win when unset.
+    patience: float = DEFAULT_PATIENCE
+    # Internal source bit: distinguishes the bare default from an operator
+    # intentionally setting the default value, so card defaults can still win
+    # when unset.
     patience_override: bool = False
     # Embodiment stance override. Empty means respect the card, then literal.
     # literal = tools are the chara's own hands; actor = tools are backstage.
@@ -418,8 +420,7 @@ def load_settings() -> Settings:
                     try:
                         data[k] = _coerce(k, v)
                         if k == "patience" and "patience_override" not in file_data:
-                            parsed = float(data[k])
-                            if parsed > 0 and abs(parsed - 600.0) > 1e-9:
+                            if patience_is_explicit(float(data[k])):
                                 data["patience_override"] = True
                     except (TypeError, ValueError):
                         pass

@@ -54,6 +54,22 @@ def _lang(lang: str) -> str:
     return "zh" if str(lang).startswith("zh") else "en"
 
 
+# The bare default base-pause between spontaneous cycles (seconds). A numeric
+# patience that differs from this is treated as an explicit operator setting, so a
+# card default can still win when the operator never touched it. The ONE definition
+# of both the default and the "is it explicit?" rule — agent.patience_resolved and
+# settings.load both read these instead of hard-coding the literal / the abs() test.
+DEFAULT_PATIENCE = 600.0
+
+
+def patience_is_explicit(value: float) -> bool:
+    """True when a numeric patience differs from the bare DEFAULT_PATIENCE — i.e.
+    the operator intentionally chose a non-default value (so it outranks a card
+    default). The companion `patience_override` flag separately records an explicit
+    set of the default value ITSELF; this catches an explicit non-default at load."""
+    return value > 0 and abs(value - DEFAULT_PATIENCE) > 1e-9
+
+
 def parse_patience(value: Any) -> float | None:
     """Parse a card/command patience value in seconds.
 
