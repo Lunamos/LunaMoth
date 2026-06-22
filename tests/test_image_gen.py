@@ -207,6 +207,56 @@ def test_handler_custom_path(monkeypatch, tmp_path, sandbox, mock_network):
 
 
 # ---------------------------------------------------------------------------
+# reference images — the chara hands over PATHS; the tool reads + encodes them
+# into the data-URI refs the image API guides on (so it can appear in shot).
+# ---------------------------------------------------------------------------
+def test_reference_images_resolved_to_data_uris(monkeypatch, tmp_path, sandbox):
+    _key_present(monkeypatch, tmp_path)
+    captured: dict = {}
+    grab = lambda *a, **k: (captured.update(k), _FAKE_PNG)[1]  # noqa: E731
+    monkeypatch.setattr(_image_gen, "generate_bytes", grab)
+    monkeypatch.setattr(media, "generate_bytes", grab)
+    (sandbox.workspace_dir / "uploads").mkdir(parents=True, exist_ok=True)
+    (sandbox.workspace_dir / "uploads" / "me.png").write_bytes(_FAKE_PNG)
+    ctx = GenCtx(sandbox, network=True)
+    out = json.loads(media.generate_image(
+        {"prompt": "a selfie", "reference_images": ["uploads/me.png"]}, ctx))
+    assert out["status"] == "submitted"
+    evt = _wait_event(ctx)
+    assert evt["status"] == "ready"
+    refs = captured.get("refs")
+    assert isinstance(refs, list) and len(refs) == 1
+    assert refs[0].startswith("data:image/png;base64,")
+
+
+def test_reference_image_missing_path_is_error(monkeypatch, tmp_path, sandbox):
+    _key_present(monkeypatch, tmp_path)
+    ctx = GenCtx(sandbox, network=True)
+    out = json.loads(media.generate_image(
+        {"prompt": "x", "reference_images": ["uploads/nope.png"]}, ctx))
+    # a missing ref is validated SYNCHRONOUSLY → a visible error, never a submit
+    assert "error" in out and "not found" in out["error"].lower()
+    assert out.get("status") != "submitted"
+
+
+def test_reference_image_traversal_is_error(monkeypatch, tmp_path, sandbox):
+    _key_present(monkeypatch, tmp_path)
+    ctx = GenCtx(sandbox, network=True)
+    out = json.loads(media.generate_image(
+        {"prompt": "x", "reference_images": ["../secret.png"]}, ctx))
+    assert "error" in out and out.get("status") != "submitted"
+
+
+def test_non_image_reference_is_error(monkeypatch, tmp_path, sandbox):
+    _key_present(monkeypatch, tmp_path)
+    (sandbox.workspace_dir / "notes.txt").write_bytes(b"not an image")
+    ctx = GenCtx(sandbox, network=True)
+    out = json.loads(media.generate_image(
+        {"prompt": "x", "reference_images": ["notes.txt"]}, ctx))
+    assert "error" in out and out.get("status") != "submitted"
+
+
+# ---------------------------------------------------------------------------
 # R7 confinement — the saved file ALWAYS stays under sandbox/workspace
 # ---------------------------------------------------------------------------
 def test_traversal_path_stays_in_workspace(monkeypatch, tmp_path, sandbox, mock_network):
