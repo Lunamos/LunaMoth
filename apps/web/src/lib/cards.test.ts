@@ -167,6 +167,31 @@ describe("serializeCardFields", () => {
     expect("user_name" in data.extensions!.lunamoth!).toBe(false);
   });
 
+  it("REGRESSION (data-loss): undefined core fields PRESERVE the card, never blank it", () => {
+    // The card editor's 设定/世界 panes unmount when another tab (e.g. 视觉) is open, so
+    // their refs are null and value() is undefined. Saving from the 视觉 tab once wiped
+    // the whole soul; the serializer must now leave every undefined field untouched.
+    const data: CardData = {
+      name: "Quinn",
+      description: "a tidy intern",
+      personality: "warm, precise",
+      scenario: "an office",
+      first_mes: "hello!",
+      character_book: { name: "Quinn", entries: [{ keys: ["desk"], content: "a quiet room" }] },
+      extensions: { lunamoth: { polaris: "ship it", tagline: "keeper of records" } },
+    };
+    // every field undefined = nothing on this surface was edited (e.g. saved from 视觉)
+    serializeCardFields(data, {}, "fallback");
+    expect(data.name).toBe("Quinn");
+    expect(data.description).toBe("a tidy intern");
+    expect(data.personality).toBe("warm, precise");
+    expect(data.scenario).toBe("an office");
+    expect(data.first_mes).toBe("hello!");
+    expect(data.character_book?.entries?.length).toBe(1);
+    expect(data.extensions!.lunamoth!.polaris).toBe("ship it");
+    expect(data.extensions!.lunamoth!.tagline).toBe("keeper of records");
+  });
+
   it("writes data.creator_notes when provided, preserves it when undefined", () => {
     const withNotes = { ...baseFields(), creator_notes: "a note" };
     const d1: CardData = {};

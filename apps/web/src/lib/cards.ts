@@ -171,20 +171,23 @@ export function putSection(draft: Partial<NormalizedDraft>, key: string, text: s
  *  it never shows. This is the data-safety contract that lets BOTH save paths share
  *  this one serializer without clobbering fields they don't render. */
 export interface CardFields {
-  name: string;
-  description: string;
-  personality: string;
-  scenario: string;
-  first_mes: string;
-  tagline: string;
-  /** Wishes, one per line (textContent of the wishes field). */
-  goals: string;
+  // Every field follows the same contract: undefined = NOT edited by this surface
+  // (preserve the card's current value); "" = clear/delete; a value = set. This is
+  // what makes it safe to save from a tab whose editors aren't mounted — an absent
+  // editor sends undefined, never a blank that would wipe the soul.
+  name?: string;
+  description?: string;
+  personality?: string;
+  scenario?: string;
+  first_mes?: string;
+  tagline?: string;
+  /** Polaris / north-star text (textContent of the field). */
+  goals?: string;
   /** World book, in the "keys — content [constant]" line form. */
-  world: string;
-  /** undefined = not edited by this surface (preserve); "" = delete; value = set. */
+  world?: string;
   user_name?: string;
   user_persona?: string;
-  /** data.creator_notes (NOT under lunamoth); undefined = not edited (preserve). */
+  /** data.creator_notes (NOT under lunamoth). */
   creator_notes?: string;
 }
 
@@ -210,11 +213,11 @@ export function serializeCardFields(
   fields: CardFields,
   charName: string,
 ): CardData {
-  data.name = fields.name.trim() || charName;
-  data.description = fields.description;
-  data.personality = fields.personality;
-  data.scenario = fields.scenario;
-  data.first_mes = fields.first_mes;
+  if (fields.name !== undefined) data.name = fields.name.trim() || charName;
+  if (fields.description !== undefined) data.description = fields.description;
+  if (fields.personality !== undefined) data.personality = fields.personality;
+  if (fields.scenario !== undefined) data.scenario = fields.scenario;
+  if (fields.first_mes !== undefined) data.first_mes = fields.first_mes;
   if (fields.creator_notes !== undefined) data.creator_notes = fields.creator_notes;
   data.extensions = data.extensions || {};
   const lm = (data.extensions.lunamoth = data.extensions.lunamoth || {});
@@ -228,28 +231,34 @@ export function serializeCardFields(
   setOrDel("user_name", fields.user_name);
   setOrDel("user_persona", fields.user_persona);
   setOrDel("tagline", fields.tagline);
-  // Polaris: a single north-star string (the field may span lines; stored as one).
-  const polaris = fields.goals.trim();
-  if (polaris) lm.polaris = polaris;
-  else delete lm.polaris;
   delete lm.wishes; // the old chara-mutable lists are gone
   delete lm.goals;
-  const tmp: Partial<NormalizedDraft> = {};
-  putSection(tmp, "world_entries", fields.world);
-  const entries = (tmp.world_entries || []).map((w, i) => ({
-    keys: w.keys,
-    content: w.content,
-    constant: w.constant,
-    enabled: true,
-    insertion_order: i,
-  }));
-  if (entries.length || (data.character_book && data.character_book.name)) {
-    data.character_book = {
-      name: (data.character_book && data.character_book.name) || data.name,
-      entries,
-    };
-  } else {
-    delete data.character_book;
+  // Polaris: a single north-star string (the field may span lines; stored as one).
+  if (fields.goals !== undefined) {
+    const polaris = fields.goals.trim();
+    if (polaris) lm.polaris = polaris;
+    else delete lm.polaris;
+  }
+  // World book — only rebuilt when the world editor was actually present. undefined
+  // (its tab wasn't open) preserves the card's existing character_book untouched.
+  if (fields.world !== undefined) {
+    const tmp: Partial<NormalizedDraft> = {};
+    putSection(tmp, "world_entries", fields.world);
+    const entries = (tmp.world_entries || []).map((w, i) => ({
+      keys: w.keys,
+      content: w.content,
+      constant: w.constant,
+      enabled: true,
+      insertion_order: i,
+    }));
+    if (entries.length || (data.character_book && data.character_book.name)) {
+      data.character_book = {
+        name: (data.character_book && data.character_book.name) || data.name,
+        entries,
+      };
+    } else {
+      delete data.character_book;
+    }
   }
   return data;
 }

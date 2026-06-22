@@ -135,28 +135,38 @@ export function CardEditor({
     if (!full.raw) return;
     setSaving(true);
     try {
-      const data = (full.raw.data = (full.raw.data as CardData) || {});
-      // The card editor edits the soul + visuals notes; it deliberately does NOT
-      // render user_name/user_persona, so they're left undefined (preserve).
-      // serializeCardFields is the ONE tested serializer (shared with the wake
-      // sheet) — no hand-rolled lunamoth/world-book assembly here.
+      // Re-read the LATEST card from disk first: the 视觉/表情 tab writes art straight
+      // to the card file (avatar_upload / asset_save / stickers_save), so our mount-time
+      // copy is stale on assets — saving it would drop freshly-generated images.
+      let raw = full.raw;
+      try {
+        const fresh = await hub.call<FullCard>("card.read", { path: card.path }, 20000);
+        if (fresh && fresh.raw) raw = fresh.raw;
+      } catch {
+        /* re-read failed — fall back to the in-memory copy */
+      }
+      const data = (raw.data = (raw.data as CardData) || {});
+      // Pass a field ONLY when its editor is mounted. The 设定/世界 panes unmount when
+      // another tab is open, so their refs are null → value() is undefined → the
+      // serializer PRESERVES the card's current value. This is what stops a save from
+      // the 视觉 tab blanking the soul/world (the data-loss bug). "" still clears.
       serializeCardFields(
         data,
         {
-          name: fName.current?.value() ?? "",
-          description: fDesc.current?.value() ?? "",
-          personality: fPers.current?.value() ?? "",
-          scenario: fScen.current?.value() ?? "",
-          first_mes: fFirst.current?.value() ?? "",
-          creator_notes: fNotes.current?.value() ?? "",
-          tagline: fTagline.current?.value() ?? "",
-          goals: fGoals.current?.value() ?? "",
-          world: fWorld.current?.value() ?? "",
+          name: fName.current?.value(),
+          description: fDesc.current?.value(),
+          personality: fPers.current?.value(),
+          scenario: fScen.current?.value(),
+          first_mes: fFirst.current?.value(),
+          creator_notes: fNotes.current?.value(),
+          tagline: fTagline.current?.value(),
+          goals: fGoals.current?.value(),
+          world: fWorld.current?.value(),
         },
-        full.name || "",
+        (raw.name as string) || full.name || "",
       );
-      full.raw.name = data.name as string;
-      await hub.call("card.save", { data: full.raw, path: card.path }, 20000);
+      raw.name = data.name as string;
+      await hub.call("card.save", { data: raw, path: card.path }, 20000);
       deckToast(t("saved"));
       onClose();
       onChanged();
