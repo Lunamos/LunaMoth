@@ -1632,7 +1632,7 @@ details.cv-raw pre{
 .fr-tert:hover{color:var(--text-2)}
 
 /* ---------- 推荐角色转盘（character select, R8） ---------- */
-.bp-host{width:min(1040px,95vw); display:flex; flex-direction:column; align-items:center}
+.bp-host{width:min(1200px,96vw); display:flex; flex-direction:column; align-items:center}
 /* The picker's content (bp-host) is wider than a normal .wide modal — let the
    modal box size to it instead of clipping it (higher specificity than .sheet.wide
    so it wins regardless of order). */
@@ -1654,7 +1654,11 @@ body.dark .bp-close{background:rgba(255,255,255,.08); color:var(--text-2)}
 .bp-grid{
   flex:0 0 100%; display:grid; grid-template-columns:repeat(4,1fr); gap:16px; padding:4px;
 }
-@media (max-width:720px){.bp-grid{grid-template-columns:repeat(2,1fr)}}
+/* Drop to a clean 2×2 well before tiles get small enough to clip the hover
+   description — 4 across only when the window is genuinely wide. (Each page has
+   4 cards, so 3 columns would wrap unevenly; 2 keeps the grid even + the tiles
+   big.) */
+@media (max-width:1080px){.bp-grid{grid-template-columns:repeat(2,1fr)}}
 /* The cell stacks the avatar ABOVE the portrait box, sitting just clear of it
    (a small positive margin-bottom) rather than overlapping — an overlap covered
    the tile's top edge. */
