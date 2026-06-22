@@ -27,12 +27,20 @@ from . import matte as _matte
 # --- the brief LLM contract (ported from visuals/cardbrief.py) ----------------
 
 BRIEF_SYSTEM = (
-    "You are a world-class character designer for premium anime gacha games (miHoYo Genshin Impact / "
-    "Honkai: Star Rail, Hypergryph Arknights). You read a character card and translate its identity, "
-    "personality and lore into a concrete, DRAWABLE visual brief that an illustrator could execute "
-    "directly. Your north star: the design must be INSTANTLY MEMORABLE — give the character a strong, "
-    "readable silhouette and one or two unmistakable signature visual hooks that make them recognizable "
-    "at a glance.\n\n"
+    "You are a world-class character designer and art director. You read a character card and translate "
+    "its identity, personality and lore into a concrete, DRAWABLE visual brief that an illustrator could "
+    "execute directly. Your north star: the design must be INSTANTLY MEMORABLE — give the character a "
+    "strong, readable silhouette and one or two unmistakable signature visual hooks that make them "
+    "recognizable at a glance.\n\n"
+    "CHOOSE THE RENDERING STYLE THAT FITS THIS CHARACTER. Your DEFAULT, recommended look is a polished "
+    "anime gacha illustration — miHoYo Genshin Impact / Honkai: Star Rail quality, Hypergryph Arknights "
+    "aesthetic, clean confident lineart, expressive cel shading — and most characters read beautifully "
+    "that way, so lean toward it unless the card pulls you elsewhere. When the character genuinely calls "
+    "for a different medium (grounded modern, historical, noir, horror, painterly, storybook, comic, or "
+    "photoreal), render them in the style that actually fits (e.g. cinematic photorealism, oil painting, "
+    "ink wash, flat vector, watercolor, pixel art, 3D render); if the card names or implies a medium, era, "
+    "or genre, honor it over the default. You are the judge of style — start from the anime default and "
+    "depart from it only with a real reason in the card.\n\n"
     "PRINCIPLES:\n"
     "- Stay strictly in-character. Mine the card for concrete, specific details and honor them exactly: "
     "named institutions and their real insignia, specific accessories, signature props, clothing styles, "
@@ -44,22 +52,32 @@ BRIEF_SYSTEM = (
     "- Be specific and rich: name materials, textures, trims, patterns, hardware, layering, footwear, "
     "hairstyle particulars, eye color, and the exact signature item(s). Avoid generic filler.\n\n"
     "Output STRICT JSON only — no markdown, no commentary — with exactly these keys:\n"
-    '  "appearance": 4-7 detailed English sentences describing the canonical look for a full-body anime '
+    '  "appearance": 4-7 detailed English sentences describing the canonical look for a full-body '
     "illustration: apparent age and build, gender presentation (respect the card; if gender-neutral, make "
     "it a deliberate androgynous design), hairstyle/color, eyes, skin/markings, the FULL layered outfit "
     "with specific colors/materials/trims, footwear, and the SIGNATURE props/accessories/weapon that make "
     "the character iconic. End with a short clause naming the single most memorable visual hook. Describe "
-    "only what an artist would draw — no name, no backstory prose.\n"
+    "only what an artist would draw — no name, no backstory prose, no rendering technique (that goes in "
+    '"style").\n'
+    '  "style": ONE rich English phrase naming the rendering style you chose for THIS character and that '
+    "an image model can act on — the medium and technique, linework/shading, lighting, finish and quality "
+    'cues (e.g. "polished anime gacha illustration, clean lineart, cel shading, soft rim light, ultra '
+    'detailed" OR "cinematic photorealistic portrait, 50mm, soft key light, fine skin detail" OR '
+    '"painterly storybook gouache, warm and hand-made"). Choose it to fit the character, not a fixed house '
+    "look. This phrase drives every image the pipeline makes.\n"
     '  "palette": a short phrase like "color palette of X, Y and Z" naming 3-4 key colors (include the '
     "signature accent).\n"
     '  "world": one vivid English sentence describing an establishing environment that embodies the '
     "character's world, suitable as a visual-novel / chat background, with NO people.\n"
     '  "theme": a single #RRGGBB hex string for the character\'s primary signature color.\n'
-    "The house art style (anime gacha rendering) is added later by the pipeline; describe the CHARACTER "
-    "and their world, not the rendering technique."
+    "Describe the CHARACTER, their world, and the fitting style — the pipeline composes the final "
+    "per-image prompt from these fields."
 )
 
-# --- the house art style + per-kind prompt craft (ported from genviz.py) ------
+# --- per-kind prompt craft (ported from genviz.py) ----------------------------
+# STYLE_REAL / CHIBI are now only DEFAULTS: used when the brief's LM-chosen
+# ``style`` is absent (an older cached brief, or a model that skipped the field).
+# A style-aware brief always wins, so the chara is no longer locked to anime.
 
 STYLE_REAL = (
     "official gacha mobile game character art, miHoYo Genshin Impact / Honkai: Star Rail "
@@ -75,12 +93,31 @@ CHIBI = (
 )
 WHITE_BG = ("a clean flat pure white seamless studio background (#FFFFFF), evenly lit, no colored "
             "light, no cast shadow on the floor")
+GREEN = ("a perfectly flat solid chroma-key green screen background (pure #00d000 green), no green "
+         "color anywhere on the character")
+
+# Standardized 9-expression set (3x3), fixed left-to-right / top-to-bottom order. Ported
+# from the dev pipeline so a sticker sheet is always sliceable into the same nine emotes.
+EXPR9 = [
+    "calm neutral default face",
+    "a warm happy smile",
+    "laughing cheerfully, eyes closed",
+    "crying with teary eyes, sad",
+    "angry with puffed cheeks",
+    "wide-eyed surprised and shocked",
+    "shy and blushing, glancing away",
+    "making a hand-heart, affectionate",
+    "a cheerful thumbs up, approving",
+]
 
 # kind → generation spec. ``matte`` is the default cutout preference for that kind
 # (a full-body sprite wants a transparent cut; a tinted-background avatar does not).
+# ``grid`` (stickers only) marks a sheet that is sliced into rows*cols cells.
 KINDS: dict[str, dict] = {
+    "keyvisual": {"size": "4096x2304", "matte": False},
     "avatar": {"size": "1920x1920", "matte": False},
     "sprite": {"size": "1664x2496", "matte": True},
+    "stickers": {"size": "2304x2304", "matte": True, "grid": (3, 3)},
     "background": {"size": "2304x1280", "matte": False},
 }
 
@@ -131,7 +168,7 @@ def build_brief(card: dict, llm_call: Callable[[str, str], str]) -> dict:
     ct = card_theme(card)
     if ct:
         brief["theme"] = ct
-    for k in ("appearance", "palette", "world", "theme"):
+    for k in ("appearance", "style", "palette", "world", "theme"):
         brief.setdefault(k, "")
     return brief
 
@@ -153,19 +190,44 @@ _EXT_MIME = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}
 
 def prompt_for(kind: str, brief: dict) -> str:
     a, pal = brief.get("appearance", ""), brief.get("palette", "")
+    # The LM-chosen rendering style drives every image. Fall back to the polished
+    # anime house look ONLY when the brief omitted a style (older briefs / a model
+    # that skipped the field), so a style-aware brief is never overridden — this is
+    # what unlocks realistic / painterly / other looks instead of forcing 二次元.
+    style = (brief.get("style") or "").strip()
+    if kind == "keyvisual":
+        # The settei / identity-reference sheet. Generated FIRST; its image is then
+        # reused as the reference for the other kinds so the character stays one person.
+        return (f"A character settei / key-visual reference sheet of ONE single character on a clean "
+                f"off-white sheet. {a}. {pal}. {style or STYLE_REAL}. Lay out, clearly separated: one "
+                f"large full-body standing pose; a clean FRONT / SIDE / BACK three-view turnaround; one "
+                f"dynamic action pose; a small study of the signature props/accessories; and a row of "
+                f"color swatches for the key palette. Identical character design, outfit and colors in "
+                f"every panel, coherent lighting, crisp and highly detailed. This sheet is the canonical "
+                f"identity reference for all of the character's other art.")
+    if kind == "stickers":
+        expr = "; ".join(f"{i+1}) {e}" for i, e in enumerate(EXPR9))
+        return (f"ONE single image: a perfectly even 3x3 grid of 9 chibi expression stickers of the SAME "
+                f"character. {a}. {CHIBI}. Nine cells, each cell exactly the same size with uniform even "
+                f"spacing and clear gutters, one clear distinct expression per cell, in this exact order "
+                f"(left to right, top to bottom): {expr}. Each is a die-cut sticker with a thick clean "
+                f"white outline and a subtle drop shadow. {GREEN}. Consistent character across all 9 "
+                f"cells, same colors and design. No text captions.")
     if kind == "avatar":
-        return (f"A cute app avatar icon: chibi bust portrait of the character. {a}. {CHIBI}. "
-                f"Close-up of head and shoulders, friendly warm expression, facing the viewer, centered. "
+        look = style or CHIBI
+        return (f"A clean app avatar icon: bust portrait of the character, head and shoulders, "
+                f"friendly warm expression, facing the viewer, centered. {a}. {look}. "
                 f"Simple smooth background of a soft gradient tinted {brief.get('theme', '') or '#888'} "
                 f"with a faint sparkle. Iconic and clean, no text.")
     if kind == "sprite":
         return (f"A single full-body character standing illustration (full-body character art). {a}. {pal}. "
                 f"One elegant three-quarter standing pose, the whole body from head to toe fully inside the "
-                f"frame, looking at the viewer, confident relaxed posture. {STYLE_REAL}. {WHITE_BG}, "
+                f"frame, looking at the viewer, confident relaxed posture. {style or STYLE_REAL}. {WHITE_BG}, "
                 f"no cast shadow, no extra props, no text, no border, centered with generous margin.")
     if kind == "background":
+        render = style or "atmospheric painterly anime game background"
         return (f"Wide environment background art, visual-novel / chat-app backdrop. Scene: "
-                f"{brief.get('world', '')}. Atmospheric painterly anime game background, soft depth of field. "
+                f"{brief.get('world', '')}. Rendered to match the character art ({render}), soft depth of field. "
                 f"Keep the CENTER open and uncluttered for overlaying chat bubbles, detail pushed to the edges. "
                 f"No characters, no people, no text, no logos.")
     raise ValueError(f"unknown visual kind: {kind}")
@@ -215,9 +277,18 @@ def generate(
         # Real path: dispatch to the active provider's adapter (validates bytes).
         data = _image_gen.generate_bytes(prompt, KINDS[kind]["size"], refs=refs)
 
+    want = KINDS[kind].get("matte", False) if matte is None else bool(matte)
+
+    # stickers: one sheet → slice into the grid → cut each cell → a LIST of PNGs.
+    grid = KINDS[kind].get("grid")
+    if grid:
+        rows, cols = grid
+        cells, matted, note = _slice_and_cut(data, rows, cols, want)
+        return {"stickers": cells, "mime": "image/png", "ext": "png",
+                "brief": brief, "kind": kind, "matted": matted, "note": note}
+
     matted = False
     note = ""
-    want = KINDS[kind]["matte"] if matte is None else bool(matte)
     if want:
         mid = _matte.selected_model()
         if _matte.deps_available() and _matte.is_installed(mid):
@@ -230,3 +301,42 @@ def generate(
     ext = "png" if matted else _ext_of(data)
     return {"data": data, "mime": _EXT_MIME.get(ext, "image/png"), "ext": ext,
             "brief": brief, "kind": kind, "matted": matted, "note": note}
+
+
+def _slice_and_cut(sheet: bytes, rows: int, cols: int, want_matte: bool) -> tuple[list[bytes], bool, str]:
+    """Slice a grid sheet into rows*cols cells, cut each to a transparent PNG, and
+    compress to the sticker cap. Prefers the semantic matte model; falls back to a
+    chroma-key (the sheet is generated on flat green) when no model is installed —
+    so stickers still come out keyed without the heavy ``visuals`` extra. Every
+    step is best-effort per cell: a cell that can't be cut is kept as-is."""
+    from ..content import imaging as _imaging
+
+    cells = _imaging.slice_grid(sheet, rows, cols)
+    mid = _matte.selected_model()
+    use_matte = want_matte and _matte.deps_available() and _matte.is_installed(mid)
+    out: list[bytes] = []
+    matted = False
+    for c in cells:
+        if use_matte:
+            try:
+                c = _matte.cut(c, model_id=mid)
+                matted = True
+            except Exception:  # noqa: BLE001 — fall back to chroma-key for this cell
+                try:
+                    c = _matte.chroma_key(c)
+                except Exception:  # noqa: BLE001
+                    pass
+        else:
+            try:
+                c = _matte.chroma_key(c)
+            except Exception:  # noqa: BLE001 — keep the raw cell if keying fails
+                pass
+        try:
+            c = _imaging.compress_image_bytes(c, "png", _imaging.CAP_STICKER)
+        except Exception:  # noqa: BLE001
+            pass
+        out.append(c)
+    note = "" if use_matte else (
+        "stickers were cut with the chroma-key fallback — install a matte model in "
+        "Settings·生图 for cleaner cutouts.")
+    return out, matted, note
