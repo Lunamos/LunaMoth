@@ -238,7 +238,7 @@ def test_image_worker_blocks_when_net_off(monkeypatch):
 def test_image_worker_runs_when_net_on(monkeypatch):
     from lunamoth.tools.builtin import media
 
-    monkeypatch.setattr(media, "generate_bytes", lambda prompt, size: b"PNGDATA")
+    monkeypatch.setattr(media, "generate_bytes", lambda prompt, size, refs=None: b"PNGDATA")
 
     class _OkCtx:
         def network_on(self):
