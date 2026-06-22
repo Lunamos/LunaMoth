@@ -64,12 +64,31 @@ def test_permanent_http_error_surfaces_immediately(monkeypatch, no_sleep):
             super().__init__("https://x.test", 401, "unauthorized", {}, None)
 
         def read(self):
-            return b'{"error": "bad key"}'
+            # OpenRouter's confusing wording for an unrecognized key.
+            return b'{"error": {"message": "User not found.", "code": 401}}'
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: (_ for _ in ()).throw(Fake401()))
     gen = _client()._connect_with_retry("https://x.test/v1/chat/completions", b"{}", 1)
-    with pytest.raises(RuntimeError, match="HTTP 401"):
+    with pytest.raises(RuntimeError) as exc:
         _drive(gen)  # no retries for auth errors — surface NOW
+    msg = str(exc.value)
+    assert "HTTP 401" in msg
+    # the bug: it used to dump the raw body verbatim. Now it must EXPLAIN it
+    # (a key problem), while still quoting the provider's own words as context.
+    assert "API key" in msg and "User not found." in msg
+
+
+def test_explain_http_error_classifies_not_dumps():
+    from lunamoth.core.llm import _explain_http_error
+
+    auth = _explain_http_error(401, '{"error":{"message":"User not found.","code":401}}')
+    assert "API key" in auth and 'User not found.' in auth
+    assert _explain_http_error(401, "x") != "HTTP 401: x"          # never a raw dump
+    assert "credit" in _explain_http_error(402, '{"error":{"message":"no funds"}}')
+    assert "model" in _explain_http_error(404, '{"error":"nope"}').lower()
+    assert "rate limited" in _explain_http_error(429, "").lower()
+    # an unparseable body still yields a clean, prefixed line (no crash)
+    assert _explain_http_error(500, "<html>oops</html>").startswith("HTTP 500:")
 
 
 # ---- jittered backoff + Retry-After (audit #5) ------------------------------------------

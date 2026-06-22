@@ -42,6 +42,47 @@ _IMAGE_TOO_LARGE_MARKERS = (
 )
 
 
+def _provider_error_message(body: str) -> str:
+    """The provider's own human message, dug out of the common JSON error shapes
+    ({"error":{"message":…}} / {"error":"…"} / {"message":…}). Falls back to the
+    raw body. Never raises."""
+    try:
+        data = json.loads(body)
+    except (ValueError, TypeError):
+        return (body or "").strip()
+    if isinstance(data, dict):
+        err = data.get("error")
+        if isinstance(err, dict):
+            return str(err.get("message") or err.get("code") or "").strip()
+        if isinstance(err, str):
+            return err.strip()
+        if data.get("message"):
+            return str(data["message"]).strip()
+    return (body or "").strip()
+
+
+def _explain_http_error(code: int, body: str) -> str:
+    """One honest, human line for a permanent provider HTTP error — never a raw
+    JSON dump. Leads with what it MEANS / what to do, then quotes the provider's
+    own message as context. (A 401 "User not found" from OpenRouter, for instance,
+    means the API key is unrecognized — not that a user account is missing.)"""
+    msg = _provider_error_message(body)[:200]
+    if code in (401, 403):
+        lead = "the model provider rejected the API key — it's invalid, revoked, or unrecognized; check the provider key in Settings"
+    elif code == 402:
+        lead = "the model provider reports the account is out of credit"
+    elif code == 404:
+        lead = "the model wasn't found — check the model id for this provider"
+    elif code == 429:
+        lead = "rate limited by the model provider — try again shortly"
+    elif 500 <= code < 600:
+        lead = "the model provider had a server error"
+    else:
+        lead = "the model provider returned an error"
+    tail = f' (provider said: "{msg}")' if msg else ""
+    return f"HTTP {code}: {lead}{tail}"
+
+
 def _is_image_too_large(detail: str) -> bool:
     """True when a provider error reads as an oversized-image rejection."""
     d = (detail or "").lower()
@@ -685,7 +726,7 @@ class LLMClient:
                             yield Notice("retry", "⚠ image too large — shrinking and retrying")
                             continue
                     _log.info("permanent HTTP error from %s: %s %s", url, e.code, detail[:200])
-                    raise RuntimeError(f"HTTP {e.code}: {detail}") from e
+                    raise RuntimeError(_explain_http_error(e.code, detail)) from e
                 if e.code == 429:
                     retry_after = _parse_retry_after(getattr(e, "headers", None))
                 err = f"HTTP {e.code}: {detail[:120]}"
@@ -859,10 +900,9 @@ class LLMClient:
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-        # OpenRouter recommends these; harmless elsewhere.
-        if "openrouter.ai" in (base_url or ""):
-            headers["HTTP-Referer"] = "https://github.com/Lunamos/LunaMoth"
-            headers["X-Title"] = "LunaMoth"
+        # OpenRouter app attribution (name + icon); scoped to openrouter.ai.
+        from ..config import openrouter_attribution_headers
+        headers.update(openrouter_attribution_headers(base_url))
         return headers
 
     def test_connection(self, timeout: float = 20.0) -> tuple[bool, str]:
@@ -893,7 +933,7 @@ class LLMClient:
             return True, f"OK — reached {self.cfg.base_url} as model '{model}'"
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", errors="replace")[:300]
-            return False, f"HTTP {e.code}: {detail}"
+            return False, _explain_http_error(e.code, detail)
         except urllib.error.URLError as e:
             return False, f"connection failed: {e.reason}"
         except Exception as e:  # noqa: BLE001 - surface anything to the operator
