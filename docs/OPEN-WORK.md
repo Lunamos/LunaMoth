@@ -25,7 +25,7 @@ history. The one deliberately-unbuilt item, **worth remembering**:
   load-bearing for the audit trail's ordering. Revisit only if throughput becomes a
   real problem.
 
-## Structural root-causes — still open
+## Structural root-causes — landed (kept as a record)
 
 The 2026-06-16 diagnosis catalogued a family of drift bugs (Smell A: one fact owned
 in several places that drift; Smell B: distinct meanings collapsed into one flag).

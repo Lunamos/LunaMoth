@@ -566,7 +566,12 @@ into the session's card, key stripped.)
 - **Isolation** per chara: `admin` / `sandbox` (default) — two modes only (the
   per-chara `docker` mode was DELETED 2026-06-18; legacy `dir`/`local`/`docker`
   session values normalize to `admin`). `admin` (formerly `dir`) = no jail,
-  full-machine read/write at the user's privileges. Network is ON by default
+  full-machine read/write at the user's privileges. The mode is picked at wake (a
+  plain 沙盒 on/off switch — `admin` = off) and is now ALSO switchable post-wake via
+  the `chara.set_isolation` RPC (the chat settings 沙盒 toggle): like the prompt
+  modules it writes the session config and applies on the chara's NEXT process start
+  — `LUNAMOTH_PY_BACKEND` is pinned at launch, so isolation is never hot-swapped under
+  a running chara; turning the sandbox OFF is confirm-gated. Network is ON by default
   (`/net off` to disable; `/net on` re-enables). The `sandbox` jail is
   an isolation LADDER (`session/isolation.py` + `tools/runner.py`): native OS jail
   (sandbox-exec on macOS, bwrap on Linux) → **Landlock LSM** (Linux ≥5.13, the
