@@ -46,7 +46,12 @@ IMAGE_PROVIDERS: list[dict[str, Any]] = [
         "domains": ("volces.com",),
         "key_provider": "volcano",
         "models": [
-            {"id": "Doubao-Seedream-5.0-lite", "label": "Doubao Seedream 5.0 Lite"},
+            # Ark wants the lowercase-hyphen model id (e.g. doubao-seedream-4-0-250828),
+            # NOT the display name — a display-name id ("Doubao-Seedream-5.0-lite") is
+            # rejected by Ark as an unknown model (the "连接模型失败" the user hit).
+            # Order: 4.5 > 5.0 Lite > 4.0.
+            {"id": "doubao-seedream-4-5-251128", "label": "Doubao Seedream 4.5"},
+            {"id": "doubao-seedream-5-0-lite-260128", "label": "Doubao Seedream 5.0 Lite"},
             {"id": "doubao-seedream-4-0-250828", "label": "Doubao Seedream 4.0"},
         ],
     },
