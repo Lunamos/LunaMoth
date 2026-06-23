@@ -74,6 +74,18 @@ def _copy_card_assets(card: "CharacterCard", dest_dir: Path, src_base: Path | No
         v = a.get(key)
         if isinstance(v, list):
             rels += [s for s in v if isinstance(s, str)]
+    # Extra (non-managed) image assets beside the card travel with it too — the card
+    # editor's 素材 tab manages these; carry them so a woken chara keeps its references.
+    _EXTRA_IMG = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+    try:
+        for p in sorted(base.iterdir()):
+            if (p.is_file() and not p.name.startswith(".")
+                    and p.suffix.lower() in _EXTRA_IMG
+                    and p.name not in ("card.png",)
+                    and not _is_asset_sidecar(p)):
+                rels.append(p.name)
+    except OSError:
+        pass
     for rel in rels:
         rel = rel.strip().replace("\\", "/")
         if not rel or rel.startswith("/") or ".." in rel.split("/"):

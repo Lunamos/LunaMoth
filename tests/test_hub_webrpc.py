@@ -879,6 +879,43 @@ def test_card_patch_merges_field_preserving_rest():
     assert rpc_error("card.patch", {"path": builtin, "fields": {"description": "x"}})["code"] in (-32031, -32035)
 
 
+def test_card_asset_library_list_upload_delete():
+    # The 素材 tab: extra images beside the card (NOT the managed art) are listed,
+    # uploadable, deletable — and never shadow a managed sidecar or card meta file.
+    import base64 as b64m
+    set_defaults()
+    card = _make_user_card("AssetLib")
+    folder = Path(card).parent
+    # a managed sidecar + a stray extra image are both on disk
+    (folder / f"{Path(card).stem}.sprite.deadbeef.png").write_bytes(_PNG_1PX)
+    (folder / "reference.png").write_bytes(_PNG_1PX)
+    listed = result("card.assets_list", {"path": card})["assets"]
+    names = {a["name"] for a in listed}
+    assert "reference.png" in names                       # stray extra image shows
+    assert not any(".sprite." in n for n in names)        # managed art excluded
+    assert "card.json" not in names                       # card meta excluded
+    assert all(a["url"].startswith("/asset?") for a in listed)
+    # upload a new asset
+    up = result("card.asset_file_upload",
+                {"path": card, "name": "Mood Board!", "data_b64": b64m.b64encode(_PNG_1PX).decode(), "ext": "png"})
+    assert up["name"] == "mood-board.png" and (folder / up["name"]).is_file()
+    # a tricky name can never become a managed-sidecar name (the slug strips the dots)
+    safe = result("card.asset_file_upload",
+                  {"path": card, "name": "my.sprite.thing", "data_b64": b64m.b64encode(_PNG_1PX).decode(), "ext": "png"})
+    assert not any(m in safe["name"] for m in (".sprite.", ".avatar.", ".keyvisual.", ".background.", ".sticker."))
+    assert safe["name"].endswith(".png")
+    # re-uploading the same name dedups with a -1 suffix
+    dup = result("card.asset_file_upload",
+                 {"path": card, "name": "mood board", "data_b64": b64m.b64encode(_PNG_1PX).decode(), "ext": "png"})
+    assert dup["name"] == "mood-board-1.png"
+    # delete; traversal / managed names refused
+    result("card.asset_file_delete", {"path": card, "name": "reference.png"})
+    assert not (folder / "reference.png").exists()
+    assert rpc_error("card.asset_file_delete", {"path": card, "name": "../card.json"})["code"] == -32602
+    assert rpc_error("card.asset_file_delete",
+                     {"path": card, "name": f"{Path(card).stem}.sprite.deadbeef.png"})["code"] == -32602
+
+
 def test_set_aspiration_writes_live_store_and_card():
     # 理想/aspiration: the live polaris.json (next turn) + the frozen card field (next wake).
     meta = wake_session()

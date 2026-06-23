@@ -171,6 +171,12 @@ class HubDispatcher:
             "card.sticker_remove": lambda p: _avatars.sticker_remove(str(p.get("path") or ""), str(p.get("name") or "")),
             "card.sticker_rename": lambda p: _avatars.sticker_rename(str(p.get("path") or ""), str(p.get("old") or ""), str(p.get("new") or "")),
             "card.sticker_reslice": self._card_sticker_reslice,
+            "card.assets_list": lambda p: _avatars.assets_list(str(p.get("path") or "")),
+            "card.asset_file_upload": lambda p: _avatars.asset_file_upload(
+                str(p.get("path") or ""), str(p.get("name") or ""),
+                str(p.get("data_b64") or ""), str(p.get("ext") or "")),
+            "card.asset_file_delete": lambda p: _avatars.asset_file_delete(
+                str(p.get("path") or ""), str(p.get("name") or "")),
             "card.asset_delete": lambda p: _avatars.asset_delete(str(p.get("path") or ""), str(p.get("kind") or "")),
             "card.avatar_read": lambda p: _avatars.avatar_read(str(p.get("path") or "")),
             "cards.list": lambda p: _cards.list_cards(),

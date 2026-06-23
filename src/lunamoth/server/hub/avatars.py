@@ -539,6 +539,111 @@ def sticker_rename(path: str, old: str, new: str) -> dict[str, Any]:
             "files": lst, "urls": [_asset_url(_rel(target, n)) for n in lst]}
 
 
+# ---- generic card-asset library (extra images beside the card) ----------------
+# A card FOLDER may hold extra images (references, alternates, mood boards) that are
+# NOT one of the managed kinds (avatar/sprite/keyvisual/background/stickers). These
+# travel with the card and are viewable/uploadable/deletable in the card editor's
+# 素材 tab. Listing EXCLUDES the managed sidecars + card meta files; raster images
+# only (what the /asset route can actually serve from a card/session folder).
+_CARD_META_NAMES = {"card.json", "card.png", "card_source"}
+_EXTRA_IMG_EXTS = ("png", "jpg", "jpeg", "webp", "gif")
+_EXTRA_MAGIC = {**_ART_MAGIC, "gif": b"GIF8"}
+_EXTRA_MAX_BYTES = 16 * 1024 * 1024
+
+
+def _is_managed_sidecar_name(name: str) -> bool:
+    low = name.lower()
+    return any(m in low for m in (".avatar.", ".sprite.", ".keyvisual.",
+                                  ".background.", ".sticker.", ".sticker_sheet."))
+
+
+def _is_extra_asset(p: Path) -> bool:
+    """A user 'extra' card asset: a raster image beside the card that is NOT a managed
+    art sidecar, a card meta file, a license, or hidden."""
+    if not p.is_file() or p.name.startswith("."):
+        return False
+    if p.name in _CARD_META_NAMES or p.name.lower().startswith("license"):
+        return False
+    if p.suffix.lower().lstrip(".") not in _EXTRA_IMG_EXTS:
+        return False
+    return not _is_managed_sidecar_name(p.name)
+
+
+def _extra_looks_like(raw: bytes, ext: str) -> bool:
+    if ext == "webp":
+        return len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"
+    magic = _EXTRA_MAGIC.get(ext)
+    return not magic or raw.startswith(magic)
+
+
+def assets_list(path: str) -> dict[str, Any]:
+    """List the card's EXTRA image assets (everything in the card folder that isn't a
+    managed art sidecar or a card meta file). Writable cards only (deck + a chara's own
+    session card)."""
+    target = _writable_card_path(path)
+    out: list[dict[str, Any]] = []
+    for p in sorted(target.parent.iterdir()):
+        if _is_extra_asset(p):
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            out.append({"name": p.name, "size": st.st_size, "mtime": st.st_mtime,
+                        "url": _asset_url(p)})
+    return {"path": str(target), "assets": out}
+
+
+def asset_file_upload(path: str, name: str, data_b64: str, ext: str) -> dict[str, Any]:
+    """Add an extra image asset to the card folder (png/jpg/jpeg/webp/gif, ≤16MB). The
+    name is sanitized + deduped; a name that would collide with a managed sidecar or a
+    card meta file is replaced with a safe one, so this can never shadow the real art."""
+    target = _writable_card_path(path)
+    ext = str(ext or "").strip().lower().lstrip(".")
+    if ext not in _EXTRA_IMG_EXTS:
+        raise RpcError(-32602, f"unsupported asset type: .{ext} (allowed: {', '.join(_EXTRA_IMG_EXTS)})")
+    try:
+        raw = base64.b64decode(str(data_b64 or ""), validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise RpcError(-32602, f"asset data is not valid base64: {exc}") from exc
+    if not raw:
+        raise RpcError(-32602, "asset data is empty")
+    if len(raw) > _EXTRA_MAX_BYTES:
+        raise HubRpcError(-32602, "asset is too large (max 16MB)",
+                          {"kind": "asset_size", "detail": f"{len(raw)} bytes"})
+    if not _extra_looks_like(raw, ext):
+        raise HubRpcError(-32602, f"the file does not look like a .{ext} image",
+                          {"kind": "asset_type", "detail": "magic-byte mismatch"})
+    stem = re.sub(r"[^a-z0-9]+", "-", Path(str(name or "")).stem.lower()).strip("-") or "asset"
+    fname = f"{stem}.{ext}"
+    if _is_managed_sidecar_name(fname) or fname in _CARD_META_NAMES:
+        fname = f"asset-{uuid.uuid4().hex[:8]}.{ext}"
+    dst = target.parent / fname
+    i = 1
+    while dst.exists():
+        fname = f"{stem}-{i}.{ext}"
+        dst = target.parent / fname
+        i += 1
+    dst.write_bytes(raw)
+    return {"path": str(target), "name": fname, "size": len(raw), "url": _asset_url(dst)}
+
+
+def asset_file_delete(path: str, name: str) -> dict[str, Any]:
+    """Delete one extra card asset (re-validated as a listable image beside the card;
+    traversal / managed sidecars / card meta files are refused)."""
+    target = _writable_card_path(path)
+    name = str(name or "").strip()
+    if not name or "/" in name or "\\" in name:
+        raise RpcError(-32602, "invalid asset name")
+    p = target.parent / name
+    if not _is_extra_asset(p):
+        raise RpcError(-32602, f"not a deletable card asset: {name}")
+    try:
+        p.unlink()
+    except OSError as exc:
+        raise HubRpcError(-32050, f"delete failed: {exc}", {"kind": "asset_delete"}) from exc
+    return {"path": str(target), "removed": name}
+
+
 def visual_brief_save(path: str, brief: dict) -> dict[str, Any]:
     """Persist the visual brief on the card (``extensions.lunamoth.visual_brief``) so
     it's REUSED instead of re-generated (the brief is an LLM call). Writable cards
