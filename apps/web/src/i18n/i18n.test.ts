@@ -57,8 +57,9 @@ describe("I18N strings map", () => {
   // iso-admin-confirm) → 594. Then the wake sheet's isolation picker became a plain
   // on/off 沙盒 switch (like the other wake toggles): removed 5 (wake-iso, iso-dir,
   // iso-sandbox, iso-dir-d, iso-sandbox-d), added wake-iso-sub → 590.
-  it("preserves the full key set from the source dict (590 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(590);
+  // The visuals editor's "write the brief first" gate added vis-need-brief → 591.
+  it("preserves the full key set from the source dict (591 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(591);
   });
 
   it("every value is a [zh, en] string tuple", () => {

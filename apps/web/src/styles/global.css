@@ -1377,7 +1377,15 @@ details.cv-raw pre{
 .vis-slot-acts{display:flex; gap:7px; flex-wrap:wrap}
 .vis-stage{margin-top:8px}
 .vis-stage-acts{display:flex; gap:7px; margin-top:8px}
-.vis-all{margin-top:18px; padding-top:16px; border-top:1px solid var(--hairline-2)}
+/* The "generate the brief + every image" action, sitting just under the brief —
+   a soft tinted card with a full-width primary button so it reads as the main
+   one-tap path (it's prettier + more prominent than the old bottom row). */
+.vis-genall{margin:0 0 16px; padding:14px; border-radius:12px;
+  background:color-mix(in srgb, var(--accent) 8%, var(--panel)); border:1px solid var(--hairline-2);
+  display:flex; flex-direction:column; align-items:stretch; gap:7px}
+.vis-genall-btn{width:100%; justify-content:center; font-weight:600; padding-block:9px}
+.vis-genall-note{font-size:11.5px; color:var(--text-3); text-align:center}
+.vis-need-brief-note{margin-bottom:10px; color:var(--text-2)}
 .av-note.err{color:var(--red)}
 .av-note.thinking{color:var(--text-2); display:inline-flex; align-items:center; gap:7px}
 .av-note.thinking::before{

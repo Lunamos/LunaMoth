@@ -190,7 +190,11 @@ export function VisualEditor({
     let live = true;
     void hub
       .call<{ deps?: boolean; models?: { installed?: boolean }[] }>("matte.status", {}, 15000)
-      .then((s) => { if (live) setMatteReady(!!(s.deps && (s.models || []).some((m) => m.installed))); })
+      // "ready" = a cutout model is INSTALLED (downloaded). We don't gate the hint on
+      // deps_available() — that can read false until the freshly-installed deps import
+      // (a process restart), and the user has clearly done their part once a model is
+      // downloaded; a deps gap just falls back to an un-matted result with a note.
+      .then((s) => { if (live) setMatteReady((s.models || []).some((m) => !!m.installed)); })
       .catch(() => { if (live) setMatteReady(null); });
     return () => { live = false; };
   }, [wantsCut, hasImageKey, hub]);
@@ -237,6 +241,12 @@ export function VisualEditor({
       setGenAllBusy(false);
     }
   };
+
+  // A per-slot generate needs the shared image brief first (the description every
+  // image is drawn from). Until it exists, the per-slot 生成 buttons are disabled
+  // with a "write the brief first" hint; 一键全部生成 builds the brief itself, so
+  // it stays enabled.
+  const hasBrief = !!(brief && String(brief.appearance || "").trim());
 
   return (
     <div className="vis-editor">
@@ -315,6 +325,21 @@ export function VisualEditor({
         </div>
       )}
 
+      {/* One prominent action right under the brief: write the brief AND generate
+          every image in one go. (Moved up from the bottom of the editor.) */}
+      {hasImageKey && orderedGenKinds.length > 0 && (
+        <div className="vis-genall">
+          <button
+            className="btn primary vis-genall-btn"
+            disabled={disabled || genAllBusy}
+            onClick={() => void generateAll()}
+          >
+            {genAllBusy ? <span className="spin" /> : t("vis-gen-all", { n: orderedGenKinds.length })}
+          </button>
+          <div className="vis-genall-note">{t("vis-gen-all-cost", { n: orderedGenKinds.length })}</div>
+        </div>
+      )}
+
       <div className="vis-ref-sec">
         <h4>{t("vis-ref-title")}</h4>
         <div className="av-note">{t("vis-ref-sub")}</div>
@@ -346,6 +371,9 @@ export function VisualEditor({
         />
       </div>
 
+      {hasImageKey && !hasBrief && !disabled && (
+        <div className="av-note vis-need-brief-note">{t("vis-need-brief")}</div>
+      )}
       <div className="vis-slots">
         {kinds.map((kind) => (
           <VisualSlot
@@ -356,6 +384,7 @@ export function VisualEditor({
             initSet={kind === "stickers" ? (card.stickers_urls || []).map((u) => assetUrl(String(u))) : []}
             disabled={disabled}
             canGenerate={hasImageKey && !!GENERATABLE[kind]}
+            hasBrief={hasBrief}
             getBrief={() => loadBrief(false)}
             getRefs={refData}
             hubCall={hub.call.bind(hub)}
@@ -370,16 +399,6 @@ export function VisualEditor({
         ))}
       </div>
 
-      {orderedGenKinds.length > 0 && (
-        <div className="vis-all">
-          <button className="btn primary" disabled={disabled || genAllBusy || !hasImageKey} onClick={() => void generateAll()}>
-            {genAllBusy ? <span className="spin" /> : t("vis-gen-all", { n: orderedGenKinds.length })}
-          </button>
-          <div className="av-note" style={{ marginTop: 6 }}>
-            {t("vis-gen-all-cost", { n: orderedGenKinds.length })}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -391,6 +410,7 @@ function VisualSlot({
   initSet,
   disabled,
   canGenerate,
+  hasBrief,
   getBrief,
   getRefs,
   hubCall,
@@ -406,6 +426,7 @@ function VisualSlot({
   initSet: string[];
   disabled: boolean;
   canGenerate: boolean;
+  hasBrief: boolean;
   getBrief: () => Promise<Brief>;
   getRefs: () => string[];
   hubCall: HubCall;
@@ -542,8 +563,8 @@ function VisualSlot({
       <div className="vis-slot-acts">
         <button
           className="btn soft sm"
-          disabled={disabled || busy || !canGenerate}
-          title={canGenerate ? undefined : t("vis-need-key")}
+          disabled={disabled || busy || !canGenerate || !hasBrief}
+          title={!canGenerate ? t("vis-need-key") : !hasBrief ? t("vis-need-brief") : undefined}
           onClick={() => void generate().catch(() => {})}
         >
           {t("vis-generate")}
