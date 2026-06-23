@@ -23,6 +23,7 @@ directly with newline-delimited JSON-RPC and zero new dependencies):
 from __future__ import annotations
 
 import atexit
+import base64
 import json
 import os
 import queue
@@ -33,6 +34,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from ..config import ROOT, SANDBOX_ROOT
+from ..core.redact import redact_sensitive_text
 from ..obs import get_logger
 from .schema_sanitizer import sanitize_input_schema
 
@@ -80,9 +82,12 @@ class McpError(RuntimeError):
 class _Client:
     """One stdio MCP server: lazy spawn, line-delimited JSON-RPC, per-client lock."""
 
-    def __init__(self, name: str, config: dict[str, Any]):
+    def __init__(self, name: str, config: dict[str, Any], media_dir: Path | None = None):
         self.name = name
         self.config = config
+        # Where image/binary result blocks land so the chara can surface them
+        # (MEDIA:<workspace path>). The chara's workspace by default.
+        self.media_dir = Path(media_dir) if media_dir is not None else (SANDBOX_ROOT / "workspace")
         self.proc: subprocess.Popen | None = None
         self.lock = threading.Lock()
         self._id = 0
@@ -201,7 +206,7 @@ class _Client:
             if "error" in msg:
                 err = msg["error"]
                 _log.warning("server %r returned an error for %s: %s", self.name, method, err)
-                raise McpError(f"mcp {self.name}: {err.get('message', err)}")
+                raise McpError(redact_sensitive_text(f"mcp {self.name}: {err.get('message', err)}"))
             return msg.get("result", {})
 
     def _timeout_kill(self, method: str, timeout: float) -> NoReturn:
@@ -249,24 +254,53 @@ class _Client:
             self._ensure_started()
             result = self._rpc("tools/call", {"name": tool, "arguments": arguments}, timeout=_CALL_TIMEOUT)
         parts = []
-        for block in result.get("content", []):
-            if block.get("type") == "text":
+        for i, block in enumerate(result.get("content", [])):
+            btype = block.get("type")
+            if btype == "text":
                 parts.append(str(block.get("text", "")))
+            elif btype in ("image", "audio") and block.get("data"):
+                # Don't drop binary content: write it to the workspace and tell the
+                # model to surface it (the agent's MEDIA: filter renders it). Same
+                # shape as the browser screenshot path.
+                saved = self._save_media(block, tool, i)
+                parts.append(saved or f"[{btype} content omitted]")
             else:
-                parts.append(f"[{block.get('type', 'non-text')} content omitted]")
+                parts.append(f"[{btype or 'non-text'} content omitted]")
         text = "\n".join(parts) or "(empty result)"
+        # MCP servers run OUTSIDE the chara's jail; never let their output leak a
+        # credential shape into the model's context.
+        text = redact_sensitive_text(text)
         if result.get("isError"):
             raise McpError(text[:1000])
         if len(text) > _RESULT_CAP:
             text = text[:_RESULT_CAP] + f"\n[output truncated — {len(text)} chars total]"
         return text
 
+    def _save_media(self, block: dict[str, Any], tool: str, idx: int) -> str | None:
+        """Decode a base64 image/audio result block to the workspace; return a
+        MEDIA: note (workspace-relative) the chara can echo, or None on failure."""
+        try:
+            data = base64.b64decode(block.get("data", ""), validate=True)
+        except (ValueError, TypeError):
+            return None
+        mime = str(block.get("mimeType") or "")
+        ext = mime.split("/")[-1].split(";")[0].strip() or ("png" if block.get("type") == "image" else "bin")
+        rel = f"mcp/{self.name}-{tool}-{idx}.{ext}"
+        try:
+            out = self.media_dir / rel
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(data)
+        except OSError:
+            return None
+        return f"[{block.get('type')} saved to {rel} — show the user with MEDIA:{rel}]"
+
 
 class McpManager:
     """All configured servers; tool names are mcp__<server>__<tool>."""
 
-    def __init__(self, config_dir: Path | None = None):
+    def __init__(self, config_dir: Path | None = None, media_dir: Path | None = None):
         self.servers = load_config(config_dir)
+        self.media_dir = media_dir
         self._clients: dict[str, _Client] = {}
         atexit.register(self.close_all)
 
@@ -274,7 +308,7 @@ class McpManager:
         if server not in self.servers:
             raise McpError(f"no mcp server named {server!r} configured")
         if server not in self._clients:
-            self._clients[server] = _Client(server, self.servers[server])
+            self._clients[server] = _Client(server, self.servers[server], media_dir=self.media_dir)
         return self._clients[server]
 
     def allowed_servers(self, pack_entries: "list[str] | None") -> list[str]:

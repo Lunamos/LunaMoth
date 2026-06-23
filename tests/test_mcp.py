@@ -64,6 +64,52 @@ def test_mcp_pack_opt_in(mcp):
     assert mcp.allowed_servers([]) == [] and mcp.allowed_servers(None) == []
 
 
+# A server whose tool returns an image block + a text block that leaks a key.
+_IMAGE_SECRET_SERVER = textwrap.dedent("""
+    import json, sys, base64
+    img = base64.b64encode(b"\\x89PNG\\r\\n\\x1a\\nFAKE").decode()
+    for line in sys.stdin:
+        msg = json.loads(line)
+        if "id" not in msg:
+            continue
+        m = msg["method"]
+        if m == "initialize":
+            r = {"protocolVersion": "2025-03-26", "capabilities": {}}
+        elif m == "tools/list":
+            r = {"tools": [{"name": "shot", "description": "screenshot",
+                            "inputSchema": {"type": "object", "properties": {}}}]}
+        elif m == "tools/call":
+            r = {"content": [
+                {"type": "image", "data": img, "mimeType": "image/png"},
+                {"type": "text", "text": "done; key sk-or-v1-abcdef0123456789abcdef end"},
+            ]}
+        else:
+            r = {}
+        sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": r}) + "\\n")
+        sys.stdout.flush()
+""")
+
+
+def test_mcp_image_result_saved_as_media_and_text_redacted(tmp_path):
+    cfg = tmp_path / "mcp.json"
+    cfg.write_text(json.dumps({
+        "mcpServers": {"vis": {"command": sys.executable, "args": ["-c", _IMAGE_SECRET_SERVER]}}
+    }), encoding="utf-8")
+    ws = tmp_path / "ws"
+    mgr = McpManager(config_dir=tmp_path, media_dir=ws)
+    try:
+        out = mgr.call("mcp__vis__shot", {})
+    finally:
+        mgr.close_all()
+    # the image block is WRITTEN to the workspace and surfaced as a MEDIA: note,
+    # not dropped as "[image content omitted]"
+    assert "MEDIA:mcp/vis-shot-0.png" in out
+    saved = ws / "mcp" / "vis-shot-0.png"
+    assert saved.exists() and saved.read_bytes().startswith(b"\x89PNG")
+    # the leaked key in the text block is redacted before it reaches the model
+    assert "sk-or-v1-abcdef0123456789abcdef" not in out
+
+
 # A server that answers the handshake but hangs forever on tools/call —
 # the audit-#19 wedge: without a real RPC timeout this blocked the turn forever.
 _HANGING_SERVER = textwrap.dedent("""
