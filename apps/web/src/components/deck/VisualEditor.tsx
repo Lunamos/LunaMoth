@@ -242,6 +242,19 @@ export function VisualEditor({
 
   const slotApi = useRef<Partial<Record<VisKind, (() => Promise<void>) | null>>>({});
   const [genAllBusy, setGenAllBusy] = useState(false);
+  // master/detail: one kind shown at a time, picked via the segmented selector.
+  const [sel, setSel] = useState<VisKind>(kinds[0]);
+  // per-kind generating flag (the amber dot) — reported by each panel; panels stay
+  // mounted (hidden) so a background generation keeps running when you switch kinds.
+  const [busyKinds, setBusyKinds] = useState<Partial<Record<VisKind, boolean>>>({});
+  const setKindBusy = (k: VisKind, b: boolean) =>
+    setBusyKinds((cur) => (cur[k] === b ? cur : { ...cur, [k]: b }));
+  const kindHasArt = (k: VisKind): boolean =>
+    k === "avatar" ? !!avatarSrc(card)
+    : k === "sprite" ? !!card.sprite_url
+    : k === "keyvisual" ? !!card.keyvisual_url
+    : k === "background" ? !!card.bg_url
+    : (card.stickers_urls || []).length > 0;
 
   const genKinds = kinds.filter((k) => GENERATABLE[k]);
   // Anchor (keyvisual) first so the rest reference it (the backend reads the saved one).
@@ -277,6 +290,10 @@ export function VisualEditor({
   // with a "write the brief first" hint; 一键全部生成 builds the brief itself, so
   // it stays enabled.
   const hasBrief = !!(brief && String(brief.appearance || "").trim());
+  const recipeSummary = brief
+    ? [brief.style, brief.palette, brief.appearance]
+        .map((x) => String(x || "").trim()).filter(Boolean).join(" · ")
+    : "";
 
   return (
     <div className="vis-editor">
@@ -306,13 +323,24 @@ export function VisualEditor({
 
       {hasImageKey && (
         <div className="vis-brief-sec">
-          <div className="vis-brief-head">
-            <h4>{t("vis-brief-title")}</h4>
-            <button className="btn text sm" disabled={disabled} onClick={toggleBrief}>
-              {briefOpen ? t("vis-brief-hide") : t("vis-brief-edit")}
+          {/* the 配方/recipe bar — collapsed it's a one-line summary; expanding edits
+              the fields. When empty it pulses to point the way (the generation gate). */}
+          <div className={"vis-recipe" + (hasBrief ? "" : " need")}>
+            <span className="vis-recipe-chev" onClick={!disabled ? toggleBrief : undefined}>
+              {briefOpen ? "▾" : "▸"}
+            </span>
+            <span className="vis-recipe-sum" onClick={!disabled ? toggleBrief : undefined}>
+              <b>{t("vis-brief-title")}</b>
+              {hasBrief ? ` · ${recipeSummary}` : ` — ${t("vis-recipe-need")}`}
+            </span>
+            <button
+              className={"btn sm " + (hasBrief ? "text" : "primary")}
+              disabled={disabled || briefBusy}
+              onClick={() => void loadBrief(true).catch(() => {})}
+            >
+              {briefBusy ? <span className="spin" /> : hasBrief ? t("vis-brief-rebuild") : t("vis-recipe-gen")}
             </button>
           </div>
-          <div className="av-note">{t("vis-brief-sub")}</div>
           {briefOpen && (
             <div className="vis-brief-body">
               {briefBusy && !brief ? (
@@ -338,15 +366,6 @@ export function VisualEditor({
                       )}
                     </label>
                   ))}
-                  <div className="vis-brief-acts">
-                    <button
-                      className="btn soft sm"
-                      disabled={disabled || briefBusy}
-                      onClick={() => void loadBrief(true).catch(() => {})}
-                    >
-                      {briefBusy ? <span className="spin" /> : t("vis-brief-rebuild")}
-                    </button>
-                  </div>
                   {briefErr && <div className="av-note err">{briefErr}</div>}
                 </>
               )}
@@ -401,43 +420,59 @@ export function VisualEditor({
         />
       </div>
 
-      {hasImageKey && !hasBrief && !disabled && (
-        <div className="av-note vis-need-brief-note">{t("vis-need-brief")}</div>
-      )}
-      <div className="vis-slots">
+      {/* kind selector — one detail panel at a time; the dot shows status:
+          green = has art, amber-pulse = generating, grey = empty. */}
+      <div className="vis-seg">
         {kinds.map((kind) => (
-          <VisualSlot
+          <button
             key={kind}
-            kind={kind}
-            cardName={String(card.name || "")}
-            cardPath={cardPath}
-            initUrl={initUrlFor(kind, card)}
-            initOptions={optionsFor(kind, card)}
-            initSet={kind === "stickers" ? (card.stickers_urls || []).map((u) => assetUrl(String(u))) : []}
-            initSheets={kind === "stickers" ? (card.sticker_sheets_urls || []).map((u) => assetUrl(String(u))) : []}
-            disabled={disabled}
-            canGenerate={hasImageKey && !!GENERATABLE[kind]}
-            hasBrief={hasBrief}
-            getBrief={() => loadBrief(false)}
-            getRefs={refData}
-            hubCall={hub.call.bind(hub)}
-            refreshHub={refresh}
-            onChanged={onChanged}
-            onGenerated={() => { if (kind === "keyvisual") setHasKeyvisual(true); }}
-            onFixMatte={() => nav("#/settings")}
-            t={t}
-            registerGenerate={(fn) => {
-              slotApi.current[kind] = fn;
-            }}
-          />
+            className={"vis-seg-btn" + (sel === kind ? " on" : "")}
+            onClick={() => setSel(kind)}
+          >
+            {t(("vis-kind-" + kind) as Parameters<TFn>[0])}
+            <span
+              className={"vis-seg-dot" + (busyKinds[kind] ? " gen" : kindHasArt(kind) ? "" : " empty")}
+            />
+          </button>
         ))}
       </div>
 
+      {/* Panels stay mounted (hidden unless selected) so a background generation keeps
+          running and its dot stays amber when you browse another kind. */}
+      {kinds.map((kind) => (
+        <VisualSlot
+          key={kind}
+          active={sel === kind}
+          kind={kind}
+          cardName={String(card.name || "")}
+          cardPath={cardPath}
+          initUrl={initUrlFor(kind, card)}
+          initOptions={optionsFor(kind, card)}
+          initSet={kind === "stickers" ? (card.stickers_urls || []).map((u) => assetUrl(String(u))) : []}
+          initSheets={kind === "stickers" ? (card.sticker_sheets_urls || []).map((u) => assetUrl(String(u))) : []}
+          disabled={disabled}
+          canGenerate={hasImageKey && !!GENERATABLE[kind]}
+          hasBrief={hasBrief}
+          getBrief={() => loadBrief(false)}
+          getRefs={refData}
+          hubCall={hub.call.bind(hub)}
+          refreshHub={refresh}
+          onChanged={onChanged}
+          onGenerated={() => { if (kind === "keyvisual") setHasKeyvisual(true); }}
+          onBusy={(b) => setKindBusy(kind, b)}
+          onFixMatte={() => nav("#/settings")}
+          t={t}
+          registerGenerate={(fn) => {
+            slotApi.current[kind] = fn;
+          }}
+        />
+      ))}
     </div>
   );
 }
 
 function VisualSlot({
+  active,
   kind,
   cardName,
   cardPath,
@@ -454,10 +489,12 @@ function VisualSlot({
   refreshHub,
   onChanged,
   onGenerated,
+  onBusy,
   onFixMatte,
   t,
   registerGenerate,
 }: {
+  active: boolean;
   kind: VisKind;
   cardName: string;
   cardPath: string;
@@ -474,6 +511,7 @@ function VisualSlot({
   refreshHub: () => Promise<void>;
   onChanged: () => void;
   onGenerated: () => void;
+  onBusy: (b: boolean) => void;
   onFixMatte: () => void;
   t: TFn;
   registerGenerate: (fn: () => Promise<void>) => void;
@@ -488,6 +526,7 @@ function VisualSlot({
   // the selected filename. Selecting/removing/去背景 hit card.asset_* and update here.
   const [options, setOptions] = useState<string[]>(initOptions);
   const [selName, setSelName] = useState<string>(initUrl ? assetName(initUrl) : "");
+  const [view, setView] = useState(0);     // sticker browse index in the big preview
   const [busy, setBusy] = useState(false);
   const [busyMsg, setBusyMsg] = useState("");
   const [errText, setErrText] = useState("");
@@ -497,6 +536,11 @@ function VisualSlot({
   const [matteSkipped, setMatteSkipped] = useState(false);
   const wantsCut = isSet || kind === "sprite";
   const fileInput = useRef<HTMLInputElement>(null);
+  // Generation queue: clicking 新生成 repeatedly enqueues more (each a kept candidate),
+  // shown as spinning placeholders in the rail. genAll awaits `generate` directly.
+  const qRef = useRef(0);
+  const [qN, setQN] = useState(0);
+  const drainingRef = useRef(false);
 
   // Cache-bust so a regenerated asset at the SAME url actually re-renders.
   const bust = (u: string) => (u && u.startsWith("/") ? `${u}${u.includes("?") ? "&" : "?"}v=${Date.now()}` : u);
@@ -504,6 +548,12 @@ function VisualSlot({
   const setWorking = (msg: string) => { setBusy(true); setBusyMsg(msg); setErrText(""); };
   const setIdle = () => { setBusy(false); setBusyMsg(""); };
   const fail = (e: unknown) => { setBusy(false); setBusyMsg(""); setErrText(rpcErrText(t, e as { message?: string })); };
+
+  // Report busy (real op OR a queued generation) up so the kind dot pulses amber even
+  // when this (hidden) panel isn't the selected one. (ref so it's not a render dep.)
+  const onBusyRef = useRef(onBusy);
+  onBusyRef.current = onBusy;
+  useEffect(() => { onBusyRef.current(busy || qN > 0); }, [busy, qN]);
 
   // generate → the BACKEND auto-saves; we just reflect the saved result + refresh. If
   // the user leaves mid-generation the job still finishes and the card still updates.
@@ -549,6 +599,23 @@ function VisualSlot({
     }
   };
   registerGenerate(generate);
+
+  // Enqueue a generation (click 新生成 again to queue more); the drain runs them in turn.
+  const drain = async () => {
+    if (drainingRef.current) return;
+    drainingRef.current = true;
+    while (qRef.current > 0) {
+      await generate().catch(() => {});
+      qRef.current -= 1;
+      setQN(qRef.current);
+    }
+    drainingRef.current = false;
+  };
+  const enqueueGen = () => {
+    qRef.current += 1;
+    setQN(qRef.current);
+    void drain();
+  };
 
   const onUpload = async (f: File) => {
     const ext = (f.name.split(".").pop() || "").toLowerCase();
@@ -705,152 +772,177 @@ function VisualSlot({
   };
 
   const hasAnyImage = isSet ? curSet.length > 0 : !!curSrc;
+  const genDisabled = disabled || busy || !canGenerate || !hasBrief;
+  // browse indices for the big preview
+  const vi = curSet.length ? ((view % curSet.length) + curSet.length) % curSet.length : 0;
+  const selIdx = options.findIndex((u) => assetName(u) === selName);
+  const previewSrc = isSet ? (curSet[vi] || "") : curSrc;
+  const count = isSet ? curSet.length : options.length;
+  const browse = (d: number) => {
+    if (isSet) { if (curSet.length) setView((v) => v + d); return; }
+    if (!options.length) return;
+    const i = selIdx < 0 ? 0 : selIdx;
+    void selectCand(options[((i + d) % options.length + options.length) % options.length]);
+  };
 
   return (
-    <div className="vis-slot">
-      <div className="vis-slot-head">
-        <b>{t(("vis-kind-" + kind) as Parameters<TFn>[0])}</b>
-      </div>
-      {/* cut-kinds (sprite/stickers) want a transparent cut — a checkerboard makes
-          the result self-evident: a real cut floats on it, a white-bg fill covers it. */}
-      <div className={"vis-slot-preview" + (wantsCut ? " vis-checker" : "")}>
-        {isSet ? (
-          curSet.length > 0 ? (
-            <div className="vis-sticker-grid">
-              {curSet.map((src, i) => (
-                <div className="vis-sticker-cell" key={i}>
-                  <img src={src} alt="" />
-                  {!disabled && (
-                    <>
-                      <span
-                        className="vis-sticker-name"
-                        title={t("vis-rename")}
-                        onClick={() => void renameSticker(src)}
-                      >
-                        {stickerSlug(src) || "—"}
-                      </span>
-                      <button
-                        className="vis-cand-x"
-                        title={t("del-word")}
-                        disabled={busy}
-                        onClick={() => void removeSticker(src)}
-                      >
-                        ×
-                      </button>
-                    </>
-                  )}
+    <div className="vis-detail" style={active ? undefined : { display: "none" }}>
+      <div className="vis-stage">
+        <div className={"vis-preview" + (wantsCut ? " cut" : "")}>
+          {previewSrc ? (
+            <img src={previewSrc} alt="" />
+          ) : (
+            <span className="vis-preview-empty">{t("vis-empty")}</span>
+          )}
+          {count > 1 && (
+            <>
+              <button className="vis-arr l" onClick={() => browse(-1)} title="‹">‹</button>
+              <button className="vis-arr r" onClick={() => browse(1)} title="›">›</button>
+            </>
+          )}
+          {hasAnyImage && (
+            <span className="vis-badge">
+              {isSet
+                ? `${stickerSlug(curSet[vi]) || "—"} · ${vi + 1}/${curSet.length}`
+                : count > 1
+                  ? `${(selIdx < 0 ? 0 : selIdx) + 1}/${count}`
+                  : t(("vis-kind-" + kind) as Parameters<TFn>[0])}
+            </span>
+          )}
+        </div>
+        <div className="vis-acts">
+          <button
+            className="btn primary sm vis-gen-btn"
+            disabled={genDisabled}
+            title={!canGenerate ? t("vis-need-key") : !hasBrief ? t("vis-need-brief") : undefined}
+            onClick={enqueueGen}
+          >
+            {hasAnyImage ? t("vis-generate-more") : t("vis-generate")}
+          </button>
+          {isSet && (
+            <div className="vis-grid-pick" title={t("vis-grid-label")}>
+              {[1, 2, 3].map((n) => (
+                <button
+                  key={n}
+                  className={"vis-grid-btn" + (stickerGrid === n ? " on" : "")}
+                  disabled={disabled}
+                  onClick={() => setStickerGrid(n)}
+                >
+                  {n}×{n}
+                </button>
+              ))}
+            </div>
+          )}
+          <input
+            className="vis-extra"
+            value={extra}
+            disabled={disabled}
+            placeholder={t("vis-extra-ph")}
+            onChange={(e) => setExtra(e.target.value)}
+          />
+          {hasGallery && curSrc && (
+            <button className="btn soft sm" disabled={disabled || busy} onClick={() => void doMatte()}>
+              {t("vis-cut")}
+            </button>
+          )}
+          {!isSet && (
+            <button className="btn soft sm" disabled={disabled || busy} onClick={() => fileInput.current?.click()}>
+              {t("av-upload")}
+            </button>
+          )}
+          {!isSet && curSrc && (
+            <button className="btn text sm" disabled={busy} onClick={download}>
+              {t("vis-download")}
+            </button>
+          )}
+          {hasAnyImage && (
+            <button className="btn text sm" disabled={disabled || busy} onClick={() => void onDelete()}>
+              {t("del-word")}
+            </button>
+          )}
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const f = e.target.files && e.target.files[0];
+              e.target.value = "";
+              if (f) void onUpload(f);
+            }}
+          />
+        </div>
+        {isSet && sheets.length > 0 && (
+          <div className="vis-sheets">
+            <span className="vis-sheets-label">{t("vis-sheet-label")}</span>
+            <div className="vis-sheets-row">
+              {sheets.map((u) => (
+                <div className="vis-sheet" key={u}>
+                  <img src={u} alt="" />
+                  <button className="btn text sm" disabled={disabled || busy} onClick={() => void resliceSheet(u)}>
+                    {t("vis-reslice")}
+                  </button>
                 </div>
               ))}
             </div>
-          ) : (
-            <span className="vis-slot-empty">{t("vis-empty")}</span>
-          )
-        ) : curSrc ? (
-          <img src={curSrc} alt="" />
-        ) : (
-          <span className="vis-slot-empty">{t("vis-empty")}</span>
-        )}
-      </div>
-      {isSet && (
-        <div className="vis-grid-pick">
-          <span className="vis-grid-label">{t("vis-grid-label")}</span>
-          {[1, 2, 3].map((n) => (
-            <button
-              key={n}
-              className={"vis-grid-btn" + (stickerGrid === n ? " on" : "")}
-              disabled={disabled || busy}
-              onClick={() => setStickerGrid(n)}
-            >
-              {n}×{n}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="vis-slot-acts">
-        <button
-          className="btn soft sm"
-          disabled={disabled || busy || !canGenerate || !hasBrief}
-          title={!canGenerate ? t("vis-need-key") : !hasBrief ? t("vis-need-brief") : undefined}
-          onClick={() => void generate().catch(() => {})}
-        >
-          {isSet && curSet.length > 0 ? t("vis-generate-more") : t("vis-generate")}
-        </button>
-        <input
-          className="vis-extra"
-          value={extra}
-          disabled={disabled || busy}
-          placeholder={t("vis-extra-ph")}
-          onChange={(e) => setExtra(e.target.value)}
-        />
-        {!isSet && (
-          <button className="btn soft sm" disabled={disabled || busy} onClick={() => fileInput.current?.click()}>
-            {t("av-upload")}
-          </button>
-        )}
-        {hasGallery && curSrc && (
-          <button className="btn text sm" disabled={disabled || busy} onClick={() => void doMatte()}>
-            {t("vis-cut")}
-          </button>
-        )}
-        {!isSet && curSrc && (
-          <button className="btn text sm" disabled={busy} onClick={download}>
-            {t("vis-download")}
-          </button>
-        )}
-        {hasAnyImage && (
-          <button className="btn text sm" disabled={disabled || busy} onClick={() => void onDelete()}>
-            {t("del-word")}
-          </button>
-        )}
-        <input
-          ref={fileInput}
-          type="file"
-          accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
-          style={{ display: "none" }}
-          onChange={(e) => {
-            const f = e.target.files && e.target.files[0];
-            e.target.value = "";
-            if (f) void onUpload(f);
-          }}
-        />
-      </div>
-      {hasGallery && options.length > 0 && (
-        <div className="vis-cands">
-          {options.map((u) => {
-            const nm = assetName(u);
-            return (
-              <div key={u} className={"vis-cand" + (nm === selName ? " on" : "")} title={t("vis-cand-pick")}>
-                <img src={u} alt="" onClick={() => void selectCand(u)} />
-                <button className="vis-cand-x" title={t("del-word")} onClick={() => void removeCand(u)}>×</button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {isSet && sheets.length > 0 && (
-        <div className="vis-sheets">
-          <span className="vis-sheets-label">{t("vis-sheet-label")}</span>
-          <div className="vis-sheets-row">
-            {sheets.map((u) => (
-              <div className="vis-sheet" key={u}>
-                <img src={u} alt="" />
-                <button className="btn text sm" disabled={disabled || busy} onClick={() => void resliceSheet(u)}>
-                  {t("vis-reslice")}
-                </button>
-              </div>
-            ))}
           </div>
+        )}
+        {(busyMsg || errText) && (
+          <div className={errText ? "av-note err" : busy ? "av-note thinking" : "av-note"}>{errText || busyMsg}</div>
+        )}
+        {matteSkipped && !busy && !errText && (
+          <div className="vis-matte-skip">
+            <span className="vis-matte-skip-text">{t("vis-matte-skipped")}</span>
+            <button className="btn soft sm" onClick={onFixMatte}>{t("go-settings")}</button>
+          </div>
+        )}
+      </div>
+
+      <div className="vis-rail">
+        <h5>{t("vis-cand-title", { n: count })}</h5>
+        <div className={"vis-rail-grid" + (isSet ? " sticker" : "")}>
+          {isSet
+            ? curSet.map((u, i) => (
+                <div
+                  key={u}
+                  className={"vis-cand" + (wantsCut ? " cut" : "") + (i === vi ? " on" : "")}
+                  onClick={() => setView(i)}
+                >
+                  <img src={u} alt="" />
+                  {!disabled && (
+                    <>
+                      <span className="vis-cand-tag" title={t("vis-rename")}
+                        onClick={(e) => { e.stopPropagation(); void renameSticker(u); }}>
+                        {stickerSlug(u) || "—"}
+                      </span>
+                      <button className="vis-cand-x" title={t("del-word")} disabled={busy}
+                        onClick={(e) => { e.stopPropagation(); void removeSticker(u); }}>×</button>
+                    </>
+                  )}
+                </div>
+              ))
+            : options.map((u) => {
+                const nm = assetName(u);
+                return (
+                  <div key={u} className={"vis-cand" + (wantsCut ? " cut" : "") + (nm === selName ? " on" : "")}
+                    title={t("vis-cand-pick")} onClick={() => void selectCand(u)}>
+                    <img src={u} alt="" />
+                    {nm === selName && <span className="vis-cand-pick">✓</span>}
+                    {!disabled && (
+                      <button className="vis-cand-x" title={t("del-word")} disabled={busy}
+                        onClick={(e) => { e.stopPropagation(); void removeCand(u); }}>×</button>
+                    )}
+                  </div>
+                );
+              })}
+          {Array.from({ length: qN }, (_, i) => (
+            <div key={"busy" + i} className="vis-cand busy"><span className="spin" /></div>
+          ))}
+          {!disabled && canGenerate && hasBrief && (
+            <button className="vis-cand add" title={t("vis-generate-more")} onClick={enqueueGen}>＋</button>
+          )}
         </div>
-      )}
-      {(busyMsg || errText) && (
-        <div className={errText ? "av-note err" : busy ? "av-note thinking" : "av-note"}>{errText || busyMsg}</div>
-      )}
-      {matteSkipped && !busy && !errText && (
-        <div className="vis-matte-skip">
-          <span className="vis-matte-skip-text">{t("vis-matte-skipped")}</span>
-          <button className="btn soft sm" onClick={onFixMatte}>{t("go-settings")}</button>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

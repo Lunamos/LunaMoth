@@ -1429,6 +1429,71 @@ details.cv-raw pre{
 .vis-genall-btn{width:100%; justify-content:center; font-weight:600; padding-block:9px}
 .vis-genall-note{font-size:11.5px; color:var(--text-3); text-align:center}
 .vis-need-brief-note{margin-bottom:10px; color:var(--text-2)}
+
+/* ── visuals v2: recipe bar + master/detail kind selector + stage/rail ──────── */
+.vis-recipe{display:flex; align-items:center; gap:12px; padding:11px 14px; border:1px solid var(--hairline);
+  border-radius:var(--radius); background:var(--field-bg)}
+.vis-recipe.need{border-color:color-mix(in srgb,var(--accent) 55%,transparent); background:var(--accent-soft);
+  animation:breathe 2.4s ease-in-out infinite}
+.vis-recipe-chev{color:var(--text-3); font-size:11px; cursor:pointer; flex:none}
+.vis-recipe-sum{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-size:12.5px; color:var(--text-2); cursor:pointer}
+.vis-recipe-sum b{color:var(--text); font-weight:600}
+.vis-recipe.need .vis-recipe-sum,.vis-recipe.need .vis-recipe-sum b{color:var(--accent-deep,var(--accent))}
+
+.vis-seg{display:flex; gap:5px; background:var(--soft,rgba(20,40,60,.06)); border-radius:999px; padding:5px;
+  margin:16px 0 14px; flex-wrap:wrap}
+.vis-seg-btn{flex:1; min-width:64px; border:none; background:none; cursor:pointer; font-size:12.5px; color:var(--text-2);
+  padding:8px 4px; border-radius:999px; display:flex; align-items:center; justify-content:center; gap:6px; transition:all .12s}
+.vis-seg-btn:hover{color:var(--text)}
+.vis-seg-btn.on{background:var(--panel); color:var(--text); font-weight:550; box-shadow:0 1px 3px rgba(20,40,60,.12)}
+.vis-seg-dot{width:6px; height:6px; border-radius:50%; background:var(--green,#2FBF5A); flex:none}
+.vis-seg-dot.empty{background:var(--text-3); opacity:.4}
+.vis-seg-dot.gen{background:var(--amber,#D9930D); animation:breathe 1s ease-in-out infinite}
+
+.vis-detail{display:grid; grid-template-columns:1.35fr 1fr; gap:18px}
+@media (max-width:680px){ .vis-detail{grid-template-columns:1fr} }
+.vis-stage{display:flex; flex-direction:column; min-width:0}
+.vis-preview{position:relative; width:100%; aspect-ratio:4/3; border-radius:var(--radius); overflow:hidden;
+  background:var(--hairline-2); display:flex; align-items:center; justify-content:center}
+.vis-preview img{width:100%; height:100%; object-fit:contain}
+.vis-preview-empty{color:var(--text-3); font-size:12px}
+.vis-preview.cut{background-color:#fff;
+  background-image:linear-gradient(45deg,var(--hairline-2) 25%,transparent 25%,transparent 75%,var(--hairline-2) 75%),
+    linear-gradient(45deg,var(--hairline-2) 25%,transparent 25%,transparent 75%,var(--hairline-2) 75%);
+  background-size:16px 16px; background-position:0 0,8px 8px}
+.vis-badge{position:absolute; left:10px; top:10px; background:rgba(0,0,0,.36); color:#fff; font-size:11px;
+  padding:3px 9px; border-radius:999px; max-width:80%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.vis-arr{position:absolute; top:50%; transform:translateY(-50%); width:32px; height:32px; border-radius:50%;
+  background:rgba(0,0,0,.32); color:#fff; border:none; font-size:17px; cursor:pointer; display:flex;
+  align-items:center; justify-content:center; opacity:0; transition:opacity .14s}
+.vis-preview:hover .vis-arr{opacity:1}
+.vis-arr.l{left:9px} .vis-arr.r{right:9px}
+.vis-acts{display:flex; gap:7px; flex-wrap:wrap; align-items:center; margin-top:11px}
+.vis-gen-btn{transition:transform .08s}
+.vis-gen-btn:not([disabled]):active{transform:scale(.94)}
+
+.vis-rail{display:flex; flex-direction:column; min-width:0}
+.vis-rail h5{margin:0 0 8px; font-size:11px; color:var(--text-3); font-weight:600; letter-spacing:.4px; text-transform:uppercase}
+.vis-rail-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(74px,1fr)); gap:9px; align-content:start;
+  max-height:320px; overflow:auto; padding:2px}
+.vis-rail-grid.sticker{grid-template-columns:repeat(auto-fill,minmax(58px,1fr))}
+.vis-rail-grid .vis-cand{width:auto; height:auto; aspect-ratio:1}
+.vis-cand.cut img{background-color:#fff;
+  background-image:linear-gradient(45deg,var(--hairline-2) 25%,transparent 25%,transparent 75%,var(--hairline-2) 75%),
+    linear-gradient(45deg,var(--hairline-2) 25%,transparent 25%,transparent 75%,var(--hairline-2) 75%);
+  background-size:12px 12px; background-position:0 0,6px 6px}
+.vis-cand-pick{position:absolute; bottom:3px; right:3px; width:16px; height:16px; border-radius:50%;
+  background:var(--accent); color:#fff; font-size:9px; line-height:16px; text-align:center}
+.vis-cand-tag{position:absolute; left:0; right:0; bottom:0; font-size:9px; line-height:1.3; padding:2px 3px;
+  background:rgba(0,0,0,.45); color:#fff; border-radius:0 0 6px 6px; text-align:center; cursor:text;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.vis-cand.busy{display:flex; align-items:center; justify-content:center; background:var(--soft,rgba(20,40,60,.06));
+  color:var(--text-3); border-color:transparent; cursor:default}
+.vis-cand.add{display:flex; align-items:center; justify-content:center; aspect-ratio:1; border:1.5px dashed var(--hairline);
+  background:none; color:var(--text-3); font-size:22px; border-radius:8px; cursor:pointer}
+.vis-cand.add:hover{border-color:var(--accent); color:var(--accent)}
+
 .av-note.err{color:var(--red)}
 .av-note.thinking{color:var(--text-2); display:inline-flex; align-items:center; gap:7px}
 .av-note.thinking::before{

@@ -66,8 +66,10 @@ describe("I18N strings map", () => {
   // candidate-gallery UI added vis-cut, vis-cutting, vis-cand-pick → 604. The sticker
   // rework (grid picker, per-image rename/delete, raw-sheet re-slice) added 5
   // (vis-generate-more, vis-grid-label, vis-rename, vis-sheet-label, vis-reslice) → 609.
-  it("preserves the full key set from the source dict (609 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(609);
+  // The mockup-v2 visuals restructure (recipe bar + master/detail kind selector +
+  // stage/rail) added 3 (vis-recipe-need, vis-recipe-gen, vis-cand-title) → 612.
+  it("preserves the full key set from the source dict (612 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(612);
   });
 
   it("every value is a [zh, en] string tuple", () => {
