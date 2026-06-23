@@ -59,7 +59,7 @@ export function WakeSheet({ card, onClose }: { card: DeckCard; onClose: () => vo
     };
   }, [hub]);
 
-  const doWake = async () => {
+  const doWake = async (force = false) => {
     setWaking(true);
     try {
       const entry = await hub.call<{ name: string }>(
@@ -74,6 +74,7 @@ export function WakeSheet({ card, onClose }: { card: DeckCard; onClose: () => vo
           embodiment: forceRoleplay ? "actor" : "literal",
           website: personalSite ? "on" : "off",
           network: wantNet,
+          force,
           // No card_data: wake freezes the SOURCE card as-is. Editing the persona
           // is the card editor's job; waking can never blank it.
         },
@@ -83,6 +84,14 @@ export function WakeSheet({ card, onClose }: { card: DeckCard; onClose: () => vo
       await refresh();
       nav(`#/chara/${encodeURIComponent(entry.name)}`);
     } catch (e) {
+      // A visual is still generating for this card → confirm and wake anyway (force),
+      // rather than freezing a copy that's missing the in-flight image.
+      const kind = (e as { data?: { kind?: string } })?.data?.kind;
+      if (!force && kind === "visual_in_flight") {
+        setWaking(false);
+        if (confirm(t("wake-inflight-q"))) void doWake(true);
+        return;
+      }
       deckToast(rpcErrText(t, e as { message?: string }), true);
       setWaking(false);
     }

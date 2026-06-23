@@ -144,6 +144,7 @@ export function CardBlock({
   fieldKey,
   hub,
   ctx,
+  badge,
 }: {
   labelKey: TKey;
   field: React.ReactNode;
@@ -152,6 +153,8 @@ export function CardBlock({
   fieldKey?: string;
   hub: HubClient;
   ctx: () => string;
+  /** Optional activation badge shown after the label (e.g. 下次启动生效). */
+  badge?: React.ReactNode;
 }) {
   const t = useT();
   return (
@@ -159,6 +162,7 @@ export function CardBlock({
       <h4>
         {t(labelKey)}
         {fieldKey && <AiEditButton hub={hub} fieldKey={fieldKey} field={fieldRef} ctx={ctx} />}
+        {badge}
       </h4>
       {field}
     </div>

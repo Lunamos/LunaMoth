@@ -68,8 +68,12 @@ describe("I18N strings map", () => {
   // (vis-generate-more, vis-grid-label, vis-rename, vis-sheet-label, vis-reslice) → 609.
   // The mockup-v2 visuals restructure (recipe bar + master/detail kind selector +
   // stage/rail) added 3 (vis-recipe-need, vis-recipe-gen, vis-cand-title) → 612.
-  it("preserves the full key set from the source dict (612 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(612);
+  // Editing a running chara (live card edit + activation badges + apply + wake
+  // in-flight) added 9 (cv-live-edit-note, cv-zone-next-start, cv-zone-next-turn,
+  // cv-apply-pending, cv-apply-now, cv-applied, cv-done, wake-generating,
+  // wake-inflight-q) → 621.
+  it("preserves the full key set from the source dict (621 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(621);
   });
 
   it("every value is a [zh, en] string tuple", () => {

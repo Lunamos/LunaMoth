@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { assetUrl } from "../../rpc";
 import { useT, type TKey } from "../../i18n";
-import { useHubApi } from "../../state/hub";
+import { useHubApi, useHubState } from "../../state/hub";
 import { rpcErrText } from "../../lib/status";
 import { glyphOf, paletteClass } from "../../lib/format";
 import { sectionText, serializeCardFields, type NormalizedDraft, type CardData } from "../../lib/cards";
@@ -37,12 +37,21 @@ export function CardEditor({
   onWake: (c: DeckCard) => void;
 }) {
   const t = useT();
-  const { hub } = useHubApi();
+  const { hub, refresh } = useHubApi();
+  const { snapshot } = useHubState();
   const [full, setFull] = useState<FullCard | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("set");
   const [saving, setSaving] = useState(false);
   const [dupBusy, setDupBusy] = useState(false);
+  const [genRunning, setGenRunning] = useState(false);
+
+  // A living chara's OWN frozen card (locked + owner) is edited LIVE: persistence is
+  // immediate (card.patch field-level + chara.set_aspiration), activation is per
+  // prompt-zone (soul → next start via 立即应用; aspiration → next turn).
+  const isJsonCard = card.path.toLowerCase().endsWith(".json");
+  const liveCard = !!card.locked && !!card.owner && isJsonCard;
+  const liveSession = liveCard ? (snapshot?.sessions || []).find((s) => s.name === card.owner) : undefined;
 
   const fName = useRef<FieldHandle>(null);
   const fTagline = useRef<FieldHandle>(null);
@@ -53,6 +62,10 @@ export function CardEditor({
   const fGoals = useRef<FieldHandle>(null);
   const fNotes = useRef<FieldHandle>(null);
   const fWorld = useRef<FieldHandle>(null);
+  const liveSaveTimer = useRef<number | null>(null);
+  const lastAspiration = useRef<string | null>(null);
+  const baseline = useRef<Record<string, string>>({});  // last-saved soul values
+  const [applying, setApplying] = useState(false);
 
   // Cross-tab staging: CardField is uncontrolled (text lives in the DOM), and the
   // 设定/世界 panes unmount on tab switch — so without this, edits on a tab you leave
@@ -98,6 +111,21 @@ export function CardEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.path]);
 
+  // Poll whether a visual is still generating for this card → the wake button shows
+  // 生成中 and warns (waking mid-generation would freeze a card missing the image).
+  useEffect(() => {
+    let alive = true;
+    const tick = () =>
+      hub
+        .call<{ running?: number }>("card.visual_jobs", { path: card.path }, 10000)
+        .then((r) => { if (alive) setGenRunning((r?.running || 0) > 0); })
+        .catch(() => {});
+    void tick();
+    const id = window.setInterval(tick, 2500);
+    return () => { alive = false; window.clearInterval(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card.path]);
+
   if (err) {
     return (
       <DeckModal open variant="wide" onClose={onClose}>
@@ -118,7 +146,9 @@ export function CardEditor({
 
   const ext = (full.extensions && full.extensions.lunamoth ? full.extensions.lunamoth : {}) as CardExtLunamoth;
   const isJson = !!full.raw;
-  const editable = !card.builtin && !card.locked && isJson;
+  // A deck template edits in place; a living chara's own card edits LIVE (locked but
+  // owned). Both are editable; only builtin / PNG / a non-owned locked card stay read-only.
+  const editable = !card.builtin && isJson && (!card.locked || liveCard);
   // Visuals are editable on LOCKED cards too — a living chara owns a frozen card,
   // and its art (立绘/背景/头像/keyvisual) is set through the same save_asset RPCs,
   // which the backend allows on a locked card. Only the soul/world stay read-only
@@ -207,6 +237,73 @@ export function CardEditor({
     }
   };
 
+  // ── live editing a running chara's OWN card (field-level, no whole-card replace) ──
+  // soul → card.patch (next start, flags the card dirty); aspiration → set_aspiration
+  // (next turn, no restart). Only patches when a soul field actually changed, so an
+  // aspiration-only edit never shows 待应用.
+  const SOUL_KEYS = ["name", "description", "personality", "scenario", "first_mes", "creator_notes", "tagline", "world"];
+  const origVal = (k: string): string =>
+    k === "name" ? full?.name || ""
+    : k === "tagline" ? taglineValue
+    : k === "world" ? worldText
+    : k === "goals" ? goalsText
+    : String((full as Record<string, unknown> | null)?.[k] ?? "");
+  const base = (k: string) => baseline.current[k] ?? origVal(k);  // moving last-saved value
+  const liveSave = async () => {
+    if (!liveCard || !full?.raw) return;
+    flushFields();
+    const val = (k: string) => fieldRefs[k].current?.value() ?? staged[k];
+    if (lastAspiration.current === null) lastAspiration.current = goalsText;
+    try {
+      const soulChanged = SOUL_KEYS.some((k) => (val(k) ?? base(k)) !== base(k));
+      if (soulChanged) {
+        const data: CardData = {};
+        serializeCardFields(
+          data,
+          {
+            name: val("name"), description: val("description"), personality: val("personality"),
+            scenario: val("scenario"), first_mes: val("first_mes"), creator_notes: val("creator_notes"),
+            tagline: val("tagline"), world: val("world"),
+            // aspiration is handled live below, NOT folded into the card patch
+          },
+          (full.raw.name as string) || full.name || "",
+        );
+        await hub.call("card.patch", { path: card.path, fields: data }, 20000);
+        // advance the baseline so a later auto-save doesn't re-patch (and re-mark
+        // dirty) the same content — especially the trailing save after 立即应用.
+        for (const k of SOUL_KEYS) baseline.current[k] = val(k) ?? base(k);
+      }
+      const asp = val("goals");
+      if (asp !== undefined && asp !== lastAspiration.current) {
+        lastAspiration.current = asp;
+        await hub.call("chara.set_aspiration", { name: card.owner, text: asp }, 15000);
+      }
+      await refresh();
+      onChanged();
+    } catch (e) {
+      deckToast(rpcErrText(t, e as { message?: string }), true);
+    }
+  };
+  const liveSaveDebounced = () => {
+    if (liveSaveTimer.current) window.clearTimeout(liveSaveTimer.current);
+    liveSaveTimer.current = window.setTimeout(() => void liveSave(), 600);
+  };
+  const doApply = async () => {
+    setApplying(true);
+    if (liveSaveTimer.current) window.clearTimeout(liveSaveTimer.current);  // no trailing re-save
+    try {
+      await liveSave(); // flush any pending edit first
+      await hub.call("chara.apply_card", { name: card.owner }, 60000);
+      deckToast(t("cv-applied"));
+      await refresh();
+    } catch (e) {
+      deckToast(rpcErrText(t, e as { message?: string }), true);
+    } finally {
+      setApplying(false);
+    }
+  };
+  const liveClose = () => { void liveSave().finally(onClose); };
+
   const doDelete = async () => {
     if (!confirm(t("deck-delete-q", { name: charName }))) return;
     try {
@@ -257,12 +354,32 @@ export function CardEditor({
   // SVG-gen + dual-theme AvatarEditor overlay was retired — VisualEditor replaces it.
   const goVisual = () => switchTab("vis");
 
+  // Activation badges for live editing: soul fields ride the cache-stable prefix
+  // (next start), the aspiration rides the per-turn volatile tail (next turn).
+  const soulBadge = liveCard ? <span className="cv-zone-badge">{t("cv-zone-next-start")}</span> : undefined;
+  const aspBadge = liveCard ? <span className="cv-zone-badge turn">{t("cv-zone-next-turn")}</span> : undefined;
+
   return (
-    <DeckModal open variant="cardview" onClose={guardedClose} style={themeStyle(card)}>
-      <div className="cardview" {...dirtyProps}>
+    <DeckModal open variant="cardview" onClose={liveCard ? liveClose : guardedClose} style={themeStyle(card)}>
+      <div
+        className="cardview"
+        onBlurCapture={liveCard ? liveSaveDebounced : undefined}
+        {...(liveCard ? {} : dirtyProps)}
+      >
         {note && (
           <div className="cv-note cv-note-top">
             {note === "av-frozen-note" ? t(note, { names: (card.used_by || []).join("、") }) : t(note)}
+          </div>
+        )}
+        {liveCard && (
+          <div className="cv-live-note">{t("cv-live-edit-note", { name: card.owner || charName })}</div>
+        )}
+        {liveCard && liveSession?.card_dirty && (
+          <div className="cv-apply-banner">
+            <span>{t("cv-apply-pending")}</span>
+            <button className="btn primary sm" disabled={applying} onClick={() => void doApply()}>
+              {applying ? <span className="spin" /> : t("cv-apply-now")}
+            </button>
           </div>
         )}
         <div className="cv-header">
@@ -285,7 +402,11 @@ export function CardEditor({
 
         <div className="cv-tabs">
           {(["set", "vis", "emo", "world"] as Tab[]).map((k) => (
-            <div key={k} className={"cv-tab" + (tab === k ? " on" : "")} onClick={() => switchTab(k)}>
+            <div
+              key={k}
+              className={"cv-tab" + (tab === k ? " on" : "")}
+              onClick={() => { switchTab(k); if (liveCard) liveSaveDebounced(); }}
+            >
               {t(("cv-tab-" + k) as TKey)}
             </div>
           ))}
@@ -296,27 +417,27 @@ export function CardEditor({
           {tab === "set" && (
             <div className="cv-pane">
               {(editable || full.description) && (
-                <CardBlock labelKey="cve-description" hub={hub} ctx={editorCtx} fieldRef={fDesc} fieldKey={editable ? "description" : undefined}
+                <CardBlock labelKey="cve-description" hub={hub} ctx={editorCtx} fieldRef={fDesc} fieldKey={editable ? "description" : undefined} badge={soulBadge}
                   field={<CardField ref={fDesc} editable={editable} initial={seed("description", full.description || "")} />} />
               )}
               {(editable || full.personality) && (
-                <CardBlock labelKey="cve-personality" hub={hub} ctx={editorCtx} fieldRef={fPers} fieldKey={editable ? "personality" : undefined}
+                <CardBlock labelKey="cve-personality" hub={hub} ctx={editorCtx} fieldRef={fPers} fieldKey={editable ? "personality" : undefined} badge={soulBadge}
                   field={<CardField ref={fPers} editable={editable} initial={seed("personality", full.personality || "")} />} />
               )}
               {(editable || full.scenario) && (
-                <CardBlock labelKey="cve-scenario" hub={hub} ctx={editorCtx} fieldRef={fScen} fieldKey={editable ? "scenario" : undefined}
+                <CardBlock labelKey="cve-scenario" hub={hub} ctx={editorCtx} fieldRef={fScen} fieldKey={editable ? "scenario" : undefined} badge={soulBadge}
                   field={<CardField ref={fScen} editable={editable} initial={seed("scenario", full.scenario || "")} />} />
               )}
               {(editable || full.first_mes) && (
-                <CardBlock labelKey="cv-first" hub={hub} ctx={editorCtx} fieldRef={fFirst} fieldKey={editable ? "first_mes" : undefined}
+                <CardBlock labelKey="cv-first" hub={hub} ctx={editorCtx} fieldRef={fFirst} fieldKey={editable ? "first_mes" : undefined} badge={soulBadge}
                   field={<CardField ref={fFirst} editable={editable} initial={seed("first_mes", full.first_mes || "")} />} />
               )}
               {(editable || goalsText) && (
-                <CardBlock labelKey="cve-goals" hub={hub} ctx={editorCtx} fieldRef={fGoals} fieldKey={editable ? "goals" : undefined}
+                <CardBlock labelKey="cve-goals" hub={hub} ctx={editorCtx} fieldRef={fGoals} fieldKey={editable ? "goals" : undefined} badge={aspBadge}
                   field={<CardField ref={fGoals} editable={editable} initial={seed("goals", goalsText)} />} />
               )}
               {(editable || full.creator_notes) && (
-                <CardBlock labelKey="cve-notes" hub={hub} ctx={editorCtx} fieldRef={fNotes}
+                <CardBlock labelKey="cve-notes" hub={hub} ctx={editorCtx} fieldRef={fNotes} badge={soulBadge}
                   field={<CardField ref={fNotes} editable={editable} initial={seed("creator_notes", full.creator_notes || "")} />} />
               )}
               {full.raw && (
@@ -398,7 +519,7 @@ export function CardEditor({
           {tab === "world" && (
             <div className="cv-pane">
               {editable ? (
-                <CardBlock labelKey="cve-world" hub={hub} ctx={editorCtx} fieldRef={fWorld} fieldKey="world_entries"
+                <CardBlock labelKey="cve-world" hub={hub} ctx={editorCtx} fieldRef={fWorld} fieldKey="world_entries" badge={soulBadge}
                   field={<CardField ref={fWorld} editable initial={seed("world", worldText)} />} />
               ) : (
                 <WorldReadOnly entries={book ? book.entries! : []} />
@@ -408,9 +529,11 @@ export function CardEditor({
         </div>
 
         <div className="cv-foot">
-          <button className="btn text" onClick={guardedClose}>{t("cancel")}</button>
+          <button className="btn text" onClick={liveCard ? liveClose : guardedClose}>
+            {liveCard ? t("cv-done") : t("cancel")}
+          </button>
           <div className="grow" />
-          {!card.builtin && !card.frozen && (
+          {!card.builtin && !card.frozen && !liveCard && (
             <button className="btn soft" onClick={() => void doDelete()}>{t("menu-delete")}</button>
           )}
           {card.builtin && isJson && (
@@ -418,12 +541,22 @@ export function CardEditor({
               {dupBusy ? <span className="spin" /> : t("deck-copy")}
             </button>
           )}
-          {editable && (
+          {/* deck cards: explicit Save (whole-card). live cards auto-save → no Save button. */}
+          {editable && !liveCard && (
             <button className="btn primary" disabled={saving} onClick={() => void doSave()}>
               {saving ? <span className="spin" /> : t("save")}
             </button>
           )}
-          <button className="btn primary go" onClick={() => { onClose(); onWake(card); }}>{t("deck-wake")}</button>
+          {!liveCard && (
+            <button
+              className="btn primary go"
+              disabled={genRunning}
+              title={genRunning ? t("wake-generating") : undefined}
+              onClick={() => { onClose(); onWake(card); }}
+            >
+              {genRunning ? t("wake-generating") : t("deck-wake")}
+            </button>
+          )}
         </div>
       </div>
     </DeckModal>

@@ -19,6 +19,8 @@ export interface BoardSession extends SessionSnapshot {
   name: string;
   char_name: string;
   lang: string;
+  // set when the chara's card changed since its process started → UI offers 立即应用.
+  card_dirty?: boolean;
   // `mode` is NOT a field: it's the same fact as `paused` (mode != live), so the
   // board derives the mode chip from `paused` rather than carrying two copies.
   // speaks + superchat_unread are inherited from SessionSnapshot (the board
