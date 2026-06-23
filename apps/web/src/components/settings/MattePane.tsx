@@ -14,7 +14,7 @@ import { deckToast } from "../ui/deckToast";
 
 interface MatteProgress { state?: string; done?: number; total?: number; error?: string }
 interface MatteModel { id: string; label: string; note: string; size: number; installed: boolean; active: boolean; progress?: MatteProgress | null }
-interface MatteStatus { deps: boolean; home: string; active: string; models: MatteModel[] }
+interface MatteStatus { deps: boolean; deps_progress?: { state?: string; error?: string }; home: string; active: string; models: MatteModel[] }
 
 // states where the install is still working (keep polling + show busy/progress)
 const ACTIVE_STATES = ["preparing", "installing_deps", "downloading"];
@@ -37,7 +37,8 @@ export function MatteSection() {
     const tick = async () => {
       const s = await refresh();
       if (!alive) return;
-      if (s && s.models.some(inFlight)) poll.current = setTimeout(tick, 1500);
+      // keep polling while a model is installing OR the shared deps are installing
+      if (s && (s.models.some(inFlight) || s.deps_progress?.state === "installing")) poll.current = setTimeout(tick, 1500);
     };
     void tick();
     return () => { alive = false; if (poll.current) clearTimeout(poll.current); };
@@ -77,13 +78,46 @@ export function MatteSection() {
     finally { setBusyId(id, false); }
   };
 
+  // Repair the SHARED matting engine (rembg/onnxruntime). The one-click model
+  // install installs these too, but if that step failed (or the model was
+  // downloaded in an older state), a model can read "installed" while the engine
+  // isn't importable — cutout then silently falls back to a white background. This
+  // is the recovery path: re-run just the deps install. (No model id — it's global.)
+  const repairDeps = async () => {
+    if (busy.has("__deps__")) return;
+    setBusyId("__deps__", true);
+    try {
+      const s = await hub.call<MatteStatus>("matte.install_deps", {}, 20000);
+      setSt(s);
+      if (!poll.current) poll.current = setTimeout(() => void refresh(), 1500);
+    } catch (e) { deckToast(rpcErrText(t, e as { message?: string }), true); }
+    finally { setBusyId("__deps__", false); }
+  };
+
   // the larger model is the recommended one
   const recId = (st?.models || []).reduce<string>((best, m) => (!best || m.size > (st!.models.find((x) => x.id === best)?.size || 0) ? m.id : best), "");
+
+  const depsReady = !!st?.deps;
+  const anyInstalled = (st?.models || []).some((m) => m.installed);
+  const depsInstalling = st?.deps_progress?.state === "installing" || busy.has("__deps__");
 
   return (
     <div className="aux-sec matte-sec">
       <h3 className="aux-title">{t("matte-title")}</h3>
       <div className="aux-subline">{t("matte-sub")}</div>
+
+      {/* Recovery path: a model is installed but the engine isn't ready (deps
+          missing). Without this the only signal is a silent white-bg fallback. */}
+      {anyInstalled && !depsReady && (
+        <div className="matte-deps-warn">
+          <span className="matte-deps-warn-text">
+            {depsInstalling ? t("matte-deps-installing") : t("matte-deps-missing")}
+          </span>
+          <button className="btn soft sm" disabled={depsInstalling} onClick={() => void repairDeps()}>
+            {depsInstalling ? <span className="spin" /> : t("matte-deps-fix")}
+          </button>
+        </div>
+      )}
 
       {(st?.models || []).map((m) => {
         const prog = m.progress || {};
@@ -122,11 +156,12 @@ export function MatteSection() {
                 <button className="btn soft sm" disabled={isBusy || working} onClick={() => void act(m.id, "matte.download")}>
                   {working ? <span className="spin" /> : t("matte-install")}
                 </button>
+              ) : m.active ? (
+                <button className="btn sm matte-selected" disabled>{t("matte-selected")}</button>
               ) : (
-                <>
-                  {!m.active && <button className="btn text sm" disabled={isBusy} onClick={() => void act(m.id, "matte.use")}>{t("prov-use")}</button>}
-                  <button className="btn text sm" disabled={isBusy} onClick={() => void act(m.id, "matte.delete")}>{isBusy ? <span className="spin" /> : "✕"}</button>
-                </>
+                <button className="btn soft sm" disabled={isBusy} onClick={() => void act(m.id, "matte.use")}>
+                  {isBusy ? <span className="spin" /> : t("matte-select")}
+                </button>
               )}
             </div>
           </div>

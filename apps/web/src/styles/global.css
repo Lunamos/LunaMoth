@@ -1925,6 +1925,14 @@ body.dark .prov-input{background:#1C2228}
 .key-field>input:focus{border-color:var(--accent); outline:none}
 body.dark .key-field>input{background:#1C2228; border-color:var(--hairline)}
 body.dark .key-badge{background:rgba(255,255,255,.08)}
+/* Deps-not-ready banner — the recovery path when a model is installed but the
+   engine can't import. Soft amber so it reads as "attention", not an error. */
+.matte-deps-warn{display:flex; align-items:center; gap:12px; margin-bottom:12px; padding:9px 12px;
+  border-radius:10px; background:color-mix(in srgb, var(--amber) 12%, var(--panel));
+  border:1px solid color-mix(in srgb, var(--amber) 30%, transparent); font-size:12px; color:var(--text-2)}
+.matte-deps-warn-text{flex:1; min-width:0}
+/* The active model's pill — reads as a state, not a clickable action. */
+.btn.matte-selected{background:var(--accent-soft); color:var(--accent-deep); border:1px solid color-mix(in srgb, var(--accent) 36%, #fff); cursor:default; opacity:1}
 .matte-prog{display:flex; align-items:center; gap:9px; margin-top:6px}
 .matte-bar{flex:1; height:6px; background:var(--hairline-2); border-radius:99px; overflow:hidden; max-width:220px}
 .matte-fill{height:100%; background:var(--accent-deep); border-radius:99px; transition:width .45s ease}

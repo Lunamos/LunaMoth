@@ -196,6 +196,7 @@ export function ModelPane() {
           imageCatalog={imageCatalog}
           keys={keys}
           modelOptions={modelOptions}
+          mainProvider={activeProvider}
           onApplyImage={(provider, model) => void persist({ image_provider: provider, image_model: model })}
           onApplyTaskProvider={(pf, mf, provider, model) => void persist({ [pf]: provider, [mf]: model })}
         />

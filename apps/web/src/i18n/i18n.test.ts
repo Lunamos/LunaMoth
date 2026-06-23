@@ -59,8 +59,10 @@ describe("I18N strings map", () => {
   // iso-sandbox, iso-dir-d, iso-sandbox-d), added wake-iso-sub → 590.
   // The visuals editor's "write the brief first" gate added vis-need-brief → 591.
   // A descriptive post-generation toast added vis-gen-done + vis-gen-done-fallback → 593.
-  it("preserves the full key set from the source dict (593 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(593);
+  // The matte pane's 选择/已选择 toggle + deps-repair path added 4 (matte-select,
+  // matte-selected, matte-deps-missing, matte-deps-fix) → 597.
+  it("preserves the full key set from the source dict (597 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(597);
   });
 
   it("every value is a [zh, en] string tuple", () => {

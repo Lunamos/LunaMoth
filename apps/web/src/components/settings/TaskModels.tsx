@@ -54,6 +54,7 @@ export function TaskModels({
   imageCatalog,
   keys,
   modelOptions,
+  mainProvider,
   onApplyImage,
   onApplyTaskProvider,
 }: {
@@ -65,6 +66,10 @@ export function TaskModels({
   // having to type the id. Free-typing still works (allowCustom) for a model the
   // catalogue doesn't list or a different provider.
   modelOptions: SelectOption[];
+  // The active (main) provider label. modelOptions belongs to it, so a per-task row
+  // only shows that list when its chosen provider matches — otherwise the catalogue
+  // would be misleading, so we fall back to free-typing.
+  mainProvider: string;
   onApplyImage: (provider: string, model: string) => void;
   onApplyTaskProvider: (providerField: string, modelField: string, provider: string, model: string) => void;
 }) {
@@ -91,6 +96,7 @@ export function TaskModels({
             model={values[task.field] || ""}
             keys={keys}
             modelOptions={modelOptions}
+            mainProvider={mainProvider}
             onApply={(p, m) => onApplyTaskProvider(task.providerField || "", task.field, p, m)}
           />
         ),
@@ -109,6 +115,7 @@ function KeyProviderRow({
   model,
   keys,
   modelOptions,
+  mainProvider,
   onApply,
 }: {
   task: TaskModel;
@@ -116,6 +123,7 @@ function KeyProviderRow({
   model: string;
   keys: KeyRow[];
   modelOptions: SelectOption[];
+  mainProvider: string;
   onApply: (provider: string, model: string) => void;
 }) {
   const t = useT();
@@ -159,7 +167,7 @@ function KeyProviderRow({
       ) : (
         <div className="aux-edit img-edit">
           <Select value={pid} options={provOptions} onChange={setPid} placeholder={t("provider")} />
-          <Select value={draft} options={modelOptions} onChange={setDraft} search allowCustom placeholder={t("model-other-ph")} />
+          <Select value={draft} options={pid === mainProvider ? modelOptions : []} onChange={setDraft} search allowCustom placeholder={t("model-other-ph")} />
           {editKey && !editKey.has_key && <div className="img-prov-hint">{t("img-prov-hint")}</div>}
           <div className="acts">
             <button
