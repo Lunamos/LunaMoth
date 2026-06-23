@@ -55,14 +55,15 @@ say "frontend built: $WEBUI_DIR"
 # tools, and no cards → no bundled personas. Copy them into the package as
 # _bundled/, shipped via [tool.setuptools.package-data]. (2026-06-17 deploy fix.)
 BUNDLED_DIR="$ROOT/src/lunamoth/_bundled"
-say "bundling cards/ + toolpacks/ into $BUNDLED_DIR ..."
+say "bundling cards/ + toolpacks/ + skills/ into $BUNDLED_DIR ..."
 rm -rf "$BUNDLED_DIR"
 mkdir -p "$BUNDLED_DIR"
-for d in cards toolpacks; do
+for d in cards toolpacks skills; do
   [ -d "$ROOT/$d" ] || fail "repo content dir $ROOT/$d is missing"
   cp -R "$ROOT/$d" "$BUNDLED_DIR/$d"
 done
 [ -n "$(ls -A "$BUNDLED_DIR/toolpacks"/*.json 2>/dev/null)" ] || fail "no toolpacks/*.json bundled"
+[ -n "$(find "$BUNDLED_DIR/skills" -name SKILL.md 2>/dev/null)" ] || fail "no skills/**/SKILL.md bundled"
 
 # --- 2. build the wheel (carries webui/ + _bundled/ via package-data) --------
 cd "$ROOT"
@@ -96,7 +97,8 @@ def need(pred, what):
 need(lambda n: "front/webui/index.html" in n, "front/webui/index.html")
 need(lambda n: "_bundled/toolpacks/" in n and n.endswith(".json"), "_bundled/toolpacks/*.json")
 need(lambda n: "_bundled/cards/" in n, "_bundled/cards/")
-print(f"WHEEL OK: webui + cards + toolpacks bundled in {whl}")
+need(lambda n: "_bundled/skills/" in n and n.endswith("SKILL.md"), "_bundled/skills/**/SKILL.md")
+print(f"WHEEL OK: webui + cards + toolpacks + skills bundled in {whl}")
 PY
 
 say "done. wheel(s):"

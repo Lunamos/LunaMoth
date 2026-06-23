@@ -278,6 +278,38 @@ def test_skill_create_bad_frontmatter(tmp_path):
     assert "frontmatter" in r["error"].lower()
 
 
+def test_skill_edit_copies_on_write_off_readonly_external(tmp_path):
+    # A skill that lives ONLY in a read-only external library (global / bundled).
+    ext = tmp_path / "ext" / "shared-skill"
+    ext.mkdir(parents=True)
+    orig = "---\nname: shared-skill\ndescription: From the shared library.\n---\n# Shared\n\nv1\n"
+    (ext / "SKILL.md").write_text(orig, encoding="utf-8")
+    store = SkillStore(skills_dir=tmp_path / "skills", external_dirs=[tmp_path / "ext"])
+    ctx = FakeCtx(skills=store)
+
+    edited = "---\nname: shared-skill\ndescription: Edited locally.\n---\n# Shared\n\nv2\n"
+    r = _parse(skill_manage({"action": "edit", "name": "shared-skill", "content": edited}, ctx))
+    assert r["success"], r
+    # the edit lands in the chara's OWN writable dir (copy-on-write)…
+    local = store.skills_dir / "shared-skill" / "SKILL.md"
+    assert local.exists() and "v2" in local.read_text(encoding="utf-8")
+    # …and the shared library copy is UNTOUCHED.
+    assert (ext / "SKILL.md").read_text(encoding="utf-8") == orig
+
+
+def test_skill_delete_refused_on_readonly_external(tmp_path):
+    ext = tmp_path / "ext" / "lib-skill"
+    ext.mkdir(parents=True)
+    (ext / "SKILL.md").write_text(
+        "---\nname: lib-skill\ndescription: From the library.\n---\n# Lib\n", encoding="utf-8")
+    store = SkillStore(skills_dir=tmp_path / "skills", external_dirs=[tmp_path / "ext"])
+    ctx = FakeCtx(skills=store)
+    r = _parse(skill_manage({"action": "delete", "name": "lib-skill"}, ctx))
+    assert not r["success"]
+    assert "read-only" in r["error"]
+    assert (ext / "SKILL.md").exists()  # the library skill was NOT deleted
+
+
 def test_skill_name_validation(tmp_path):
     store = _skill_store(tmp_path)
     ctx = FakeCtx(skills=store)

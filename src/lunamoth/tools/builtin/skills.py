@@ -520,6 +520,37 @@ def _resolve_skill_dir(store, name: str, category: str = None) -> Path:
     return store.skills_dir / name
 
 
+def _is_writable(store, skill_dir: Path) -> bool:
+    """True when skill_dir lives under the chara's own writable skills root (not a
+    read-only external library: the user-global dir or the bundled examples)."""
+    try:
+        skill_dir.resolve().relative_to(store.skills_dir.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _ensure_writable_copy(store, existing: Path) -> Path:
+    """External skill dirs (the user-global library, bundled examples) are READ-ONLY.
+    To mutate a skill that resolves to one of them, copy-on-write it into the chara's
+    own writable root first, so edits land locally and never touch a shared library
+    (and so an unwritable bundled/_bundled dir can't error). A skill already under
+    the writable root is returned unchanged."""
+    if _is_writable(store, existing):
+        return existing
+    dest = store.skills_dir / existing.name
+    if not dest.exists():
+        shutil.copytree(existing, dest)
+    return dest
+
+
+def _readonly_skill_error(name: str, verb: str) -> Dict[str, Any]:
+    return {"success": False, "error": (
+        f"Skill '{name}' lives in a read-only library (global or bundled), not this "
+        f"chara's own skills. It can only {verb} skills it owns. Recreate a local copy "
+        f"with action='create' if you need a variant.")}
+
+
 def _skill_not_found_error(store, name: str, suffix: str = "") -> str:
     base = f"Skill '{name}' not found."
     base += " Use skills_list() to see available skills."
@@ -573,6 +604,7 @@ def _edit_skill(store, name: str, content: str) -> Dict[str, Any]:
     existing = store.find_skill(name)
     if not existing:
         return {"success": False, "error": _skill_not_found_error(store, name)}
+    existing = _ensure_writable_copy(store, existing)  # copy-on-write off a read-only library
     skill_md = existing / "SKILL.md"
     _atomic_write_text(skill_md, content)
     return {"success": True, "message": f"Skill '{name}' updated.", "path": str(existing)}
@@ -587,7 +619,7 @@ def _patch_skill(store, name: str, old_string: str, new_string: str,
     existing = store.find_skill(name)
     if not existing:
         return {"success": False, "error": _skill_not_found_error(store, name)}
-    skill_dir = existing
+    skill_dir = _ensure_writable_copy(store, existing)  # copy-on-write off a read-only library
     if file_path:
         err = _validate_file_path(file_path)
         if err:
@@ -634,6 +666,8 @@ def _delete_skill(store, name: str, absorbed_into: Optional[str] = None) -> Dict
     existing = store.find_skill(name)
     if not existing:
         return {"success": False, "error": _skill_not_found_error(store, name)}
+    if not _is_writable(store, existing):
+        return _readonly_skill_error(name, "delete")
     if absorbed_into is not None and isinstance(absorbed_into, str) and absorbed_into.strip():
         target_name = absorbed_into.strip()
         if target_name == name:
@@ -680,6 +714,7 @@ def _write_file_action(store, name: str, file_path: str, file_content: str) -> D
     existing = store.find_skill(name)
     if not existing:
         return {"success": False, "error": _skill_not_found_error(store, name, " Create it first with action='create'.")}
+    existing = _ensure_writable_copy(store, existing)  # copy-on-write off a read-only library
     target, err = _resolve_skill_target(existing, file_path)
     if err:
         return {"success": False, "error": err}
@@ -695,6 +730,8 @@ def _remove_file_action(store, name: str, file_path: str) -> Dict[str, Any]:
     existing = store.find_skill(name)
     if not existing:
         return {"success": False, "error": _skill_not_found_error(store, name)}
+    if not _is_writable(store, existing):
+        return _readonly_skill_error(name, "remove files from")
     skill_dir = existing
     target, err = _resolve_skill_target(skill_dir, file_path)
     if err:

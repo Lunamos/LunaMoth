@@ -145,7 +145,7 @@ def _polaris(agent, session, arg: str) -> Reply:
 def _skills(agent, session, arg: str) -> Reply:
     skills = agent.skills.scan()
     if not skills:
-        body = "(no skills yet)\n\nThe chara writes its own with create_skill;\nyou can drop SKILL.md dirs into ~/.lunamoth/skills/."
+        body = "(no skills yet)\n\nThe chara writes its own with skill_manage;\nyou can drop SKILL.md dirs into ~/.lunamoth/skills/."
         return Reply(True, body, (), verbose=True)
     else:
         tag = {"own": "✎", "user": "⌂", "bundled": "·"}

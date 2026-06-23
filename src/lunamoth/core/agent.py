@@ -188,8 +188,12 @@ class LunaMothAgent:
         # (workspace/skills/ shadows user + bundled — hermes's local-first rule).
         self.skills = SkillStore()
         self._skills_snapshot: str | None = None
+        self._skills_manifest: dict | None = None  # freshness fingerprint; see _refresh_skills_if_changed
         # MCP: operator-configured external tool servers (mcp.json); packs opt in.
-        self.mcp = McpManager(config_dir=Path(os.getenv("LUNAMOTH_CONFIG_DIR", "")) if os.getenv("LUNAMOTH_CONFIG_DIR") else None)
+        self.mcp = McpManager(
+            config_dir=Path(os.getenv("LUNAMOTH_CONFIG_DIR", "")) if os.getenv("LUNAMOTH_CONFIG_DIR") else None,
+            media_dir=self.sandbox.workspace_dir,  # MCP image/binary results land here (MEDIA:)
+        )
         self.tools = ToolGateway(
             self.sandbox, self.state, self.audit, self.memory, self.polaris,
             skills=self.skills, mcp=self.mcp,
@@ -548,6 +552,23 @@ class LunaMothAgent:
 
     def _freeze_skills(self) -> None:
         self._skills_snapshot = self.skills.render_block()
+        self._skills_manifest = self.skills.manifest()
+
+    def _refresh_skills_if_changed(self) -> None:
+        """Keep the in-prompt skill index fresh: if a SKILL.md changed since it was
+        frozen (the chara wrote one via skill_manage, or one was dropped into a
+        library), re-render the index and drop the prefix cache so it appears next
+        turn. The check is a stat-only manifest, so a cache miss happens ONLY on a
+        real skill change — normal work never busts it. Best-effort: a scan failure
+        leaves the current snapshot in place (never crashes the turn)."""
+        try:
+            current = self.skills.manifest()
+        except Exception:  # noqa: BLE001 — a filesystem hiccup must not kill the turn
+            return
+        if current != getattr(self, "_skills_manifest", None):
+            self._skills_snapshot = self.skills.render_block()
+            self._skills_manifest = current
+            self._stable_prefix_cache = None
 
     def _stage_art_assets(self) -> str:
         """Copy the card's bundled art into the read-only assets shelf — a SIBLING
@@ -604,7 +625,10 @@ class LunaMothAgent:
 
     def _stable_prefix(self) -> list[str]:
         """Session-stable prompt prefix. The same list object is reused until a
-        session boundary/reconfigure/reset explicitly invalidates it."""
+        session boundary/reconfigure/reset explicitly invalidates it — or a skill
+        changed, which refreshes the skill index in place (the one sanctioned
+        mid-session edit; see _refresh_skills_if_changed)."""
+        self._refresh_skills_if_changed()
         if self._stable_prefix_cache is not None:
             return self._stable_prefix_cache
 

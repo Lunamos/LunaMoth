@@ -28,13 +28,17 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..config import ROOT, SANDBOX_ROOT
+from ..config import SANDBOX_ROOT, content_dir
 
 logger = logging.getLogger("lunamoth.tools.skills")
 
 MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 1024
 MAX_SKILL_CONTENT_CHARS = 100_000
+# The prompt INDEX shows only a compact one-liner per skill; the full description
+# (up to MAX_DESCRIPTION_LENGTH) is still available via skills_list / skill_view.
+# Bounds the stable-prefix token cost when a chara accumulates many skills.
+INDEX_DESCRIPTION_CAP = 120
 
 # Filesystem-safe, URL-friendly skill names (hermes VALID_NAME_RE).
 VALID_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
@@ -133,8 +137,11 @@ class SkillStore:
         else:
             home = Path(os.getenv("LUNAMOTH_HOME", Path.home() / ".lunamoth")).expanduser()
             # Read-only external dirs (local takes precedence on name collisions):
-            # the user's global library, then bundled examples.
-            self.external_dirs = [home / "skills", ROOT / "skills"]
+            # the user's global library, then bundled examples. content_dir resolves
+            # the bundled copy in a wheel install (ROOT/skills in dev → _bundled/skills
+            # in a wheel) — same mechanism as cards/toolpacks, so the bundled skill
+            # ships and is visible to an installed chara, not just a git checkout.
+            self.external_dirs = [home / "skills", content_dir("skills")]
         # Back-compat alias some callers used.
         self.own_dir = self.skills_dir
 
@@ -143,6 +150,27 @@ class SkillStore:
     def all_dirs(self) -> List[Path]:
         """The writable root first, then external dirs (precedence order)."""
         return [self.skills_dir] + list(self.external_dirs)
+
+    def manifest(self) -> Dict[str, tuple]:
+        """A cheap freshness fingerprint — ``{path: (mtime_ns, size)}`` for every
+        SKILL.md across the search dirs. Stat-only (no file reads), so the prompt
+        index can detect when a skill changed (the chara wrote one, or one was
+        dropped in) and refresh, without re-parsing every turn. Best-effort: an
+        unreadable file/dir is skipped, never raised."""
+        fp: Dict[str, tuple] = {}
+        for base in self.all_dirs():
+            if not base.is_dir():
+                continue
+            try:
+                for skill_md in iter_skill_index_files(base):
+                    try:
+                        st = skill_md.stat()
+                        fp[str(skill_md)] = (st.st_mtime_ns, st.st_size)
+                    except OSError:
+                        continue
+            except OSError:
+                continue
+        return fp
 
     def _origin(self, skill_md: Path) -> str:
         try:
@@ -312,7 +340,10 @@ class SkillStore:
             if cat:
                 lines.append(f"### {cat}")
             for s in entries:
-                lines.append(f"- {s['name']}: {s['description']}")
+                desc = s["description"]
+                if len(desc) > INDEX_DESCRIPTION_CAP:
+                    desc = desc[:INDEX_DESCRIPTION_CAP - 1].rstrip() + "…"
+                lines.append(f"- {s['name']}: {desc}")
         lines.append("</available_skills>")
         lines.append("")
         lines.append(
