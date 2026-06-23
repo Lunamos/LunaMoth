@@ -438,8 +438,7 @@ class HubDispatcher:
             if "stickers" in out:
                 cells = [base64.b64encode(c).decode("ascii") for c in out["stickers"]]
                 sheet_b64 = base64.b64encode(out["sheet"]).decode("ascii") if out.get("sheet") else None
-                saved = _avatars.stickers_save(path, cells, names=out.get("names"),
-                                               sheet=sheet_b64, grid=out.get("grid"))
+                saved = _avatars.stickers_save(path, cells, names=out.get("names"), sheet=sheet_b64)
                 return {"saved": True, "kind": kind, "urls": saved["urls"], "added": saved.get("added"),
                         "sheet_urls": saved.get("sheet_urls"),
                         "note": out["note"], "matted": bool(out.get("matted"))}
@@ -490,7 +489,7 @@ class HubDispatcher:
         path = str(p.get("path") or "")
         sheet_name = str(p.get("sheet") or p.get("name") or "").strip()
         target = _avatars._writable_card_path(path)  # raises on builtin/PNG/non-writable
-        sheet_file = target.with_name(sheet_name)
+        sheet_file = _avatars._rel(target, sheet_name)  # subdir-safe, like the other asset paths
         if not sheet_name or not sheet_file.is_file():
             raise RpcError(-32602, f"no such sticker sheet: {sheet_name}")
         rows, cols = _norm_grid(p.get("grid")) or pipeline.KINDS["stickers"]["grid"]

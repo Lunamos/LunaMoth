@@ -777,6 +777,9 @@ def test_card_sticker_named_rename_remove():
     r = result("card.sticker_rename", {"path": card, "old": f0, "new": "Big Grin!"})
     assert r["new"].endswith(".sticker.big-grin.png") and r["old"] == f0
     assert not (Path(card).with_name(f0)).is_file() and (Path(card).with_name(r["new"])).is_file()
+    # renaming to the SAME slug is a no-op (no -1 suffix bump)
+    same = result("card.sticker_rename", {"path": card, "old": r["new"], "new": "big grin"})
+    assert same["new"] == r["new"]
     # remove one → list shrinks, file gone; an untracked name is a clean error
     rm = result("card.sticker_remove", {"path": card, "name": f1})
     assert len(rm["files"]) == 1 and not (Path(card).with_name(f1)).is_file()

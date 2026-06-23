@@ -417,7 +417,7 @@ def _sticker_list(assets: dict) -> list[str]:
 
 
 def stickers_save(path: str, items: list[str], names: list[str] | None = None,
-                  sheet: str | None = None, grid: list[int] | None = None) -> dict[str, Any]:
+                  sheet: str | None = None) -> dict[str, Any]:
     """APPEND a batch of sticker cells to the card's set, each saved as
     ``<stem>.sticker.<slug>.png``. ``items`` = base64 PNG cells; ``names`` = the
     parallel desired name tags (slugified + deduped, defaults applied when short).
@@ -520,7 +520,12 @@ def sticker_rename(path: str, old: str, new: str) -> dict[str, Any]:
     lst = _sticker_list(assets)
     if old not in lst:
         raise RpcError(-32602, f"no such sticker: {old}")
-    new_name = _sticker_path(target, _unique_sticker_slug(target, _slug(new), set())).name
+    desired = _slug(new)
+    if _sticker_path(target, desired).name == old:
+        # renaming to the same slug — no-op (don't let the dedup bump it to <slug>-1)
+        return {"path": str(target), "old": old, "new": old, "url": _asset_url(_rel(target, old)),
+                "files": lst, "urls": [_asset_url(_rel(target, n)) for n in lst]}
+    new_name = _sticker_path(target, _unique_sticker_slug(target, desired, set())).name
     src, dst = _rel(target, old), target.with_name(new_name)
     if src.is_file():
         try:
