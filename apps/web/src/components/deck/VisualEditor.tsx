@@ -558,10 +558,10 @@ function VisualSlot({
   // generate → the BACKEND auto-saves; we just reflect the saved result + refresh. If
   // the user leaves mid-generation the job still finishes and the card still updates.
   const generate = async () => {
-    // stickers APPEND (新生成 adds more), so they never prompt-to-overwrite; the
-    // single kinds keep a gallery candidate but still confirm replacing the shown one.
-    const hasCurrent = isSet ? false : !!curSrc;
-    if (hasCurrent && !confirm(t("vis-regen-overwrite"))) return;
+    // No overwrite confirm here: stickers + the gallery kinds (sprite/keyvisual/
+    // background) all APPEND a new candidate and keep the old. Only avatar truly
+    // overwrites its single file — that confirm lives in enqueueGen (asked once per
+    // click, not per queued item), and genAll calls generate() directly to skip it.
     setWorking(t("vis-generating"));
     try {
       const params: Record<string, unknown> = {
@@ -612,6 +612,9 @@ function VisualSlot({
     drainingRef.current = false;
   };
   const enqueueGen = () => {
+    // avatar is the ONLY kind that overwrites its single file; the gallery kinds and
+    // stickers append, so they never need an overwrite confirm. Ask once per click.
+    if (!isSet && !hasGallery && !!curSrc && !confirm(t("vis-regen-overwrite"))) return;
     qRef.current += 1;
     setQN(qRef.current);
     void drain();
@@ -772,7 +775,10 @@ function VisualSlot({
   };
 
   const hasAnyImage = isSet ? curSet.length > 0 : !!curSrc;
-  const genDisabled = disabled || busy || !canGenerate || !hasBrief;
+  // The generate entry points QUEUE (busy doesn't block them — clicking again just
+  // appends another spinning candidate), matching the rail's ＋ cell. Only the
+  // key/brief/permission gates disable them.
+  const genDisabled = disabled || !canGenerate || !hasBrief;
   // browse indices for the big preview
   const vi = curSet.length ? ((view % curSet.length) + curSet.length) % curSet.length : 0;
   const selIdx = options.findIndex((u) => assetName(u) === selName);
