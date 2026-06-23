@@ -1,7 +1,8 @@
 /* CreateFlow — the tell→shape→land create-a-chara flow, a React port of app.js
  * openCreateFlow (2086) / renderTellStep (2391) / renderShapeStep (2454).
  *
- * Step 1 (tell): a free-text telling → cards.draft (the SYSTEM default model) →
+ * Step 1 (tell): a free-text telling → cards.draft (the card-draft model — the
+ * per-task `card_model`, else the main default — resolved server-side) →
  * normalizeDraft → step 2. Step 2 (shape): every section editable (with the same
  * inline ✦ AI rewrite as the card editor), the telling kept in a collapsible
  * panel, a shared avatar/theme editor, the embodiment stance — then either
@@ -62,7 +63,10 @@ export function CreateFlow({ onClose }: { onClose: () => void }) {
   const { hub, snapshot, refresh } = useHub();
   const nav = useNavigate();
   const overlay = useOverlay();
-  const defaults = (snapshot?.defaults as { model?: string }) || {};
+  const defaults = (snapshot?.defaults as { model?: string; card_model?: string }) || {};
+  // cards.draft routes through the per-task card_model server-side (else the main
+  // default), so the flow shows THAT model — not the main one — as "生成模型".
+  const draftModel = String(defaults.card_model || defaults.model || "");
 
   const [step, setStep] = useState<Step>("tell");
   const [origin, setOrigin] = useState("");
@@ -81,7 +85,7 @@ export function CreateFlow({ onClose }: { onClose: () => void }) {
             origin={origin}
             setOrigin={setOrigin}
             hadDraft={!!draftRef.current}
-            defaultModel={String(defaults.model || "")}
+            defaultModel={draftModel}
             onClose={guardedClose}
             generate={async () => {
               const raw = await hub.call("cards.draft", { inspiration: origin.trim() }, 240000);
