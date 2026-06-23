@@ -259,9 +259,9 @@ def _big_png(px=512):
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def test_avatar_upload_squares_a_rectangular_image():
-    # A rectangular (e.g. model-returned) avatar is center-cropped to a square so it
-    # shows as a clean rounded tile, not a letterboxed rectangle.
+def test_avatar_upload_keeps_raw_aspect_non_destructive():
+    # NON-DESTRUCTIVE: a rectangular avatar is stored with its aspect intact (squaring
+    # happens at the DISPLAY layer via object-fit:cover), so the original is never baked.
     import base64 as _b
     import io
     from PIL import Image
@@ -273,7 +273,7 @@ def test_avatar_upload_squares_a_rectangular_image():
     assert out["avatar_file"].endswith(".avatar.png")
     uri = result("card.avatar_read", {"path": path})["data_uri"]
     im = Image.open(io.BytesIO(_b.b64decode(uri.split(",", 1)[1])))
-    assert im.size[0] == im.size[1]  # squared
+    assert im.size[0] != im.size[1]  # raw aspect preserved (not cropped to a square)
 
 
 def test_list_cards_inline_avatar_is_small_thumbnail():
