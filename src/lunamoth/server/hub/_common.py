@@ -5,10 +5,13 @@ of the dependency graph and break would-be cycles.
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
+import threading
 import urllib.parse
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +44,50 @@ def _atomic_write_json(path: Path, data: dict[str, Any], *, private: bool = Fals
             tmp.unlink()
         except OSError:
             pass
+
+
+# Per-path locks so every read-modify-write of one card.json / config.json serializes.
+# The concurrency is real on a single desktop: async image-job completions run on daemon
+# threads (visuals/jobs.py) and field auto-save (card.patch) runs on the RPC worker pool —
+# 一键生成全部 fans out several at once, all mutating the same card.json. Without this an
+# interleave silently drops a gallery entry, and a torn config.json write can drop the
+# provider api_key. The lock covers the WHOLE RMW; the write half uses _atomic_write_json.
+_PATH_LOCKS: dict[str, "threading.Lock"] = {}
+_PATH_LOCKS_GUARD = threading.Lock()
+
+
+def _path_lock(path: Any) -> "threading.Lock":
+    try:
+        key = str(Path(str(path)).resolve())
+    except (OSError, ValueError, TypeError):
+        key = str(path)
+    with _PATH_LOCKS_GUARD:
+        lk = _PATH_LOCKS.get(key)
+        if lk is None:
+            lk = _PATH_LOCKS[key] = threading.Lock()
+        return lk
+
+
+@contextmanager
+def card_write_lock(path: Any):
+    """Hold the per-path lock for a manual read-modify-write block (e.g. a config.json
+    edit). Pair the write with _atomic_write_json."""
+    with _path_lock(path):
+        yield
+
+
+def locked_card_write(fn):
+    """Serialize a card-mutating function on its card path (the `path` kwarg, else the
+    first positional arg), covering the full read-modify-write so concurrent writers can't
+    lose an update or read a torn file. The write half must use _atomic_write_json."""
+    @functools.wraps(fn)
+    def wrap(*args: Any, **kwargs: Any):
+        path = kwargs.get("path")
+        if path is None and args:
+            path = args[0]
+        with _path_lock(path or ""):
+            return fn(*args, **kwargs)
+    return wrap
 
 
 _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -178,13 +225,15 @@ def _writable_card_path(path: str) -> Path:
     if p.suffix.lower() != ".json":
         raise RpcError(-32031, "avatar editing needs a JSON card (PNG cards are read-only here)")
     rp = p.resolve()
+    # Return the RESOLVED path so callers act on the same path the check validated (no
+    # check/act asymmetry if `path` is a symlink).
     if user_cards_dir().resolve() in rp.parents:
-        return p
+        return rp
     # A frozen session card lives at <sessions>/<name>/card.json (exactly one
     # level deep). Sidecars the asset RPCs write land beside it, inside the
     # session dir — confined. This is what lets the chat Visuals tab edit the
     # active chara's own card.
     sessions = S.sessions_dir().resolve()
     if rp.name == "card.json" and rp.parent.parent == sessions:
-        return p
+        return rp
     raise RpcError(-32031, "only a deck card or a chara's own session card can be edited")

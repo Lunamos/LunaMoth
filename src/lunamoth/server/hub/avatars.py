@@ -24,7 +24,8 @@ from ...content.imaging import (
 )
 from ..dispatch import RpcError
 from ._common import (
-    HubRpcError, _asset_url, _sanitize_avatar_svg, _writable_card_path, is_managed_sidecar_name,
+    HubRpcError, _asset_url, _atomic_write_json, _sanitize_avatar_svg, _writable_card_path,
+    is_managed_sidecar_name, locked_card_write,
 )
 
 # ---- avatar sidecar storage --------------------------------------------------
@@ -85,6 +86,7 @@ def avatar_read(path: str) -> dict[str, Any]:
     return {"data_uri": _avatar_data_uri(p, card) or None}
 
 
+@locked_card_write
 def avatar_upload(path: str, data_b64: str, ext: str) -> dict[str, Any]:
     """Validate an uploaded avatar, write it as a sidecar, point the card at it.
 
@@ -152,7 +154,7 @@ def avatar_upload(path: str, data_b64: str, ext: str) -> dict[str, Any]:
         lm = ext_root["lunamoth"] = {}
     lm["avatar_file"] = sidecar.name
     lm.pop("avatar_svg", None)
-    target.write_text(json.dumps(raw_card, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(target, raw_card)
     return {"path": str(target), "avatar_file": sidecar.name,
             "data_uri": f"data:{_AVATAR_MIME[ext]};base64,{base64.b64encode(payload).decode('ascii')}"}
 
@@ -230,6 +232,7 @@ def _looks_like(raw: bytes, ext: str) -> bool:
     return not magic or raw.startswith(magic)
 
 
+@locked_card_write
 def asset_save(path: str, kind: str, data_b64: str, ext: str) -> dict[str, Any]:
     """Write a sprite/background/keyvisual sidecar (upload OR a saved generation)
     and point the card's ``extensions.lunamoth.assets[kind]`` at it. png/jpg/webp,
@@ -268,12 +271,13 @@ def asset_save(path: str, kind: str, data_b64: str, ext: str) -> dict[str, Any]:
     if sidecar.name not in opts:
         opts.append(sidecar.name)
     assets[kind] = sidecar.name  # newest is auto-selected
-    target.write_text(json.dumps(raw_card, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(target, raw_card)
     return {"path": str(target), "kind": kind, "file": sidecar.name, "url": _asset_url(sidecar),
             "selected": sidecar.name,
             "options": [_asset_url(_rel(target, n)) for n in opts]}
 
 
+@locked_card_write
 def asset_select(path: str, kind: str, name: str) -> dict[str, Any]:
     """Make an existing gallery candidate the active one for a kind (just repoints
     ``assets[kind]`` — non-destructive)."""
@@ -290,11 +294,12 @@ def asset_select(path: str, kind: str, name: str) -> dict[str, Any]:
     if name not in opts or not _rel(target, name).is_file():
         raise RpcError(-32602, f"no such candidate for {kind}: {name}")
     assets[kind] = name
-    target.write_text(json.dumps(raw_card, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(target, raw_card)
     return {"path": str(target), "kind": kind, "selected": name,
             "url": _asset_url(_rel(target, name))}
 
 
+@locked_card_write
 def asset_remove(path: str, kind: str, name: str) -> dict[str, Any]:
     """Delete one gallery candidate (file + list entry). If it was selected, fall back
     to the newest remaining candidate (or clear the kind if none remain)."""
@@ -324,12 +329,13 @@ def asset_remove(path: str, kind: str, name: str) -> dict[str, Any]:
             assets[kind] = opts[-1]
         else:
             assets.pop(kind, None)
-    target.write_text(json.dumps(raw_card, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(target, raw_card)
     return {"path": str(target), "kind": kind, "removed": name,
             "selected": assets.get(kind, ""),
             "options": [_asset_url(_rel(target, n)) for n in opts]}
 
 
+@locked_card_write
 def asset_matte(path: str, kind: str, name: str = "") -> dict[str, Any]:
     """MANUAL background removal on a candidate → a NEW transparent-PNG candidate
     (the raw original is kept in the gallery, so it's reversible — just re-select it).
@@ -369,7 +375,7 @@ def asset_matte(path: str, kind: str, name: str = "") -> dict[str, Any]:
     opts = _options_list(assets, kind)
     opts.append(sidecar.name)
     assets[kind] = sidecar.name  # show the cut version
-    target.write_text(json.dumps(raw_card, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(target, raw_card)
     return {"path": str(target), "kind": kind, "file": sidecar.name, "url": _asset_url(sidecar),
             "selected": sidecar.name,
             "options": [_asset_url(_rel(target, n)) for n in opts]}
@@ -419,6 +425,7 @@ def _sticker_list(assets: dict) -> list[str]:
     return [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
 
 
+@locked_card_write
 def stickers_save(path: str, items: list[str], names: list[str] | None = None,
                   sheet: str | None = None) -> dict[str, Any]:
     """APPEND a batch of sticker cells to the card's set, each saved as
@@ -479,7 +486,7 @@ def stickers_save(path: str, items: list[str], names: list[str] | None = None,
                 sheets = assets.get("sticker_sheets")
                 sheets = [x for x in sheets if isinstance(x, str)] if isinstance(sheets, list) else []
                 assets["sticker_sheets"] = [*sheets, sh.name]
-    target.write_text(json.dumps(raw_card, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(target, raw_card)
     full = _sticker_list(assets)
     sheets = [s for s in (assets.get("sticker_sheets") or []) if isinstance(s, str)]
     return {"path": str(target), "kind": "stickers", "files": full, "added": added,
@@ -487,6 +494,7 @@ def stickers_save(path: str, items: list[str], names: list[str] | None = None,
             "sheets": sheets, "sheet_urls": [_asset_url(_rel(target, n)) for n in sheets]}
 
 
+@locked_card_write
 def sticker_remove(path: str, name: str) -> dict[str, Any]:
     """Delete one sticker (file + list entry). Idempotent only on a tracked name."""
     target = _writable_card_path(path)
@@ -506,11 +514,12 @@ def sticker_remove(path: str, name: str) -> dict[str, Any]:
         except OSError:
             pass
     assets["stickers"] = lst
-    target.write_text(json.dumps(raw_card, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(target, raw_card)
     return {"path": str(target), "removed": name, "files": lst,
             "urls": [_asset_url(_rel(target, n)) for n in lst]}
 
 
+@locked_card_write
 def sticker_rename(path: str, old: str, new: str) -> dict[str, Any]:
     """Rename one sticker's file → ``<stem>.sticker.<slug(new)>.png`` (deduped) so its
     filename carries the user's chosen meaning. Updates the list entry in place."""
@@ -537,7 +546,7 @@ def sticker_rename(path: str, old: str, new: str) -> dict[str, Any]:
             raise HubRpcError(-32050, f"rename failed: {exc}", {"kind": "sticker_rename"}) from exc
     lst[lst.index(old)] = new_name
     assets["stickers"] = lst
-    target.write_text(json.dumps(raw_card, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(target, raw_card)
     return {"path": str(target), "old": old, "new": new_name, "url": _asset_url(dst),
             "files": lst, "urls": [_asset_url(_rel(target, n)) for n in lst]}
 
@@ -568,8 +577,8 @@ _ASSET_READ_CAP = 16 * 1024 * 1024  # max bytes inlined as a data-URI for downlo
 def _is_root_image_asset(p: Path) -> bool:
     """A non-managed image stray in the card ROOT — secret-safe to surface (images carry
     no secrets), unlike arbitrary root files (which on a session card include config.json)."""
-    if not p.is_file() or p.name.startswith("."):
-        return False
+    if p.is_symlink() or not p.is_file() or p.name.startswith("."):
+        return False  # never follow a symlink out of the card folder to an arbitrary host file
     if p.name in _CARD_META_NAMES or p.name.lower().startswith("license"):
         return False
     if p.suffix.lower().lstrip(".") not in _SERVABLE_IMG_EXTS:
@@ -650,6 +659,7 @@ def assets_list(path: str) -> dict[str, Any]:
     return {"path": str(target), "assets": out}
 
 
+@locked_card_write
 def asset_file_upload(path: str, name: str, data_b64: str, ext: str) -> dict[str, Any]:
     """Add an extra asset of ANY format to the card's `assets/` subdir (≤32MB). The name
     is slug-sanitized + deduped; the subdir keeps user files away from the card's managed
@@ -702,6 +712,7 @@ def asset_file_read(path: str, rel: str) -> dict[str, Any]:
     return {"kind": kind, "name": p.name, "size": size, "data_uri": f"data:{mime};base64,{b64}"}
 
 
+@locked_card_write
 def asset_file_delete(path: str, rel: str) -> dict[str, Any]:
     """Delete one extra asset (a root image or an `assets/` file). Traversal / managed
     sidecars / card-meta / non-image root files are all refused by `_resolve_asset_rel`."""
@@ -716,6 +727,7 @@ def asset_file_delete(path: str, rel: str) -> dict[str, Any]:
     return {"path": str(target), "removed": rel}
 
 
+@locked_card_write
 def visual_brief_save(path: str, brief: dict) -> dict[str, Any]:
     """Persist the visual brief on the card (``extensions.lunamoth.visual_brief``) so
     it's REUSED instead of re-generated (the brief is an LLM call). Writable cards
@@ -736,10 +748,11 @@ def visual_brief_save(path: str, brief: dict) -> dict[str, Any]:
     if not isinstance(lm, dict):
         lm = ext_root["lunamoth"] = {}
     lm["visual_brief"] = brief
-    target.write_text(json.dumps(raw_card, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(target, raw_card)
     return {"ok": True, "path": str(target)}
 
 
+@locked_card_write
 def asset_delete(path: str, kind: str) -> dict[str, Any]:
     """Remove an art asset (avatar / sprite / background / keyvisual / stickers):
     delete its sidecar file(s) and drop the card's pointer. Idempotent."""
@@ -814,5 +827,5 @@ def asset_delete(path: str, kind: str) -> dict[str, Any]:
             assets.pop("sticker_sheets", None)
     else:
         raise RpcError(-32602, f"unknown asset kind: {kind}")
-    target.write_text(json.dumps(raw_card, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(target, raw_card)
     return {"path": str(target), "kind": kind, "removed": removed}

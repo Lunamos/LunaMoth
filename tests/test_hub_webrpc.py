@@ -921,6 +921,24 @@ def test_card_asset_library_list_upload_delete():
                      {"path": card, "rel": f"{Path(card).stem}.sprite.deadbeef.png"})["code"] == -32602
 
 
+def test_card_asset_library_rejects_symlink_in_root(tmp_path):
+    # A symlink in the card root must NOT be listed/served (it could point at an arbitrary
+    # host image outside the card folder); the assets/ lane resolves-and-confines too.
+    set_defaults()
+    card = _make_user_card("SymCard")
+    folder = Path(card).parent
+    outside = tmp_path / "secret.png"
+    outside.write_bytes(_PNG_1PX)
+    try:
+        (folder / "link.png").symlink_to(outside)
+    except (OSError, NotImplementedError):
+        import pytest as _pt
+        _pt.skip("symlinks not supported here")
+    rels = {a["rel"] for a in result("card.assets_list", {"path": card})["assets"]}
+    assert "link.png" not in rels  # symlink stray not surfaced
+    assert rpc_error("card.asset_file_delete", {"path": card, "rel": "link.png"})["code"] == -32602
+
+
 def test_set_aspiration_writes_live_store_and_card():
     # 理想/aspiration: the live polaris.json (next turn) + the frozen card field (next wake).
     meta = wake_session()

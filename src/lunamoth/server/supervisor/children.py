@@ -173,11 +173,15 @@ class CharaChild:
             log.close()
             self.state, self.detail = "running", ""
             # A fresh process reads the (possibly edited) card into its stable prefix,
-            # so any "card changed since start" flag is now satisfied — clear it.
+            # so any "card changed since start" flag is now satisfied — clear it. Locked +
+            # atomic (shared with the hub's config writers) so it can't tear config.json /
+            # drop the api_key, nor lose-update against a concurrent card.patch.
             with contextlib.suppress(OSError, json.JSONDecodeError):
-                cfg = json.loads(meta.config_path.read_text(encoding="utf-8"))
-                if cfg.pop("card_dirty", None) is not None:
-                    meta.config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+                from ..hub._common import _atomic_write_json, card_write_lock
+                with card_write_lock(meta.config_path):
+                    cfg = json.loads(meta.config_path.read_text(encoding="utf-8"))
+                    if cfg.pop("card_dirty", None) is not None:
+                        _atomic_write_json(meta.config_path, cfg, private=True)
             self.restart.note_started()
             self._stdout_task = asyncio.create_task(self._read_stdout(), name=f"chara-{self.name}-stdout")
             self._idle_task = asyncio.create_task(self._idle_loop(), name=f"chara-{self.name}-idle")

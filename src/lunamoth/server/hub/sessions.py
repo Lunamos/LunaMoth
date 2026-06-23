@@ -26,7 +26,7 @@ from ...content.knobs import normalize_embodiment, normalize_website
 from ...session import sessions as S
 from ...session.settings import Settings
 from ..dispatch import RpcError
-from ._common import _atomic_write_json, _slug
+from ._common import _atomic_write_json, _slug, card_write_lock
 from .cards import _copy_card_assets, _merge_preserving, _sanitize_card_extensions
 from .config import load_defaults
 
@@ -623,11 +623,7 @@ def set_modules(meta: S.SessionMeta, force_roleplay: Any = None,
         cfg["website_override"] = "on" if bool(website) else "off"
         if bool(website):
             _write_home_scaffold(meta)  # ensure the homepage exists when turned on
-    meta.config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    try:
-        meta.config_path.chmod(0o600)
-    except OSError:
-        pass
+    _atomic_write_json(meta.config_path, cfg, private=True)
     return {
         "ok": True,
         "force_roleplay": cfg.get("embodiment_override") == "actor",
@@ -647,24 +643,26 @@ def set_aspiration(meta: S.SessionMeta, text: str) -> dict[str, Any]:
     pol = meta.sandbox_dir / "polaris.json"
     try:
         pol.parent.mkdir(parents=True, exist_ok=True)
-        pol.write_text(json.dumps({"polaris": text}, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_write_json(pol, {"polaris": text})
     except OSError as e:
         raise RpcError(-32031, f"could not write the aspiration: {e}") from e
-    # persist on the frozen card too (so a restart / re-wake keeps it)
+    # persist on the frozen card too (so a restart / re-wake keeps it). Share the card
+    # lock so a concurrent card.patch / visual save on the same session card can't lose it.
     card = meta.root / "card.json"
     if card.is_file():
         try:
-            raw = json.loads(card.read_text(encoding="utf-8"))
-            data = raw.get("data") if isinstance(raw, dict) else None
-            if isinstance(data, dict):
-                ext = data.setdefault("extensions", {})
-                lm = ext.setdefault("lunamoth", {}) if isinstance(ext, dict) else None
-                if isinstance(lm, dict):
-                    if text:
-                        lm["polaris"] = text
-                    else:
-                        lm.pop("polaris", None)
-                    card.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+            with card_write_lock(card):
+                raw = json.loads(card.read_text(encoding="utf-8"))
+                data = raw.get("data") if isinstance(raw, dict) else None
+                if isinstance(data, dict):
+                    ext = data.setdefault("extensions", {})
+                    lm = ext.setdefault("lunamoth", {}) if isinstance(ext, dict) else None
+                    if isinstance(lm, dict):
+                        if text:
+                            lm["polaris"] = text
+                        else:
+                            lm.pop("polaris", None)
+                        _atomic_write_json(card, raw)
         except (OSError, json.JSONDecodeError):
             pass  # best-effort card persist; the live store is this session's source of truth
     return {"ok": True, "polaris": text, "applies": "next_turn"}
@@ -684,23 +682,26 @@ def session_for_card(path: str) -> S.SessionMeta | None:
 
 def mark_card_dirty(meta: S.SessionMeta) -> None:
     """Flag that the chara's card changed since its process last started, so the UI can
-    show '待应用 / apply pending'. Cleared when the child (re)starts (children.start)."""
-    try:
-        cfg = json.loads(meta.config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return
-    if not cfg.get("card_dirty"):
-        cfg["card_dirty"] = True
-        meta.config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    show '待应用 / apply pending'. Cleared when the child (re)starts (children.start).
+    Locked + atomic so a concurrent config write can't tear it / drop the api_key."""
+    with card_write_lock(meta.config_path):
+        try:
+            cfg = json.loads(meta.config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if not cfg.get("card_dirty"):
+            cfg["card_dirty"] = True
+            _atomic_write_json(meta.config_path, cfg, private=True)
 
 
 def clear_card_dirty(meta: S.SessionMeta) -> None:
-    try:
-        cfg = json.loads(meta.config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return
-    if cfg.pop("card_dirty", None) is not None:
-        meta.config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    with card_write_lock(meta.config_path):
+        try:
+            cfg = json.loads(meta.config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if cfg.pop("card_dirty", None) is not None:
+            _atomic_write_json(meta.config_path, cfg, private=True)
 
 
 def set_isolation(meta: S.SessionMeta, isolation: str) -> dict[str, Any]:
@@ -720,11 +721,7 @@ def set_isolation(meta: S.SessionMeta, isolation: str) -> dict[str, Any]:
         # chara's model/etc) — surface it, exactly as set_modules does.
         raise RpcError(-32031, f"cannot read session config for {meta.name!r}: {e}") from e
     cfg["isolation"] = iso
-    meta.config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    try:
-        meta.config_path.chmod(0o600)
-    except OSError:
-        pass
+    _atomic_write_json(meta.config_path, cfg, private=True)
     meta.isolation = iso
     return {"ok": True, "isolation": iso, "applies": "next_start"}
 

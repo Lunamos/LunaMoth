@@ -22,11 +22,13 @@ from ...session import sessions as S
 from ..dispatch import RpcError
 from ._common import (
     _asset_url,
+    _atomic_write_json,
     _clean_theme,
     _sanitize_avatar_svg,
     _slug,
     _writable_card_path,
     is_managed_sidecar_name,
+    locked_card_write,
 )
 from .avatars import _avatar_thumb_uri
 from .config import bundled_cards_dir, user_cards_dir, user_worlds_dir
@@ -243,6 +245,7 @@ def _session_card_entry(meta: S.SessionMeta) -> dict[str, Any] | None:
     return entry
 
 
+@locked_card_write
 def save_card(data: dict[str, Any], path: str = "") -> dict[str, Any]:
     """Write a V3 card JSON into the user deck (create flow / drafts)."""
     if not isinstance(data, dict) or not isinstance(data.get("data"), dict):
@@ -267,7 +270,7 @@ def save_card(data: dict[str, Any], path: str = "") -> dict[str, Any]:
     data.setdefault("version", "1.0")  # our own card format; we no longer emit the ST spec markers
     data["name"] = name
     _sanitize_card_extensions(data)
-    target.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(target, data)
     return {"path": str(target)}
 
 
@@ -284,6 +287,7 @@ def _deep_patch(base: Any, over: Any) -> Any:
     return over
 
 
+@locked_card_write
 def patch_card(path: str, fields: dict[str, Any]) -> dict[str, Any]:
     """Field-level merge-write of a card's ``data``: only the provided keys change,
     everything else is preserved (deep patch). Accepts a deck card OR a LIVING chara's
@@ -306,7 +310,7 @@ def patch_card(path: str, fields: dict[str, Any]) -> dict[str, Any]:
     if isinstance(name, str) and name.strip():
         raw["name"] = name.strip()  # keep the top-level mirror in sync
     _sanitize_card_extensions(raw)
-    target.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(target, raw)
     return {"path": str(target)}
 
 
