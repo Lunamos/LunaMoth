@@ -172,6 +172,12 @@ class CharaChild:
             )
             log.close()
             self.state, self.detail = "running", ""
+            # A fresh process reads the (possibly edited) card into its stable prefix,
+            # so any "card changed since start" flag is now satisfied — clear it.
+            with contextlib.suppress(OSError, json.JSONDecodeError):
+                cfg = json.loads(meta.config_path.read_text(encoding="utf-8"))
+                if cfg.pop("card_dirty", None) is not None:
+                    meta.config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
             self.restart.note_started()
             self._stdout_task = asyncio.create_task(self._read_stdout(), name=f"chara-{self.name}-stdout")
             self._idle_task = asyncio.create_task(self._idle_loop(), name=f"chara-{self.name}-idle")

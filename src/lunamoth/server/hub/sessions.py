@@ -417,6 +417,8 @@ def session_entry(meta: S.SessionMeta, supervisor: Any | None = None) -> dict[st
         "isolation": meta.isolation,
         "model": cfg.get("model", ""),
         "mode": cfg.get("mode", "live"),
+        # the chara's card changed since its process started → UI shows 待应用 +「立即应用」
+        "card_dirty": bool(cfg.get("card_dirty")),
         "created_at": meta.created_at,
         "last_active": meta.last_active or meta.created_at,
         "speaks": _transcript_speaks(meta),
@@ -632,6 +634,73 @@ def set_modules(meta: S.SessionMeta, force_roleplay: Any = None,
         "website": cfg.get("website_override") == "on",
         "applies": "next_start",
     }
+
+
+def set_aspiration(meta: S.SessionMeta, text: str) -> dict[str, Any]:
+    """Set the chara's aspiration (理想 — the user-owned north-star). Writes the LIVE
+    ``sandbox/polaris.json`` (a running chara re-reads it EVERY turn → takes effect
+    next turn, no restart) AND the frozen session card field so it survives a restart
+    or re-wake. The aspiration is read-only to the chara; only the user sets it."""
+    text = str(text or "").strip()[:1000]
+    # live store — same on-disk format as tools.polaris.PolarisStore (kept inline so
+    # the server layer never imports core/tools). Next turn the running chara reads it.
+    pol = meta.sandbox_dir / "polaris.json"
+    try:
+        pol.parent.mkdir(parents=True, exist_ok=True)
+        pol.write_text(json.dumps({"polaris": text}, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as e:
+        raise RpcError(-32031, f"could not write the aspiration: {e}") from e
+    # persist on the frozen card too (so a restart / re-wake keeps it)
+    card = meta.root / "card.json"
+    if card.is_file():
+        try:
+            raw = json.loads(card.read_text(encoding="utf-8"))
+            data = raw.get("data") if isinstance(raw, dict) else None
+            if isinstance(data, dict):
+                ext = data.setdefault("extensions", {})
+                lm = ext.setdefault("lunamoth", {}) if isinstance(ext, dict) else None
+                if isinstance(lm, dict):
+                    if text:
+                        lm["polaris"] = text
+                    else:
+                        lm.pop("polaris", None)
+                    card.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+        except (OSError, json.JSONDecodeError):
+            pass  # best-effort card persist; the live store is this session's source of truth
+    return {"ok": True, "polaris": text, "applies": "next_turn"}
+
+
+def session_for_card(path: str) -> S.SessionMeta | None:
+    """The session that OWNS a frozen card path (``<sessions>/<name>/card.json``), or
+    None for a deck/template card."""
+    try:
+        rp = Path(str(path or "")).resolve()
+    except OSError:
+        return None
+    if rp.name == "card.json" and rp.parent.parent == S.sessions_dir().resolve():
+        return S.load_session(rp.parent.name)
+    return None
+
+
+def mark_card_dirty(meta: S.SessionMeta) -> None:
+    """Flag that the chara's card changed since its process last started, so the UI can
+    show '待应用 / apply pending'. Cleared when the child (re)starts (children.start)."""
+    try:
+        cfg = json.loads(meta.config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not cfg.get("card_dirty"):
+        cfg["card_dirty"] = True
+        meta.config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def clear_card_dirty(meta: S.SessionMeta) -> None:
+    try:
+        cfg = json.loads(meta.config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if cfg.pop("card_dirty", None) is not None:
+        meta.config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def set_isolation(meta: S.SessionMeta, isolation: str) -> dict[str, Any]:

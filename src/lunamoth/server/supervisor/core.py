@@ -140,6 +140,18 @@ class Supervisor:
         Supervisor.set_mode_on_disk(child.meta, "chat")
         return await child.stop()
 
+    async def restart_chara(self, name: str) -> dict[str, Any]:
+        """Apply a card edit to a RUNNING chara: stop+start the child so it re-reads
+        its frozen card into the cached stable prefix (history is restored by
+        make_session). Preserves the current mode (doesn't force live/chat). A stopped
+        chara is left stopped — its next start reads the new card anyway."""
+        child = self.child(name)
+        running = child.proc is not None and child.proc.returncode is None
+        if running:
+            await child.stop()
+            await child.start()
+        return {"restarted": running, **child.status()}
+
     async def set_autonomy(self, name: str, on: bool) -> dict[str, Any]:
         """Flip autonomy (mode live|chat) WITHOUT killing the chat you're in —
         the in-chat switch. A running child is told via its /mode command so the

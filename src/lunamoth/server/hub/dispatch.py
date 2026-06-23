@@ -137,6 +137,9 @@ class HubDispatcher:
             "session.wake": self._session_wake,
             "session.set_modules": self._session_set_modules,
             "chara.set_isolation": self._chara_set_isolation,
+            "chara.set_aspiration": lambda p: _sessions.set_aspiration(_meta(p), str(p.get("text") or "")),
+            "chara.apply_card": self._chara_apply_card,
+            "card.visual_jobs": self._card_visual_jobs,
             "toolpacks.list": lambda p: _sessions.list_toolpacks(),
             "keys.list": lambda p: _config.list_keys(),
             "keys.save": self._keys_save,
@@ -173,7 +176,7 @@ class HubDispatcher:
             "cards.list": lambda p: _cards.list_cards(),
             "card.read": self._card_read,
             "card.save": lambda p: _cards.save_card(p.get("data"), path=str(p.get("path") or "")),
-            "card.patch": lambda p: _cards.patch_card(str(p.get("path") or ""), p.get("fields") or {}),
+            "card.patch": self._card_patch,
             "card.delete": lambda p: _cards.delete_card(str(p.get("path") or "")),
             "card.restore": lambda p: _cards.restore_card(str(p.get("trash_id") or "")),
             "card.duplicate": lambda p: _cards.duplicate_card(str(p.get("path") or "")),
@@ -289,6 +292,13 @@ class HubDispatcher:
         return _sessions.export_session(_meta(p))
 
     def _session_wake(self, p: dict[str, Any]) -> Any:
+        # If a visual is still generating for this card, waking now would freeze a copy
+        # that's missing the in-flight image — warn unless the user chose to wake anyway.
+        from ...visuals import jobs
+        card = str(p.get("card") or "")
+        if not bool(p.get("force")) and jobs.running_for(card) > 0:
+            raise HubRpcError(-32050, "a visual is still generating for this card — wait or wake anyway",
+                              {"kind": "visual_in_flight"})
         cd = p.get("card_data")
         return _sessions.wake(
             card_path=str(p.get("card") or ""),
@@ -313,6 +323,40 @@ class HubDispatcher:
 
     def _chara_set_isolation(self, p: dict[str, Any]) -> Any:
         return _sessions.set_isolation(_meta(p), str(p.get("isolation") or ""))
+
+    def _chara_running(self, meta: "S.SessionMeta") -> bool:
+        if self.supervisor is not None:
+            st = self.supervisor.chara_status(meta.name)
+            return bool(st and st.get("state") == "running")
+        return meta.status() in ("attached", "running")
+
+    def _card_patch(self, p: dict[str, Any]) -> Any:
+        # Field-level merge writer (deck OR a living chara's session card). When the
+        # edited card belongs to a RUNNING chara, flag it dirty so the UI offers 立即应用
+        # (the soul rides the cache-stable prefix → it only re-reads on (re)start).
+        path = str(p.get("path") or "")
+        out = _cards.patch_card(path, p.get("fields") or {})
+        meta = _sessions.session_for_card(path)
+        if meta is not None and self._chara_running(meta):
+            _sessions.mark_card_dirty(meta)
+            out["card_dirty"] = True
+        return out
+
+    def _chara_apply_card(self, p: dict[str, Any]) -> Any:
+        # Apply a pending card edit to a running chara = restart its child (history is
+        # restored by make_session). No resident supervisor → just clear the flag; the
+        # next start reads the new card.
+        meta = _meta(p)
+        if self.supervisor is None:
+            _sessions.clear_card_dirty(meta)
+            return {"ok": True, "restarted": False, "applies": "next_start"}
+        res = _await_supervisor(self.supervisor, self.supervisor.restart_chara(meta.name))
+        _sessions.clear_card_dirty(meta)
+        return {"ok": True, **(res if isinstance(res, dict) else {})}
+
+    def _card_visual_jobs(self, p: dict[str, Any]) -> Any:
+        from ...visuals import jobs
+        return {"running": jobs.running_for(str(p.get("path") or ""))}
 
     def _keys_save(self, p: dict[str, Any]) -> Any:
         return _config.save_key(str(p.get("label") or ""), provider=str(p.get("provider") or ""),
@@ -451,7 +495,8 @@ class HubDispatcher:
             saved = _avatars.asset_save(path, kind, base64.b64encode(data).decode("ascii"), out["ext"])
             return {"saved": True, "kind": kind, "url": saved["url"], "note": out["note"], "matted": bool(out.get("matted"))}
 
-        return {"status": "running", "job_id": jobs.submit(_run, label=f"visual:{kind}")}
+        return {"status": "running",
+                "job_id": jobs.submit(_run, label=f"visual:{kind}", meta={"path": path})}
 
     def _card_visual_job(self, p: dict[str, Any]) -> Any:
         # Poll a card.visual_generate job. running → {status:"running"}; ready →

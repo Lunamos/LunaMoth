@@ -36,14 +36,16 @@ def _evict_locked(now: float) -> None:
             _JOBS.pop(jid, None)
 
 
-def submit(target: Callable[[], Any], *, label: str = "") -> str:
-    """Run ``target()`` on a daemon thread; return a job_id to poll with ``status``."""
+def submit(target: Callable[[], Any], *, label: str = "", meta: dict | None = None) -> str:
+    """Run ``target()`` on a daemon thread; return a job_id to poll with ``status``.
+    ``meta`` is opaque tracking data (e.g. ``{"path": card_path}``) queryable via
+    ``running_for`` so a wake can tell whether a card still has a generation in flight."""
     job_id = f"vj-{uuid.uuid4().hex[:12]}"
     now = time.monotonic()
     with _LOCK:
         _evict_locked(now)
         _JOBS[job_id] = {"status": "running", "result": None, "error": "",
-                         "label": label, "started_at": now, "done_at": 0.0}
+                         "label": label, "meta": meta or {}, "started_at": now, "done_at": 0.0}
 
     def _run() -> None:
         try:
@@ -77,6 +79,18 @@ def status(job_id: str) -> dict:
         if j["status"] == "failed":
             return {"status": "failed", "error": j["error"]}
         return {"status": "ready", "result": j["result"]}
+
+
+def running_for(card_path: str) -> int:
+    """How many generations are STILL running for a given card path (its sidecars are
+    auto-saved on completion, so this tells a wake whether to wait/warn)."""
+    if not card_path:
+        return 0
+    now = time.monotonic()
+    with _LOCK:
+        _evict_locked(now)
+        return sum(1 for j in _JOBS.values()
+                   if j["status"] == "running" and (j.get("meta") or {}).get("path") == card_path)
 
 
 def _reset() -> None:

@@ -879,6 +879,63 @@ def test_card_patch_merges_field_preserving_rest():
     assert rpc_error("card.patch", {"path": builtin, "fields": {"description": "x"}})["code"] in (-32031, -32035)
 
 
+def test_set_aspiration_writes_live_store_and_card():
+    # 理想/aspiration: the live polaris.json (next turn) + the frozen card field (next wake).
+    meta = wake_session()
+    out = result("chara.set_aspiration", {"name": meta.name, "text": "become a great cook"})
+    assert out["applies"] == "next_turn" and out["polaris"] == "become a great cook"
+    assert json.loads((meta.sandbox_dir / "polaris.json").read_text())["polaris"] == "become a great cook"
+    card = json.loads((meta.root / "card.json").read_text(encoding="utf-8"))
+    assert card["data"]["extensions"]["lunamoth"]["polaris"] == "become a great cook"
+    # clearing empties both the live store and the card field
+    result("chara.set_aspiration", {"name": meta.name, "text": ""})
+    assert json.loads((meta.sandbox_dir / "polaris.json").read_text())["polaris"] == ""
+    assert "polaris" not in json.loads((meta.root / "card.json").read_text())["data"]["extensions"]["lunamoth"]
+
+
+def test_card_patch_dirty_flag_and_apply_for_running_chara():
+    # Editing a RUNNING chara's card flags it dirty (待应用); apply clears it.
+    meta = wake_session()
+    sc = str(meta.root / "card.json")
+    # not running → no dirty flag
+    result("card.patch", {"path": sc, "fields": {"description": "d1"}})
+    assert not json.loads((meta.root / "config.json").read_text()).get("card_dirty")
+    # simulate a live child (pid file points at this process)
+    meta.mark_running()
+    out = result("card.patch", {"path": sc, "fields": {"description": "d2"}})
+    assert out.get("card_dirty") is True
+    assert json.loads((meta.root / "config.json").read_text())["card_dirty"] is True
+    assert any(e["name"] == meta.name and e["card_dirty"] for e in result("sessions.list"))
+    # apply (no supervisor) clears the flag; the next start would read the new card
+    ap = result("chara.apply_card", {"name": meta.name})
+    assert ap["restarted"] is False
+    assert not json.loads((meta.root / "config.json").read_text()).get("card_dirty")
+    meta.clear_running()
+
+
+def test_card_visual_jobs_and_wake_inflight_guard():
+    import threading
+    import time
+    from lunamoth.visuals import jobs
+    jobs._reset()
+    set_defaults()
+    card = _make_user_card("InFlight")
+    ev = threading.Event()
+    jid = jobs.submit(lambda: ev.wait(3), meta={"path": card})
+    # a running generation is reported for the card + blocks an un-forced wake
+    assert result("card.visual_jobs", {"path": card})["running"] == 1
+    err = rpc_error("session.wake", {"card": card})
+    assert err["code"] == -32050 and err["data"]["kind"] == "visual_in_flight"
+    # force wakes anyway
+    assert result("session.wake", {"card": card, "force": True})["name"]
+    ev.set()
+    for _ in range(100):
+        if jobs.status(jid)["status"] != "running":
+            break
+        time.sleep(0.02)
+    assert result("card.visual_jobs", {"path": card})["running"] == 0
+
+
 def test_card_visual_brief(monkeypatch):
     set_defaults()
     card = str(H.bundled_cards_dir() / "Quinn" / "card.json")
