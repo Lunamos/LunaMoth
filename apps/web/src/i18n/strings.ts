@@ -569,6 +569,8 @@ export const I18N = {
   "vis-kind-stickers": ["表情包", "Stickers"],
   "vis-anchor-hint": ["建议先生成「主视觉」作为主参考图——其余头像/立绘/表情/背景会以它为参考，保持是同一个角色。", "Generate the Key visual first as the main reference — the avatar / sprite / stickers / background then use it so they stay the same character."],
   "vis-gen-progress": ["生成中 · {n}s", "Generating · {n}s"],
+  "vis-gen-done": ["{name} 的{kind}生成完成，已保存并覆盖到角色卡。", "{name}'s {kind} is ready — saved to the card."],
+  "vis-gen-done-fallback": ["这张卡", "this card"],
   "vis-gen-all": ["✨ 一键全部生成（{n} 张）", "✨ Generate all ({n})"],
   "vis-gen-all-cost": ["将先生成主视觉作为参考，再依次生成其余各项；共消耗 {n} 次生图额度。", "Generates the key visual first as the reference, then the rest in turn — {n} image credits in total."],
   "vis-gen-all-confirm": ["这将消耗 {n} 次生图额度（真实计费），并覆盖已有的对应图片。建议先下载备份。继续？", "This spends {n} image credits (real billing) and overwrites the matching existing images. Download backups first. Continue?"],

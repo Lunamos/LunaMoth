@@ -379,6 +379,7 @@ export function VisualEditor({
           <VisualSlot
             key={kind}
             kind={kind}
+            cardName={String(card.name || "")}
             cardPath={cardPath}
             initUrl={initUrlFor(kind, card)}
             initSet={kind === "stickers" ? (card.stickers_urls || []).map((u) => assetUrl(String(u))) : []}
@@ -405,6 +406,7 @@ export function VisualEditor({
 
 function VisualSlot({
   kind,
+  cardName,
   cardPath,
   initUrl,
   initSet,
@@ -421,6 +423,7 @@ function VisualSlot({
   registerGenerate,
 }: {
   kind: VisKind;
+  cardName: string;
   cardPath: string;
   initUrl: string;
   initSet: string[];
@@ -468,7 +471,10 @@ function VisualSlot({
       else setCurSrc(out.url ? bust(assetUrl(String(out.url))) : "");
       setIdle();
       onGenerated();
-      deckToast(t("saved"));
+      deckToast(t("vis-gen-done", {
+        name: cardName || t("vis-gen-done-fallback"),
+        kind: t(("vis-kind-" + kind) as Parameters<TFn>[0]),
+      }));
       await refreshHub();
       onChanged();
     } catch (e) {

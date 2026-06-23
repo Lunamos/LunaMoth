@@ -58,8 +58,9 @@ describe("I18N strings map", () => {
   // on/off 沙盒 switch (like the other wake toggles): removed 5 (wake-iso, iso-dir,
   // iso-sandbox, iso-dir-d, iso-sandbox-d), added wake-iso-sub → 590.
   // The visuals editor's "write the brief first" gate added vis-need-brief → 591.
-  it("preserves the full key set from the source dict (591 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(591);
+  // A descriptive post-generation toast added vis-gen-done + vis-gen-done-fallback → 593.
+  it("preserves the full key set from the source dict (593 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(593);
   });
 
   it("every value is a [zh, en] string tuple", () => {
