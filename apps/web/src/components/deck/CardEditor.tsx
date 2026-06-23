@@ -111,6 +111,12 @@ export function CardEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.path]);
 
+  // Drop any pending debounced live-save when the editor unmounts, so a 600ms timer
+  // armed by a field blur on close can't fire a stray card.patch after teardown.
+  useEffect(() => () => {
+    if (liveSaveTimer.current) window.clearTimeout(liveSaveTimer.current);
+  }, []);
+
   // Poll whether a visual is still generating for this card → the wake button shows
   // 生成中 and warns (waking mid-generation would freeze a card missing the image).
   useEffect(() => {
@@ -580,10 +586,24 @@ function fileToB64(f: File): Promise<string> {
   });
 }
 
-interface CardAsset { name: string; url: string; size: number }
+interface CardAsset { rel: string; name: string; url: string | null; size: number; kind: string }
 
-/* 素材 manager — the card's extra image assets (everything beside the card that isn't
-   the managed visual set). View / upload / delete, each saved immediately. */
+const KIND_GLYPH: Record<string, string> = {
+  image: "🖼", audio: "🎵", video: "🎬", pdf: "📕", text: "📄", archive: "🗜", file: "📦",
+};
+function assetExt(name: string): string {
+  const i = name.lastIndexOf(".");
+  return i > 0 ? name.slice(i + 1).toUpperCase().slice(0, 4) : "";
+}
+function humanSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/* 素材 manager — the card's extra files of ANY format (everything beside the card that
+   isn't the managed visual set). Images thumbnail inline; other files show a glyph and
+   download via card.asset_file_read. View / upload / delete, each saved immediately. */
 function AssetsPane({ cardPath, disabled }: { cardPath: string; disabled: boolean }) {
   const t = useT();
   const { hub } = useHubApi();
@@ -591,7 +611,6 @@ function AssetsPane({ cardPath, disabled }: { cardPath: string; disabled: boolea
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
-  const EXTS = ["png", "jpg", "jpeg", "webp", "gif"];
 
   const load = async () => {
     try {
@@ -607,13 +626,12 @@ function AssetsPane({ cardPath, disabled }: { cardPath: string; disabled: boolea
   }, [cardPath]);
 
   const onUpload = async (f: File) => {
+    if (f.size > 32 * 1024 * 1024) { setErr(t("av-up-size")); return; }
     const ext = (f.name.split(".").pop() || "").toLowerCase();
-    if (!EXTS.includes(ext)) { setErr(t("av-up-type")); return; }
-    if (f.size > 16 * 1024 * 1024) { setErr(t("av-up-size")); return; }
     setBusy(true); setErr("");
     try {
       const b64 = await fileToB64(f);
-      await hub.call("card.asset_file_upload", { path: cardPath, name: f.name, data_b64: b64, ext }, 30000);
+      await hub.call("card.asset_file_upload", { path: cardPath, name: f.name, data_b64: b64, ext }, 60000);
       await load();
       deckToast(t("saved"));
     } catch (e) {
@@ -622,16 +640,38 @@ function AssetsPane({ cardPath, disabled }: { cardPath: string; disabled: boolea
       setBusy(false);
     }
   };
-  const onDelete = async (name: string) => {
+  const onDelete = async (a: CardAsset) => {
     if (!confirm(t("vis-del-q"))) return;
     setBusy(true); setErr("");
     try {
-      await hub.call("card.asset_file_delete", { path: cardPath, name }, 15000);
+      await hub.call("card.asset_file_delete", { path: cardPath, rel: a.rel }, 15000);
       await load();
     } catch (e) {
       setErr(rpcErrText(t, e as { message?: string }));
     } finally {
       setBusy(false);
+    }
+  };
+  const download = async (a: CardAsset) => {
+    setErr("");
+    try {
+      let href = a.url ? assetUrl(a.url) : "";
+      if (!href) {
+        // the /asset route can't serve a non-image from a card/session dir → read it.
+        const r = await hub.call<{ data_uri?: string; too_large?: boolean }>(
+          "card.asset_file_read", { path: cardPath, rel: a.rel }, 60000);
+        if (r.too_large) { setErr(t("cv-asset-toobig")); return; }
+        href = r.data_uri || "";
+      }
+      if (!href) return;
+      const el = document.createElement("a");
+      el.href = href;
+      el.download = a.name;
+      document.body.appendChild(el);
+      el.click();
+      el.remove();
+    } catch (e) {
+      setErr(rpcErrText(t, e as { message?: string }));
     }
   };
 
@@ -640,10 +680,17 @@ function AssetsPane({ cardPath, disabled }: { cardPath: string; disabled: boolea
       <div className="av-note">{t("cv-assets-note")}</div>
       <div className="cv-assets-grid">
         {items.map((a) => (
-          <div className="cv-asset" key={a.name} title={a.name}>
-            <img src={assetUrl(a.url)} alt="" />
+          <div className="cv-asset" key={a.rel} title={`${a.name} · ${humanSize(a.size)}`}>
+            {a.kind === "image" && a.url ? (
+              <img src={assetUrl(a.url)} alt="" onClick={() => void download(a)} />
+            ) : (
+              <button className="cv-asset-glyph" onClick={() => void download(a)} title={t("cv-asset-download")}>
+                <span className="cv-asset-ic">{KIND_GLYPH[a.kind] || KIND_GLYPH.file}</span>
+                <span className="cv-asset-ext">{assetExt(a.name)}</span>
+              </button>
+            )}
             {!disabled && (
-              <button className="vis-cand-x" title={t("del-word")} disabled={busy} onClick={() => void onDelete(a.name)}>×</button>
+              <button className="vis-cand-x" title={t("del-word")} disabled={busy} onClick={() => void onDelete(a)}>×</button>
             )}
             <span className="cv-asset-name">{a.name}</span>
           </div>
@@ -659,7 +706,6 @@ function AssetsPane({ cardPath, disabled }: { cardPath: string; disabled: boolea
       <input
         ref={fileInput}
         type="file"
-        accept=".png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif"
         style={{ display: "none" }}
         onChange={(e) => {
           const f = e.target.files && e.target.files[0];

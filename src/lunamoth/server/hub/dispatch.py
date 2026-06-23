@@ -175,8 +175,10 @@ class HubDispatcher:
             "card.asset_file_upload": lambda p: _avatars.asset_file_upload(
                 str(p.get("path") or ""), str(p.get("name") or ""),
                 str(p.get("data_b64") or ""), str(p.get("ext") or "")),
+            "card.asset_file_read": lambda p: _avatars.asset_file_read(
+                str(p.get("path") or ""), str(p.get("rel") or p.get("name") or "")),
             "card.asset_file_delete": lambda p: _avatars.asset_file_delete(
-                str(p.get("path") or ""), str(p.get("name") or "")),
+                str(p.get("path") or ""), str(p.get("rel") or p.get("name") or "")),
             "card.asset_delete": lambda p: _avatars.asset_delete(str(p.get("path") or ""), str(p.get("kind") or "")),
             "card.avatar_read": lambda p: _avatars.avatar_read(str(p.get("path") or "")),
             "cards.list": lambda p: _cards.list_cards(),

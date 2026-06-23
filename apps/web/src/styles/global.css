@@ -1136,7 +1136,13 @@ body.dragging::after{
 .cv-assets-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:10px}
 .cv-asset{position:relative; display:flex; flex-direction:column; gap:4px}
 .cv-asset>img{width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px;
-  border:1px solid var(--hairline); background:var(--hairline-2)}
+  border:1px solid var(--hairline); background:var(--hairline-2); cursor:pointer}
+.cv-asset-glyph{width:100%; aspect-ratio:1; border-radius:8px; border:1px solid var(--hairline);
+  background:var(--field-bg); cursor:pointer; display:flex; flex-direction:column; gap:4px;
+  align-items:center; justify-content:center; color:var(--text-2)}
+.cv-asset-glyph:hover{border-color:var(--accent); color:var(--text)}
+.cv-asset-ic{font-size:26px; line-height:1}
+.cv-asset-ext{font-size:9px; font-weight:600; letter-spacing:.5px; color:var(--text-3)}
 .cv-asset .vis-cand-x{top:2px; right:2px; display:none}
 .cv-asset:hover .vis-cand-x{display:block}
 .cv-asset-name{font-size:10px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis;

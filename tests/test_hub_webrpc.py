@@ -880,40 +880,45 @@ def test_card_patch_merges_field_preserving_rest():
 
 
 def test_card_asset_library_list_upload_delete():
-    # The 素材 tab: extra images beside the card (NOT the managed art) are listed,
-    # uploadable, deletable — and never shadow a managed sidecar or card meta file.
+    # The 素材 tab: extra files of ANY format. Uploads land in the assets/ subdir; root
+    # IMAGE strays also surface; managed art + card meta + session secrets never do.
     import base64 as b64m
     set_defaults()
     card = _make_user_card("AssetLib")
     folder = Path(card).parent
-    # a managed sidecar + a stray extra image are both on disk
+    # a managed sidecar + a stray root image are both on disk
     (folder / f"{Path(card).stem}.sprite.deadbeef.png").write_bytes(_PNG_1PX)
     (folder / "reference.png").write_bytes(_PNG_1PX)
     listed = result("card.assets_list", {"path": card})["assets"]
-    names = {a["name"] for a in listed}
-    assert "reference.png" in names                       # stray extra image shows
-    assert not any(".sprite." in n for n in names)        # managed art excluded
-    assert "card.json" not in names                       # card meta excluded
-    assert all(a["url"].startswith("/asset?") for a in listed)
-    # upload a new asset
+    rels = {a["rel"] for a in listed}
+    assert "reference.png" in rels                          # stray root image shows
+    assert not any(".sprite." in r for r in rels)           # managed art excluded
+    assert "card.json" not in rels                          # card meta excluded
+    # upload a non-image (any format) → lands in assets/, no url, kind=text
     up = result("card.asset_file_upload",
-                {"path": card, "name": "Mood Board!", "data_b64": b64m.b64encode(_PNG_1PX).decode(), "ext": "png"})
-    assert up["name"] == "mood-board.png" and (folder / up["name"]).is_file()
-    # a tricky name can never become a managed-sidecar name (the slug strips the dots)
-    safe = result("card.asset_file_upload",
-                  {"path": card, "name": "my.sprite.thing", "data_b64": b64m.b64encode(_PNG_1PX).decode(), "ext": "png"})
-    assert not any(m in safe["name"] for m in (".sprite.", ".avatar.", ".keyvisual.", ".background.", ".sticker."))
-    assert safe["name"].endswith(".png")
-    # re-uploading the same name dedups with a -1 suffix
+                {"path": card, "name": "Notes!", "data_b64": b64m.b64encode(b"hello world").decode(), "ext": "txt"})
+    assert up["rel"] == "assets/notes.txt" and up["kind"] == "text" and up["url"] is None
+    assert (folder / "assets" / "notes.txt").is_file()
+    # read it back (preview/download path, since /asset can't serve a non-image here)
+    rd = result("card.asset_file_read", {"path": card, "rel": up["rel"]})
+    assert rd["kind"] == "text" and rd["content"] == "hello world"
+    # an image upload also goes to assets/ but IS servable (has a url)
+    img = result("card.asset_file_upload",
+                 {"path": card, "name": "mood board", "data_b64": b64m.b64encode(_PNG_1PX).decode(), "ext": "png"})
+    assert img["rel"] == "assets/mood-board.png" and img["url"].startswith("/asset?")
+    # re-upload dedups
     dup = result("card.asset_file_upload",
                  {"path": card, "name": "mood board", "data_b64": b64m.b64encode(_PNG_1PX).decode(), "ext": "png"})
-    assert dup["name"] == "mood-board-1.png"
-    # delete; traversal / managed names refused
-    result("card.asset_file_delete", {"path": card, "name": "reference.png"})
+    assert dup["rel"] == "assets/mood-board-1.png"
+    # delete by rel; traversal / managed / card-meta refused
+    result("card.asset_file_delete", {"path": card, "rel": "reference.png"})
     assert not (folder / "reference.png").exists()
-    assert rpc_error("card.asset_file_delete", {"path": card, "name": "../card.json"})["code"] == -32602
+    result("card.asset_file_delete", {"path": card, "rel": "assets/notes.txt"})
+    assert not (folder / "assets" / "notes.txt").exists()
+    assert rpc_error("card.asset_file_delete", {"path": card, "rel": "../card.json"})["code"] == -32602
+    assert rpc_error("card.asset_file_delete", {"path": card, "rel": "config.json"})["code"] == -32602
     assert rpc_error("card.asset_file_delete",
-                     {"path": card, "name": f"{Path(card).stem}.sprite.deadbeef.png"})["code"] == -32602
+                     {"path": card, "rel": f"{Path(card).stem}.sprite.deadbeef.png"})["code"] == -32602
 
 
 def test_set_aspiration_writes_live_store_and_card():

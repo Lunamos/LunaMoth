@@ -74,8 +74,9 @@ def _copy_card_assets(card: "CharacterCard", dest_dir: Path, src_base: Path | No
         v = a.get(key)
         if isinstance(v, list):
             rels += [s for s in v if isinstance(s, str)]
-    # Extra (non-managed) image assets beside the card travel with it too — the card
-    # editor's 素材 tab manages these; carry them so a woken chara keeps its references.
+    # Extra assets (the 素材 tab) travel with the card too: non-managed IMAGE strays in
+    # the card root + EVERYTHING in the card's assets/ subdir (any format). So a woken
+    # chara keeps its references / docs.
     _EXTRA_IMG = (".png", ".jpg", ".jpeg", ".webp", ".gif")
     try:
         for p in sorted(base.iterdir()):
@@ -84,6 +85,11 @@ def _copy_card_assets(card: "CharacterCard", dest_dir: Path, src_base: Path | No
                     and p.name not in ("card.png",)
                     and not _is_asset_sidecar(p)):
                 rels.append(p.name)
+        sub = base / "assets"
+        if sub.is_dir():
+            for p in sorted(sub.iterdir()):
+                if p.is_file() and not p.name.startswith("."):
+                    rels.append(f"assets/{p.name}")
     except OSError:
         pass
     for rel in rels:

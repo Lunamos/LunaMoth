@@ -15,6 +15,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Callable
 
 _LOCK = threading.Lock()
@@ -81,16 +82,28 @@ def status(job_id: str) -> dict:
         return {"status": "ready", "result": j["result"]}
 
 
+def _norm_path(p: str) -> str:
+    """Resolve a path for a robust equality test (absolute, symlinks/.. collapsed) —
+    aligned with session_for_card so a trailing-slash / relative variant can't slip
+    past the in-flight guard. Falls back to the raw string if resolution fails."""
+    try:
+        return str(Path(p).resolve())
+    except (OSError, ValueError):
+        return p
+
+
 def running_for(card_path: str) -> int:
     """How many generations are STILL running for a given card path (its sidecars are
     auto-saved on completion, so this tells a wake whether to wait/warn)."""
     if not card_path:
         return 0
+    want = _norm_path(card_path)
     now = time.monotonic()
     with _LOCK:
         _evict_locked(now)
         return sum(1 for j in _JOBS.values()
-                   if j["status"] == "running" and (j.get("meta") or {}).get("path") == card_path)
+                   if j["status"] == "running"
+                   and _norm_path(str((j.get("meta") or {}).get("path") or "")) == want)
 
 
 def _reset() -> None:
