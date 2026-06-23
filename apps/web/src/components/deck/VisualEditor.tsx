@@ -449,6 +449,7 @@ function VisualSlot({
   const [busy, setBusy] = useState(false);
   const [busyMsg, setBusyMsg] = useState("");
   const [errText, setErrText] = useState("");
+  const [extra, setExtra] = useState("");  // optional 额外提示词 for this generation
   // A cut-kind (sprite/stickers) was generated but the background wasn't removed
   // (engine not ready). Generation SUCCEEDED — this is a soft, fixable notice.
   const [matteSkipped, setMatteSkipped] = useState(false);
@@ -471,7 +472,7 @@ function VisualSlot({
     try {
       const out = await runVisualJob(
         hubCall,
-        { path: cardPath, kind, brief: await getBrief(), refs: getRefs() },
+        { path: cardPath, kind, brief: await getBrief(), refs: getRefs(), extra: extra.trim() },
         (sec) => setBusyMsg(t("vis-gen-progress", { n: sec })),
       );
       if (isSet) setCurSet((out.urls || []).map((u) => bust(assetUrl(String(u)))));
@@ -589,6 +590,13 @@ function VisualSlot({
         >
           {t("vis-generate")}
         </button>
+        <input
+          className="vis-extra"
+          value={extra}
+          disabled={disabled || busy}
+          placeholder={t("vis-extra-ph")}
+          onChange={(e) => setExtra(e.target.value)}
+        />
         {!isSet && (
           <button className="btn soft sm" disabled={disabled || busy} onClick={() => fileInput.current?.click()}>
             {t("av-upload")}

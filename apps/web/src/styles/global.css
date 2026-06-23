@@ -1387,7 +1387,10 @@ details.cv-raw pre{
 .vis-sticker-cell{aspect-ratio:1/1; display:flex; align-items:center; justify-content:center;
   background:var(--panel); border:1px solid var(--hairline); border-radius:8px; overflow:hidden}
 .vis-sticker-cell img{max-width:100%; max-height:100%; object-fit:contain}
-.vis-slot-acts{display:flex; gap:7px; flex-wrap:wrap}
+.vis-slot-acts{display:flex; gap:7px; flex-wrap:wrap; align-items:center}
+.vis-extra{flex:1; min-width:120px; height:28px; border:1px solid var(--hairline); background:var(--field-bg);
+  color:var(--text); border-radius:var(--field-radius,8px); padding:0 10px; font-size:12px; font-family:inherit}
+.vis-extra::placeholder{color:var(--text-3)}
 .vis-stage{margin-top:8px}
 .vis-stage-acts{display:flex; gap:7px; margin-top:8px}
 /* The "generate the brief + every image" action, sitting just under the brief —
