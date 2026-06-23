@@ -259,6 +259,23 @@ def _big_png(px=512):
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def test_avatar_upload_squares_a_rectangular_image():
+    # A rectangular (e.g. model-returned) avatar is center-cropped to a square so it
+    # shows as a clean rounded tile, not a letterboxed rectangle.
+    import base64 as _b
+    import io
+    from PIL import Image
+    set_defaults()
+    path = _make_user_card("Sq")
+    rect = Image.new("RGB", (160, 60), (200, 30, 30))
+    buf = io.BytesIO(); rect.save(buf, "PNG")
+    out = result("card.avatar_upload", {"path": path, "data_b64": _b.b64encode(buf.getvalue()).decode(), "ext": "png"})
+    assert out["avatar_file"].endswith(".avatar.png")
+    uri = result("card.avatar_read", {"path": path})["data_uri"]
+    im = Image.open(io.BytesIO(_b.b64decode(uri.split(",", 1)[1])))
+    assert im.size[0] == im.size[1]  # squared
+
+
 def test_list_cards_inline_avatar_is_small_thumbnail():
     """The board list embeds a TINY webp thumbnail, not the full sidecar — the
     full-res avatar still rides /asset & avatar_read."""
@@ -649,6 +666,31 @@ def test_card_stickers_save_and_delete():
     raw = json.loads(open(card, encoding="utf-8").read())
     assert "stickers" not in raw["data"]["extensions"]["lunamoth"].get("assets", {})
     assert result("card.asset_delete", {"path": card, "kind": "stickers"})["removed"] is False
+
+
+def test_keyvisual_generation_receives_user_refs(monkeypatch):
+    # User reference images must feed EVERY generation, the keyvisual MOST of all (it's
+    # the identity anchor). Not an img2img concern — models like Seedream take
+    # image + text → image together, so refs ride alongside the prompt.
+    card, _b64 = _user_card_copy(None)
+    H.save_key("火山", provider="volcano",
+               base_url="https://ark.cn-beijing.volces.com/api/v3", api_key="sk-img-test")
+    H.save_defaults({"image_provider": "volcano", "image_model": "doubao-seedream-x"})
+    monkeypatch.setattr(H, "_complete",
+                        lambda *a, **k: '{"appearance":"a","style":"anime","palette":"p","world":"w","theme":"#1a2"}')
+    from lunamoth.tools.builtin import _image_gen
+    seen = {}
+
+    def fake_ark(prompt, size, refs=None):
+        seen["refs"] = refs
+        return ["http://x/kv.png"]
+
+    monkeypatch.setattr(_image_gen, "ark_generate", fake_ark)
+    monkeypatch.setattr(_image_gen, "download_bytes", lambda url: b"\x89PNG\r\n\x1a\nFAKE")
+    sub = result("card.visual_generate", {"path": card, "kind": "keyvisual",
+                                          "refs": ["data:image/png;base64,REF1"]})
+    _await_visual(sub["job_id"])
+    assert seen["refs"] == ["data:image/png;base64,REF1"]  # the user ref reached the keyvisual
 
 
 def test_card_visual_generate_stickers_async(monkeypatch):
