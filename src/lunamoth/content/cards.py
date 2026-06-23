@@ -247,8 +247,23 @@ class CharacterCard:
         return a if isinstance(a, dict) else {}
 
     def asset_path(self, kind: str) -> Path | None:
-        """Resolved path of a single-file art asset (sprite/background/keyvisual)."""
+        """Resolved path of the SELECTED single-file art asset (sprite/background/keyvisual)."""
         return self._resolve(self._asset_rel(self.assets().get(kind)))
+
+    def asset_options(self, kind: str) -> list[Path]:
+        """Resolved, existing candidate paths for a kind (the non-destructive gallery),
+        order preserved. Falls back to the single selected asset for pre-gallery cards."""
+        opts = (self.assets().get("options") or {}).get(kind)
+        names = opts if isinstance(opts, list) else []
+        if not names:
+            sel = self.assets().get(kind)
+            names = [sel] if isinstance(sel, str) and sel else []
+        out = []
+        for v in names:
+            p = self._resolve(self._asset_rel(v))
+            if p is not None:
+                out.append(p)
+        return out
 
     def sticker_paths(self) -> list[Path]:
         """Resolved, existing sticker sidecar paths (order preserved)."""

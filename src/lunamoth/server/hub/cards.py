@@ -61,10 +61,15 @@ def _copy_card_assets(card: "CharacterCard", dest_dir: Path, src_base: Path | No
     if card.avatar_file():
         rels.append(card.avatar_file())
     a = card.assets()
+    opts = a.get("options") if isinstance(a.get("options"), dict) else {}
     for kind in ("sprite", "background", "keyvisual"):
         v = a.get(kind)
         if isinstance(v, str):
             rels.append(v)
+        # carry the whole candidate gallery, not just the selected one
+        lst = opts.get(kind)
+        if isinstance(lst, list):
+            rels += [s for s in lst if isinstance(s, str)]
     stk = a.get("stickers")
     if isinstance(stk, list):
         rels += [s for s in stk if isinstance(s, str)]
@@ -164,6 +169,10 @@ def _card_entry(path: Path, builtin: bool, refs: dict[str, list[str]]) -> dict[s
         "bg_url": _asset_url(card.asset_path("background")),
         "keyvisual_url": _asset_url(card.asset_path("keyvisual")),
         "stickers_urls": [u for u in (_asset_url(p) for p in card.sticker_paths()) if u],
+        # The non-destructive candidate gallery per kind (selected = *_url above).
+        "sprite_options": [u for u in (_asset_url(p) for p in card.asset_options("sprite")) if u],
+        "bg_options": [u for u in (_asset_url(p) for p in card.asset_options("background")) if u],
+        "keyvisual_options": [u for u in (_asset_url(p) for p in card.asset_options("keyvisual")) if u],
         "force_roleplay": bool(force_roleplay),
     }
 

@@ -11,6 +11,7 @@ import base64
 import binascii
 import json
 import urllib.parse
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -166,6 +167,44 @@ def _art_sidecar_path(card_path: Path, kind: str, ext: str) -> Path:
     return card_path.with_name(f"{card_path.stem}.{kind}.{ext}")
 
 
+def _art_candidate_path(card_path: Path, kind: str, ext: str) -> Path:
+    """A UNIQUE candidate sidecar so generations never overwrite — the gallery keeps
+    them all and `assets[kind]` points at the selected one."""
+    return card_path.with_name(f"{card_path.stem}.{kind}.{uuid.uuid4().hex[:8]}.{ext}")
+
+
+def _assets_dict(raw_card: dict) -> dict:
+    """The card's extensions.lunamoth.assets dict, created if absent."""
+    data = raw_card.get("data")
+    if not isinstance(data, dict):
+        data = raw_card["data"] = {}
+    ext_root = data.get("extensions")
+    if not isinstance(ext_root, dict):
+        ext_root = data["extensions"] = {}
+    lm = ext_root.get("lunamoth")
+    if not isinstance(lm, dict):
+        lm = ext_root["lunamoth"] = {}
+    assets = lm.get("assets")
+    if not isinstance(assets, dict):
+        assets = lm["assets"] = {}
+    return assets
+
+
+def _options_list(assets: dict, kind: str) -> list:
+    """The candidate gallery for a kind, seeding the pre-gallery single `assets[kind]`
+    as the first entry (read-tolerant migration). Returns the live list."""
+    opts = assets.get("options")
+    if not isinstance(opts, dict):
+        opts = assets["options"] = {}
+    lst = opts.get(kind)
+    if not isinstance(lst, list):
+        lst = opts[kind] = []
+    cur = assets.get(kind)
+    if isinstance(cur, str) and cur and cur not in lst:
+        lst.insert(0, cur)  # migrate the existing single asset into the gallery
+    return lst
+
+
 def _looks_like(raw: bytes, ext: str) -> bool:
     if ext == "webp":
         return len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"
@@ -196,38 +235,78 @@ def asset_save(path: str, kind: str, data_b64: str, ext: str) -> dict[str, Any]:
     if not _looks_like(raw, ext):
         raise HubRpcError(-32602, f"the file does not look like a .{ext} image",
                           {"kind": "asset_type", "detail": "magic-byte mismatch"})
-    # Compress on save (cap long side, preserve format+alpha) so user uploads
-    # don't reintroduce huge files. Best-effort: a non-shrinkable image is kept
-    # as-is, so the already-validated bytes are never lost.
+    # Compress on save (cap long side, preserve format+alpha). Best-effort: a
+    # non-shrinkable image is kept as-is, so the already-validated bytes are never lost.
     raw = compress_image_bytes(raw, ext, CAP_ART)
-    keep = _art_sidecar_path(target, kind, ext).name
-    for old in _ART_EXTS:
-        sc = _art_sidecar_path(target, kind, old)
-        if sc.name != keep and sc.exists():
-            try:
-                sc.unlink()
-            except OSError:
-                pass
-    sidecar = _art_sidecar_path(target, kind, ext)
+    # NON-DESTRUCTIVE: save a UNIQUE candidate, append to the gallery, auto-select it.
+    # Older candidates are kept so the user can switch back / swap freely.
+    sidecar = _art_candidate_path(target, kind, ext)
     sidecar.write_bytes(raw)
     raw_card = json.loads(target.read_text(encoding="utf-8"))
     if not isinstance(raw_card, dict):
         raise RpcError(-32602, "card is not a JSON object")
-    data = raw_card.get("data")
-    if not isinstance(data, dict):
-        data = raw_card["data"] = {}
-    ext_root = data.get("extensions")
-    if not isinstance(ext_root, dict):
-        ext_root = data["extensions"] = {}
-    lm = ext_root.get("lunamoth")
-    if not isinstance(lm, dict):
-        lm = ext_root["lunamoth"] = {}
-    assets = lm.get("assets")
-    if not isinstance(assets, dict):
-        assets = lm["assets"] = {}
-    assets[kind] = sidecar.name
+    assets = _assets_dict(raw_card)
+    opts = _options_list(assets, kind)
+    if sidecar.name not in opts:
+        opts.append(sidecar.name)
+    assets[kind] = sidecar.name  # newest is auto-selected
     target.write_text(json.dumps(raw_card, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"path": str(target), "kind": kind, "file": sidecar.name, "url": _asset_url(sidecar)}
+    return {"path": str(target), "kind": kind, "file": sidecar.name, "url": _asset_url(sidecar),
+            "selected": sidecar.name,
+            "options": [_asset_url(target.with_name(n)) for n in opts]}
+
+
+def asset_select(path: str, kind: str, name: str) -> dict[str, Any]:
+    """Make an existing gallery candidate the active one for a kind (just repoints
+    ``assets[kind]`` — non-destructive)."""
+    target = _writable_card_path(path)
+    kind = str(kind or "").strip().lower()
+    if kind not in _ART_ASSET_KINDS:
+        raise RpcError(-32602, f"unknown art asset kind: {kind}")
+    name = str(name or "").strip()
+    raw_card = json.loads(target.read_text(encoding="utf-8"))
+    if not isinstance(raw_card, dict):
+        raise RpcError(-32602, "card is not a JSON object")
+    assets = _assets_dict(raw_card)
+    opts = _options_list(assets, kind)
+    if name not in opts or not target.with_name(name).is_file():
+        raise RpcError(-32602, f"no such candidate for {kind}: {name}")
+    assets[kind] = name
+    target.write_text(json.dumps(raw_card, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"path": str(target), "kind": kind, "selected": name,
+            "url": _asset_url(target.with_name(name))}
+
+
+def asset_remove(path: str, kind: str, name: str) -> dict[str, Any]:
+    """Delete one gallery candidate (file + list entry). If it was selected, fall back
+    to the newest remaining candidate (or clear the kind if none remain)."""
+    target = _writable_card_path(path)
+    kind = str(kind or "").strip().lower()
+    if kind not in _ART_ASSET_KINDS:
+        raise RpcError(-32602, f"unknown art asset kind: {kind}")
+    name = str(name or "").strip()
+    raw_card = json.loads(target.read_text(encoding="utf-8"))
+    if not isinstance(raw_card, dict):
+        raise RpcError(-32602, "card is not a JSON object")
+    assets = _assets_dict(raw_card)
+    opts = _options_list(assets, kind)
+    if name in opts:
+        opts.remove(name)
+    sc = target.with_name(name)
+    if sc.is_file():
+        try:
+            sc.unlink()
+        except OSError:
+            pass
+    if assets.get(kind) == name:
+        if opts:
+            assets[kind] = opts[-1]
+        else:
+            assets.pop(kind, None)
+    target.write_text(json.dumps(raw_card, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"path": str(target), "kind": kind, "removed": name,
+            "selected": assets.get(kind, ""),
+            "options": [_asset_url(target.with_name(n)) for n in opts]}
 
 
 # ---- sticker set (表情包) — a LIST of cut cells, not a single sidecar -----------
@@ -345,16 +424,31 @@ def asset_delete(path: str, kind: str) -> dict[str, Any]:
             lm.pop("avatar_file", None)
             lm.pop("avatar_svg", None)
     elif kind in _ART_ASSET_KINDS:
-        for e in _ART_EXTS:
-            sc = _art_sidecar_path(target, kind, e)
+        assets = lm.get("assets") if isinstance(lm, dict) else None
+        # Delete EVERY candidate in the gallery (+ the legacy single sidecar), then
+        # clear both the pointer and the options list.
+        names: set[str] = set()
+        if isinstance(assets, dict):
+            opts = (assets.get("options") or {}).get(kind)
+            if isinstance(opts, list):
+                names.update(n for n in opts if isinstance(n, str))
+            sel = assets.get(kind)
+            if isinstance(sel, str):
+                names.add(sel)
+        for e in _ART_EXTS:  # legacy single-name sidecar, pre-gallery
+            names.add(_art_sidecar_path(target, kind, e).name)
+        for n in names:
+            sc = target.with_name(n)
             if sc.exists():
                 try:
                     sc.unlink(); removed = True
                 except OSError:
                     pass
-        assets = lm.get("assets") if isinstance(lm, dict) else None
         if isinstance(assets, dict):
             assets.pop(kind, None)
+            opts = assets.get("options")
+            if isinstance(opts, dict):
+                opts.pop(kind, None)
     elif kind == "stickers":
         for i in range(_STICKER_MAX):
             sc = _sticker_sidecar_path(target, i)

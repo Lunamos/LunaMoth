@@ -625,26 +625,59 @@ def _user_card_copy(monkeypatch):
 
 
 def test_card_asset_save_and_delete_sprite():
-    card, _b64 = _user_card_copy(None)
-    b64 = _b64.b64encode(_PNG_1PX).decode("ascii")
+    import base64 as b64m
+    set_defaults()
+    card = _make_user_card("SpriteCard")  # clean card, no pre-existing assets
+    b64 = b64m.b64encode(_PNG_1PX).decode("ascii")
     out = result("card.asset_save", {"path": card, "kind": "sprite", "data_b64": b64, "ext": "png"})
-    assert out["kind"] == "sprite" and out["file"].endswith(".sprite.png")
+    assert out["kind"] == "sprite" and ".sprite." in out["file"] and out["file"].endswith(".png")
     assert out["url"].startswith("/asset?")
-    # the card now points at it
+    # the card points at it, and it's in the candidate gallery
     raw = json.loads(open(card, encoding="utf-8").read())
-    assert raw["data"]["extensions"]["lunamoth"]["assets"]["sprite"] == out["file"]
+    lm = raw["data"]["extensions"]["lunamoth"]
+    assert lm["assets"]["sprite"] == out["file"]
+    assert lm["assets"]["options"]["sprite"] == [out["file"]]
     assert (Path(card).with_name(out["file"])).is_file()
     # bad kind / bad ext / non-image body are clean param errors
     assert rpc_error("card.asset_save", {"path": card, "kind": "nope", "data_b64": b64, "ext": "png"})["code"] == -32602
     assert rpc_error("card.asset_save", {"path": card, "kind": "sprite", "data_b64": b64, "ext": "gif"})["code"] == -32602
-    bad = _b64.b64encode(b"<html>nope</html>").decode("ascii")
+    bad = b64m.b64encode(b"<html>nope</html>").decode("ascii")
     assert rpc_error("card.asset_save", {"path": card, "kind": "sprite", "data_b64": bad, "ext": "png"})["code"] == -32602
-    # delete removes the file + the pointer (idempotent)
+    # delete removes EVERY candidate + the pointer + the options list (idempotent)
     out = result("card.asset_delete", {"path": card, "kind": "sprite"})
     assert out["removed"] is True
     raw = json.loads(open(card, encoding="utf-8").read())
     assert "sprite" not in raw["data"]["extensions"]["lunamoth"].get("assets", {})
+    assert "sprite" not in (raw["data"]["extensions"]["lunamoth"]["assets"].get("options") or {})
     assert result("card.asset_delete", {"path": card, "kind": "sprite"})["removed"] is False
+
+
+def test_card_asset_gallery_select_and_remove():
+    # Generation/upload is NON-destructive: each save is a new candidate; select
+    # repoints; remove deletes one and re-selects another.
+    import base64 as b64m
+    set_defaults()
+    card = _make_user_card("GalleryCard")  # clean card, no pre-existing assets
+    b64 = b64m.b64encode(_PNG_1PX).decode("ascii")
+    a = result("card.asset_save", {"path": card, "kind": "background", "data_b64": b64, "ext": "png"})["file"]
+    b = result("card.asset_save", {"path": card, "kind": "background", "data_b64": b64, "ext": "png"})["file"]
+    assert a != b  # unique candidate names, no overwrite
+    lm = json.loads(open(card, encoding="utf-8").read())["data"]["extensions"]["lunamoth"]
+    assert lm["assets"]["options"]["background"] == [a, b] and lm["assets"]["background"] == b  # newest selected
+    assert (Path(card).with_name(a)).is_file() and (Path(card).with_name(b)).is_file()
+    # select the older one
+    result("card.asset_select", {"path": card, "kind": "background", "name": a})
+    assert json.loads(open(card, encoding="utf-8").read())["data"]["extensions"]["lunamoth"]["assets"]["background"] == a
+    assert rpc_error("card.asset_select", {"path": card, "kind": "background", "name": "nope.png"})["code"] == -32602
+    # remove the selected (a) → falls back to the remaining (b); file gone
+    out = result("card.asset_remove", {"path": card, "kind": "background", "name": a})
+    assert out["selected"] == b
+    assert not (Path(card).with_name(a)).is_file()
+    lm = json.loads(open(card, encoding="utf-8").read())["data"]["extensions"]["lunamoth"]
+    assert lm["assets"]["options"]["background"] == [b] and lm["assets"]["background"] == b
+    # list_cards surfaces the gallery
+    entry = next(c for c in H.list_cards() if c["path"] == card)
+    assert len(entry["bg_options"]) == 1
 
 
 def test_card_stickers_save_and_delete():
