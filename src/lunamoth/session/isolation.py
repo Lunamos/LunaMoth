@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -42,10 +43,25 @@ _LANDLOCK_NETOFF_WARNED = False
 
 # Don't hand the agent our own provider/credentials through the environment.
 # Applies to EVERY child we spawn — one-shot commands and interactive shells.
-_ENV_BLOCKLIST = (
+# This is a NAME-PATTERN denylist, not a fixed 6-name list: any var whose name
+# looks like a secret (API keys, tokens, passwords, cloud creds — including OUR
+# OWN OpenRouter/Ark/DashScope keys and AWS_*/HF_* the old list missed) is
+# stripped, plus the explicit provider vars we set ourselves. (A strict allowlist
+# would be tighter but routinely breaks programs needing locale/proxy/XDG env; a
+# pattern denylist removes the leak with no functional breakage.)
+_ENV_EXPLICIT_DENY = frozenset({
     "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "ANTHROPIC_API_KEY",
     "GITHUB_TOKEN", "LLM_PROVIDER",
+})
+_ENV_SECRET_RE = re.compile(
+    r"(API_?KEY|ACCESS_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|_KEY$|^AWS_|^HF_)",
+    re.IGNORECASE,
 )
+
+
+def _is_secret_env(name: str) -> bool:
+    """True if an env var NAME looks like a credential we must not hand the child."""
+    return name in _ENV_EXPLICIT_DENY or bool(_ENV_SECRET_RE.search(name))
 
 
 class JailUnavailableError(RuntimeError):
@@ -105,10 +121,23 @@ def _darwin_user_temp() -> str:
 
 
 def _base_env(workspace: Path) -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if k not in _ENV_BLOCKLIST}
+    env = {k: v for k, v in os.environ.items() if not _is_secret_env(k)}
     env["TMPDIR"] = str(workspace)  # keep temp files inside the writable jail
     env.setdefault("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin")
     return env
+
+
+def _sbpl(path) -> str:
+    """A filesystem path as a SAFE Seatbelt string-literal body (what goes between
+    the quotes in ``(subpath "…")``). SBPL literals are double-quoted; an unescaped
+    ``"`` or ``\\`` — both legal in macOS filenames, and ``writable`` paths come from
+    the operator's ``/allow-dir`` — could close the literal and inject profile
+    directives (e.g. ``(allow default)``), neutralizing the jail. Escape both; reject
+    control chars no legitimate jail target needs."""
+    s = str(path)
+    if any(c in s for c in ("\n", "\r", "\x00")):
+        raise JailUnavailableError(f"path not representable in a sandbox profile: {s!r}")
+    return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _macos_profile(workspace: Path, allow_network: bool, writable: list[Path], *,
@@ -135,7 +164,7 @@ def _macos_profile(workspace: Path, allow_network: bool, writable: list[Path], *
         # can't. Re-allow metadata-ONLY on home so traversal works while file
         # CONTENTS stay denied (file-read-data not re-allowed → the key is safe).
         b_writes = "\n".join(
-            f'(allow file-write* (subpath "{p}"))'
+            f'(allow file-write* (subpath "{_sbpl(p)}"))'
             for p in [workspace, *writable, Path(_darwin_user_temp()), Path("/private/tmp")]
         )
         b_net = "" if allow_network else "(deny network*)"  # AF_UNIX (local socket) is unaffected
@@ -144,22 +173,22 @@ def _macos_profile(workspace: Path, allow_network: bool, writable: list[Path], *
         # like the shell jail does. But the highest-value operator secrets are cheap
         # to deny surgically — they're never anything a browser legitimately reads.
         secret_dirs = "\n".join(
-            f'(deny file-read* (subpath "{user_home / d}"))'
+            f'(deny file-read* (subpath "{_sbpl(user_home / d)}"))'
             for d in (".ssh", ".aws", ".gnupg", ".kube", ".config/gcloud", ".docker")
         )
         return f'''
 (version 1)
 (allow default)
-(deny file-read* (subpath "{home}"))
-(allow file-read-metadata (subpath "{home}"))
+(deny file-read* (subpath "{_sbpl(home)}"))
+(allow file-read-metadata (subpath "{_sbpl(home)}"))
 {secret_dirs}
-(allow file-read* (subpath "{workspace}"))
-(allow file-read* (subpath "{assets}"))
+(allow file-read* (subpath "{_sbpl(workspace)}"))
+(allow file-read* (subpath "{_sbpl(assets)}"))
 (deny file-write*)
 {b_writes}
 (allow file-write* (literal "/dev/null") (literal "/dev/tty") (literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/dtracehelper"))
 {b_net}'''
-    writes = "\n".join(f'(allow file-write* (subpath "{p}"))' for p in [workspace, *writable])
+    writes = "\n".join(f'(allow file-write* (subpath "{_sbpl(p)}"))' for p in [workspace, *writable])
     net = "(allow network*)" if allow_network else "(deny network*)"
     # Tighten reads: a shell needs system libs/binaries, so keep the broad read
     # allow for /usr,/bin,/System,… — but DENY the user's whole HOME (so
@@ -175,10 +204,10 @@ def _macos_profile(workspace: Path, allow_network: bool, writable: list[Path], *
     # --binds them read+write — otherwise /allow-dir would be write-but-not-read).
     reads = (
         '(allow file-read*)\n'
-        f'(deny file-read* (subpath "{user_home}"))\n'
-        f'(deny file-read* (subpath "{home}"))\n'
-        + "".join(f'(allow file-read* (subpath "{p}"))\n' for p in [workspace, *writable])
-        + f'(allow file-read* (subpath "{assets}"))'
+        f'(deny file-read* (subpath "{_sbpl(user_home)}"))\n'
+        f'(deny file-read* (subpath "{_sbpl(home)}"))\n'
+        + "".join(f'(allow file-read* (subpath "{_sbpl(p)}"))\n' for p in [workspace, *writable])
+        + f'(allow file-read* (subpath "{_sbpl(assets)}"))'
     )
     # An interactive shell sits on a pty SLAVE (/dev/ttysNN on macOS): job
     # control (TIOCSPGRP/TIOCGWINSZ) and termios need ioctl plus read/write on

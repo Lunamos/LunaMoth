@@ -167,3 +167,42 @@ def test_terminal_tools_never_select_the_browser_jail():
                         isinstance(kw.value, ast.Constant) and kw.value.value is False), (
                         f"{fname}: a shell tool passes browser= to run_terminal — "
                         "the loose browser jail must not be reachable from the model's shell")
+
+
+# ---- security regressions: Seatbelt path escaping + env secret filtering -----
+
+def test_macos_profile_escapes_quotes_in_writable_paths(tmp_path):
+    """An operator /allow-dir path containing a double-quote (legal in a macOS
+    filename) must NOT break out of the SBPL string literal to inject directives.
+    Regression for the profile-injection vector."""
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    evil = tmp_path / 'a") (allow default) (deny nothing'  # would inject if unescaped
+    evil.mkdir()
+    prof = isolation._macos_profile(ws, True, [evil], browser=False)
+    # the injected quote is backslash-escaped, so it can't terminate the SBPL
+    # literal — the path stays ONE string atom, no directive is injected.
+    assert '\\")' in prof  # the breakout quote rendered as \" inside the literal
+    # the unescaped path never appears as a bare, closed literal (would be a breakout)
+    assert f'(subpath "{evil}")' not in prof
+
+
+def test_sbpl_rejects_newline_paths():
+    import pytest
+    with pytest.raises(isolation.JailUnavailableError):
+        isolation._sbpl("/tmp/a\nb")
+
+
+def test_base_env_strips_secret_named_vars(tmp_path, monkeypatch):
+    """Provider keys + any secret-looking env name (our own OpenRouter/Ark/DashScope
+    keys, AWS_*, *_TOKEN) are stripped from every jailed child; benign vars survive."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-secret")
+    monkeypatch.setenv("ARK_API_KEY", "ark-secret")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+    monkeypatch.setenv("HF_TOKEN", "hf-secret")
+    monkeypatch.setenv("GITHUB_TOKEN", "gh-secret")
+    monkeypatch.setenv("LANG", "en_US.UTF-8")  # benign — must survive
+    env = isolation._base_env(tmp_path)
+    for leaked in ("OPENROUTER_API_KEY", "ARK_API_KEY", "AWS_SECRET_ACCESS_KEY", "HF_TOKEN", "GITHUB_TOKEN"):
+        assert leaked not in env, f"{leaked} leaked into the jailed child env"
+    assert env.get("LANG") == "en_US.UTF-8"  # locale not stripped
