@@ -181,7 +181,11 @@ SCHEMA = {
         "pass that character's reference picture via `reference_images` so the "
         "result actually looks like them — e.g. your own portrait/sprite, or a "
         "photo from a place you're visiting. You give the file PATH(s); the tool "
-        "reads and attaches them. Needs the network on and an image key configured."
+        "reads and attaches them. "
+        "Prefer NOT to generate images unprompted — it spends your user's image credits, "
+        "so generate when they've asked for one or clearly agreed, rather than on your own "
+        "initiative without their go-ahead. "
+        "Needs the network on and an image key configured."
     ),
     "parameters": {
         "type": "object",
