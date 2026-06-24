@@ -67,6 +67,8 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - name: Install deps
         run: npm ci
+      - name: Lint (eslint — fails on errors)
+        run: npm run lint
       - name: Typecheck (tsc --noEmit)
         run: npm run typecheck
       - name: Unit tests (vitest)

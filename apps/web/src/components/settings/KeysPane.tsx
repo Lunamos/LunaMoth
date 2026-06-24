@@ -65,7 +65,7 @@ export function KeysPane() {
     finally { setBusy(""); }
   };
 
-  const useKey = async (label: string) => {
+  const activateKey = async (label: string) => {
     setBusy(label);
     setRows((p) => p?.map((r) => ({ ...r, active: r.label === label })) ?? p); // optimistic
     try { await hub.call("defaults.use_key", { label }, 15000); await refresh(); }
@@ -109,14 +109,14 @@ export function KeysPane() {
             key={pp.label} name={pp.label} desc={t(pp.descKey as Parameters<typeof t>[0])} row={byLabel(pp.label)}
             busy={busy === pp.label}
             onSave={(k) => saveKey(pp.label, pp.provider, pp.base_url, k, false)}
-            onUse={() => useKey(pp.label)} onTest={() => testKey(pp.label)}
+            onUse={() => activateKey(pp.label)} onTest={() => testKey(pp.label)}
           />
         ))}
         {customRows.map((r) => (
           <ProviderRow
             key={r.label} name={r.label} desc={r.base_url} custom row={r} busy={busy === r.label}
             onSave={(k) => saveKey(r.label, r.provider, r.base_url, k, false)}
-            onUse={() => useKey(r.label)} onDelete={() => del(r.label)} onTest={() => testKey(r.label)}
+            onUse={() => activateKey(r.label)} onDelete={() => del(r.label)} onTest={() => testKey(r.label)}
           />
         ))}
       </div>

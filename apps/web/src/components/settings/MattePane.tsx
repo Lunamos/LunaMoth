@@ -65,7 +65,7 @@ export function MatteSection() {
   }, [prepId]);
 
   const setBusyId = (id: string, on: boolean) =>
-    setBusy((prev) => { const next = new Set(prev); on ? next.add(id) : next.delete(id); return next; });
+    setBusy((prev) => { const next = new Set(prev); if (on) next.add(id); else next.delete(id); return next; });
 
   const act = async (id: string, method: string) => {
     if (busy.has(id)) return;
