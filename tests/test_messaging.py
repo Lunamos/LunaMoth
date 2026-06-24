@@ -1116,20 +1116,48 @@ def test_gateway_config_error_exits_fatal_not_retried(tmp_path, monkeypatch):
     assert cli.cmd_gateway(ns) == GATEWAY_FATAL_EXIT
 
 
-def test_warn_if_open_allowlist_logs_only_when_open(caplog, monkeypatch):
-    """An empty allow-list (= open) must emit a loud WARNING; a restricted one is silent."""
+def test_warn_if_open_allowlist_logs_by_posture(caplog, monkeypatch):
+    """A '*' wildcard = truly OPEN → loud WARNING (returns True). An empty list with
+    NO owner → nobody can reach it → a (different) WARNING. An empty list WITH an
+    owner (owner-only) or a restricted list → silent."""
     import logging
     from lunamoth.messaging.access import warn_if_open_allowlist
     # obs.setup_logging (run by sibling tests) cuts propagation on "lunamoth";
     # restore it so caplog sees the record regardless of test order.
     monkeypatch.setattr(logging.getLogger("lunamoth"), "propagate", True)
+    # '*' → truly open
     with caplog.at_level(logging.WARNING, logger="lunamoth.messaging.access"):
-        assert warn_if_open_allowlist(set(), channel="weixin") is True
-    assert any("OPEN allow-list" in r.message for r in caplog.records)
+        assert warn_if_open_allowlist({"*"}, channel="weixin") is True
+    assert any("OPEN" in r.message for r in caplog.records)
+    # empty + no owner → "nobody can reach" warning, not "open"
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="lunamoth.messaging.access"):
+        assert warn_if_open_allowlist(set(), channel="weixin") is False
+    assert any("NOBODY" in r.message for r in caplog.records)
+    # empty + owner = owner-only → silent
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="lunamoth.messaging.access"):
+        assert warn_if_open_allowlist(set(), channel="weixin", owner_id="me") is False
+    assert not caplog.records
+    # restricted list → silent
     caplog.clear()
     with caplog.at_level(logging.WARNING, logger="lunamoth.messaging.access"):
         assert warn_if_open_allowlist({"u1"}, channel="weixin") is False
-    assert not any("OPEN allow-list" in r.message for r in caplog.records)
+    assert not caplog.records
+
+
+def test_sender_allowed_owner_and_wildcard():
+    from lunamoth.messaging.access import sender_allowed
+    # empty list: owner-only
+    assert sender_allowed("me", set(), owner_id="me") is True
+    assert sender_allowed("stranger", set(), owner_id="me") is False
+    assert sender_allowed("anyone", set()) is False          # empty + no owner = closed
+    # wildcard opens to everyone
+    assert sender_allowed("anyone", {"*"}) is True
+    # restricted list = members + owner
+    assert sender_allowed("u1", {"u1"}) is True
+    assert sender_allowed("u2", {"u1"}) is False
+    assert sender_allowed("me", {"u1"}, owner_id="me") is True
 
 
 # --- per-platform enable (independent gateways) -------------------------------

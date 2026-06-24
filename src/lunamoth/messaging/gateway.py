@@ -202,7 +202,10 @@ class MessagingGateway:
     def start(self) -> None:
         if self._started:
             return
-        warn_if_open_allowlist(self.allowed_senders, channel="gateway")
+        # owner-aware: empty list + an owner = owner-only (safe); empty + no owner
+        # anywhere = nobody can reach it (warned).
+        _owner = next((a.owner_id() for a in self.adapters if a.owner_id()), "")
+        warn_if_open_allowlist(self.allowed_senders, channel="gateway", owner_id=_owner)
         if not self._attached:
             self.handle.attach()
             self._attached = True
@@ -268,8 +271,8 @@ class MessagingGateway:
 
         self._inbox.put(_Envelope(adapter, message))
 
-    def _allowed(self, sender_id: str) -> bool:
-        return sender_allowed(sender_id, self.allowed_senders)
+    def _allowed(self, sender_id: str, owner_id: str = "") -> bool:
+        return sender_allowed(sender_id, self.allowed_senders, owner_id=owner_id)
 
     def _process_inbound(self, adapter: Adapter, msg: InboundMessage) -> None:
         # Audit #30: OneBot redelivers after reconnect (and any callback platform
@@ -281,7 +284,7 @@ class MessagingGateway:
         adapter.set_reply_target(msg)
         try:
             sender = str(msg.sender_id)
-            if not self._allowed(sender):
+            if not self._allowed(sender, adapter.owner_id()):
                 self._refuse_unknown_once_per_day(adapter, sender)
                 _log.info("ignored unauthorized messaging sender %s (%s)", sender, msg.sender_name)
                 return

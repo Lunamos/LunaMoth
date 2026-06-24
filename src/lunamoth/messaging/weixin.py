@@ -421,6 +421,14 @@ class WeixinAdapter(Adapter):
     def name(self) -> str:
         return "weixin"
 
+    def owner_id(self) -> str:
+        # The logged-in iLink account IS the operator's own id. It's the load-bearing
+        # owner: WeChat's from_user_id is opaque (never shown in the app), so the
+        # operator can't type it into the allow-list — owner-allow is what lets an
+        # empty list mean "only me" without locking WeChat out entirely. (Echo dedup
+        # of the chara's own replies is separate + content-based; this is inbound-only.)
+        return self.ilink_user_id
+
     def set_reply_target(self, message: InboundMessage) -> None:
         self._reply_target = str(message.sender_id).strip()
         if self._reply_target:

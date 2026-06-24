@@ -136,7 +136,8 @@ class MessagingHost:
             self._allowed = {str(x) for x in allowed} if isinstance(allowed, list) else set()
             self._refusal = str(cfg.get("refusal_text") or DEFAULT_REFUSAL)
             self._reconcile(adapters)
-            warn_if_open_allowlist(self._allowed, channel=self._platform or "messaging")
+            _owner = next((a.owner_id() for a in self._adapters if a.owner_id()), "")
+            warn_if_open_allowlist(self._allowed, channel=self._platform or "messaging", owner_id=_owner)
             _log.info("messaging host start: state=%s platform=%s", self._state, self._platform)
             return self.status()
 
@@ -308,7 +309,7 @@ class MessagingHost:
         adapter.set_reply_target(msg)
         try:
             sender = str(msg.sender_id)
-            if not sender_allowed(sender, self._allowed):
+            if not sender_allowed(sender, self._allowed, owner_id=adapter.owner_id()):
                 if self._refusals.allow(sender):
                     self._send(adapter, self._refusal)
                 _log.info("ignored unauthorized messaging sender %s (%s)", sender, msg.sender_name)

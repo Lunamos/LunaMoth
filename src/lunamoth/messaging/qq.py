@@ -111,6 +111,11 @@ class QQAdapter(Adapter):
     def name(self) -> str:
         return "qq"
 
+    def owner_id(self) -> str:
+        # The configured peer (the intended human) is the owner — always allowed,
+        # so an empty allow-list = owner-only rather than open to any stranger.
+        return self.peer_id
+
     def _validate(self) -> None:
         if not self.url:
             raise ValueError("QQ adapter missing required config: url")

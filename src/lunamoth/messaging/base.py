@@ -95,6 +95,15 @@ class Adapter(abc.ABC):
     def close(self) -> None:
         """Stop platform I/O. Adapters with background servers override this."""
 
+    def owner_id(self) -> str:
+        """The bound OWNER's stable sender id on this platform, or "" if none is
+        resolvable. The access check always lets the owner through, so an empty
+        allow-list means "only me" instead of locking the operator out — essential
+        where the owner can't learn their own id to type it in (WeChat's opaque id).
+        Override per platform (WeChat: the logged-in account; QQ: the configured
+        peer; Telegram: a configured owner id). Default: no owner."""
+        return ""
+
     def needs_login(self) -> bool:
         """True when this adapter can't run until an interactive login the
         operator must complete out of band (e.g. a WeChat QR scan).

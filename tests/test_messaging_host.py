@@ -101,21 +101,45 @@ def test_wechat_turn_shares_agent_say_to_adapter_events_to_transport():
     assert "tool_start" in kinds and "think" in kinds
 
 
-def test_wechat_empty_allowlist_is_open():
-    # Empty allowed_senders = open (matches the field help). Out of the box,
-    # the chara must answer — not refuse everyone.
+def test_wechat_empty_allowlist_is_owner_only_not_open():
+    # Empty allowed_senders = OWNER-ONLY, not open: a stranger is refused (no turn),
+    # so a public channel can't drive a tool-capable agent. (The bound owner is still
+    # always let through — see test_empty_allowlist_lets_the_owner_through.)
     handle = _Handle()
-    adapter = _Adapter()
+    adapter = _Adapter()                 # owner_id() = "" → no owner resolvable
     frames: list[dict] = []
     dispatch = JsonRpcDispatcher(frames.append, handle=handle)
     host = MessagingHost(dispatch, "/tmp/x.json")
     dispatch.set_messaging_host(host)
-    host._allowed = set()   # nothing configured
+    host._allowed = set()                # nothing configured, no owner
 
     host._process(adapter, InboundMessage("anyone", "Stranger", "hi"))
-    assert handle.user_calls == ["hi"]
-    assert adapter.sent[-1] == "hi there"   # the chara's say-channel reply
-    assert len(adapter.sent) == 2            # preceded by the immediate "got it" receipt
+    assert handle.user_calls == []       # stranger NOT run
+    assert "hi there" not in adapter.sent
+
+
+class _OwnedAdapter(_Adapter):
+    """An adapter that knows its bound owner (e.g. WeChat's logged-in account)."""
+
+    def owner_id(self):
+        return "me"
+
+
+def test_empty_allowlist_lets_the_owner_through():
+    # The owner is always allowed, so an empty list means "only me" — the WeChat
+    # case where the opaque owner id can't be typed into the allow-list.
+    handle = _Handle()
+    adapter = _OwnedAdapter()
+    frames: list[dict] = []
+    dispatch = JsonRpcDispatcher(frames.append, handle=handle)
+    host = MessagingHost(dispatch, "/tmp/x.json")
+    dispatch.set_messaging_host(host)
+    host._allowed = set()                # empty, but the adapter resolves an owner
+
+    host._process(adapter, InboundMessage("me", "Me", "hi"))
+    assert handle.user_calls == ["hi"]   # owner allowed despite the empty list
+    host._process(adapter, InboundMessage("stranger", "X", "yo"))
+    assert handle.user_calls == ["hi"]   # a non-owner is still refused
 
 
 def test_wechat_unauthorized_sender_refused_not_run():

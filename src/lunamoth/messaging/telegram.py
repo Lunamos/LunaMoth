@@ -196,6 +196,10 @@ class TelegramAdapter(Adapter):
         self.bot_token = str(self.config.get("bot_token") or "").strip()
         if not self.bot_token:
             raise ValueError("Telegram adapter missing required config: bot_token")
+        # The owner's numeric chat/user id (from @userinfobot). Always allowed, so an
+        # empty allow-list = owner-only rather than locked out. Configured, not the
+        # first-to-/start, so a stranger can't claim ownership.
+        self.owner = str(self.config.get("owner_id") or "").strip()
         self.api_base = _normalize_api_base(self.config.get("api_base"))
         self.state_path = Path(state_path).expanduser().resolve() if state_path is not None else default_state_path()
         self._sleep = sleep
@@ -213,6 +217,9 @@ class TelegramAdapter(Adapter):
     @property
     def name(self) -> str:
         return "telegram"
+
+    def owner_id(self) -> str:
+        return self.owner
 
     def set_reply_target(self, message: InboundMessage) -> None:
         self._reply_target = str(message.sender_id).strip()

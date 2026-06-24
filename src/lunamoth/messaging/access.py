@@ -14,32 +14,50 @@ from datetime import datetime
 _log = logging.getLogger("lunamoth.messaging.access")
 
 
-def warn_if_open_allowlist(allowed, channel: str = "") -> bool:
-    """Emit a loud WARNING when a messaging gateway starts with an EMPTY allow-list
-    (= open: any inbound sender can summon a capable shell/file agent). This is the
-    documented default, but on a public channel it's the #1 misconfiguration risk,
-    so we make it visible in the log at start. Returns True when the list is open."""
-    if not allowed:
+def warn_if_open_allowlist(allowed, channel: str = "", owner_id: str = "") -> bool:
+    """Surface a messaging gateway's access posture at start, loudly when risky.
+
+    * ``"*"`` in the list → truly OPEN (anyone can reach a tool-capable agent):
+      a WARNING, the #1 misconfiguration risk. Returns True.
+    * empty list AND no resolvable owner → CLOSED to everyone, so NOBODY can
+      reach the chara: a WARNING (the operator must set ``allowed_senders`` or the
+      platform's owner id). Returns False.
+    * empty list with an owner → owner-only (the safe default): quiet info.
+    * a non-empty list → restricted: quiet info.
+    """
+    if "*" in (allowed or set()):
         _log.warning(
-            "messaging gateway%s started with an OPEN allow-list (empty = anyone "
-            "can reach this chara, which has tool access). Set allowed_senders to "
-            "restrict it for any non-trusted channel.",
+            "messaging gateway%s started OPEN (allow-list contains '*': anyone can "
+            "reach this chara, which has tool access). Remove '*' to restrict it.",
             f" [{channel}]" if channel else "",
         )
         return True
+    if not allowed and not owner_id:
+        _log.warning(
+            "messaging gateway%s has an EMPTY allow-list and no resolvable owner — "
+            "NOBODY can reach this chara. Set allowed_senders (or the platform's "
+            "owner id) so at least you can.",
+            f" [{channel}]" if channel else "",
+        )
     return False
 
 
-def sender_allowed(sender_id: str, allowed: set[str]) -> bool:
+def sender_allowed(sender_id: str, allowed: set[str], owner_id: str = "") -> bool:
     """Whether `sender_id` may reach the chara.
 
-    An EMPTY allow-list means OPEN — anyone can summon the chara (this is what
-    the gateway pane's field help promises). A non-empty list restricts to its
-    members, with ``"*"`` as an explicit wildcard.
+    The bound OWNER (``owner_id``, e.g. WeChat's logged-in account / QQ peer / the
+    configured Telegram owner) is ALWAYS allowed — so an empty allow-list means
+    "only me", never "locked out" (the WeChat case: its sender id is opaque and
+    can't be typed into a list). ``"*"`` is the explicit "open to everyone" opt-in;
+    a non-empty list restricts to its members (plus the owner).
     """
-    if not allowed:
+    if owner_id and sender_id == owner_id:
         return True
-    return sender_id in allowed or "*" in allowed
+    if "*" in allowed:
+        return True
+    if not allowed:
+        return False  # empty = owner-only (handled above), closed to strangers
+    return sender_id in allowed
 
 
 class RefusalThrottle:
