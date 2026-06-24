@@ -672,6 +672,32 @@ def test_card_asset_save_and_delete_sprite():
     assert result("card.asset_delete", {"path": card, "kind": "sprite"})["removed"] is False
 
 
+def test_card_asset_gallery_caps_oldest_nonselected():
+    # The candidate gallery is non-destructive but BOUNDED — repeated generation must not
+    # grow options[kind] (each a multi-MB sidecar) without limit. Past the cap, the oldest
+    # non-selected candidate (file + entry) is evicted; the selected one is always kept.
+    import base64 as b64m
+    from lunamoth.server.hub import avatars as A
+    set_defaults()
+    card = _make_user_card("CapCard")
+    b64 = b64m.b64encode(_PNG_1PX).decode("ascii")
+    cap = A._GALLERY_OPTIONS_MAX
+    names: list[str] = []
+    out = None
+    for _ in range(cap + 4):
+        out = result("card.asset_save", {"path": card, "kind": "sprite", "data_b64": b64, "ext": "png"})
+        names.append(out["file"])
+    # the gallery is bounded at the cap, and the newest is still selected
+    lm = json.loads(open(card, encoding="utf-8").read())["data"]["extensions"]["lunamoth"]
+    opts = lm["assets"]["options"]["sprite"]
+    assert len(opts) == cap
+    assert lm["assets"]["sprite"] == names[-1] and names[-1] in opts
+    # the 4 oldest candidates were evicted — entry AND sidecar file gone
+    for evicted in names[:4]:
+        assert evicted not in opts
+        assert not (Path(card).with_name(evicted)).is_file()
+
+
 def test_card_asset_gallery_select_and_remove():
     # Generation/upload is NON-destructive: each save is a new candidate; select
     # repoints; remove deletes one and re-selects another.

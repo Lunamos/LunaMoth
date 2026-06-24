@@ -139,6 +139,7 @@ def avatar_upload(path: str, data_b64: str, ext: str) -> dict[str, Any]:
     if sidecar.name not in opts:
         opts.append(sidecar.name)
     assets["avatar"] = sidecar.name
+    _cap_gallery(target, opts, sidecar.name)
     lm = _lm_dict(raw_card)
     lm["avatar_file"] = sidecar.name
     lm.pop("avatar_svg", None)
@@ -235,6 +236,32 @@ def _options_list(assets: dict, kind: str) -> list:
     return lst
 
 
+# Per-kind candidate cap. The gallery is non-destructive, but generation auto-appends
+# (一键生成全部 + repeated regenerate), so without a bound `options[kind]` — each entry a
+# multi-MB sidecar — grows forever. Stickers cap by hard refusal (a deliberate set); a
+# generation gallery instead evicts the OLDEST non-selected candidate to stay friendly.
+_GALLERY_OPTIONS_MAX = 24
+
+
+def _cap_gallery(target: Path, opts: list, selected: str, cap: int = _GALLERY_OPTIONS_MAX) -> None:
+    """Bound *opts* in place: while it exceeds *cap*, drop the oldest entry that isn't
+    *selected* (its list slot AND its sidecar file). The selected candidate is always
+    kept, so the active art is never evicted out from under the card."""
+    i = 0
+    while len(opts) > cap and i < len(opts):
+        name = opts[i]
+        if name == selected:
+            i += 1
+            continue
+        opts.pop(i)
+        sidecar = _rel(target, name)
+        try:
+            if sidecar.is_file():
+                sidecar.unlink()
+        except OSError:
+            pass
+
+
 def _looks_like(raw: bytes, ext: str) -> bool:
     if ext == "webp":
         return len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"
@@ -281,6 +308,7 @@ def asset_save(path: str, kind: str, data_b64: str, ext: str) -> dict[str, Any]:
     if sidecar.name not in opts:
         opts.append(sidecar.name)
     assets[kind] = sidecar.name  # newest is auto-selected
+    _cap_gallery(target, opts, sidecar.name)
     _atomic_write_json(target, raw_card)
     return {"path": str(target), "kind": kind, "file": sidecar.name, "url": _asset_url(sidecar),
             "selected": sidecar.name,
@@ -392,6 +420,7 @@ def asset_matte(path: str, kind: str, name: str = "") -> dict[str, Any]:
     opts = _options_list(assets, kind)
     opts.append(sidecar.name)
     assets[kind] = sidecar.name  # show the cut version
+    _cap_gallery(target, opts, sidecar.name)
     _atomic_write_json(target, raw_card)
     return {"path": str(target), "kind": kind, "file": sidecar.name, "url": _asset_url(sidecar),
             "selected": sidecar.name,
