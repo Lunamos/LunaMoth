@@ -1,0 +1,42 @@
+/* Mobile / small-screen adaptation — a focused first pass so the webui is usable on a
+ * phone (e.g. hitting a deployed instance over the network). Kept in its OWN file and
+ * imported AFTER global.css so these overrides win by source order — and so it never
+ * touches the (concurrently-edited) global.css. One breakpoint, matching the partial
+ * mobile rules already in global.css. Logic/components are untouched; this is pure CSS. */
+
+@media (max-width: 680px) {
+  /* The status strip is desktop chrome; reclaim its height on a phone. */
+  #app { height: 100dvh; }
+  #statusbar { display: none; }
+
+  /* Left rail → a bottom tab bar (a fixed 196px column eats half a phone screen).
+     position:fixed takes it out of flow so .main spans full width; z below the modal
+     layer (40) so a full-screen modal still covers it. */
+  .sidebar, .sidebar.collapsed {
+    display: flex; flex-direction: row; gap: 0; width: auto; height: auto;
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 30;
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+    border-right: none; border-top: 1px solid var(--hairline-2);
+    box-shadow: 0 -2px 12px rgba(10, 30, 50, .07);
+  }
+  .sidebar .spacer { display: none; }
+  .nav-item {
+    flex: 1; flex-direction: column; gap: 3px; width: auto; padding: 6px 4px;
+    font-size: 10px; align-items: center; justify-content: center; text-align: center;
+  }
+  .nav-item svg { width: 21px; height: 21px; }
+  .nav-item span { line-height: 1; }
+  /* keep scrollable content + the chat composer clear of the bar */
+  .main { padding-bottom: calc(54px + env(safe-area-inset-bottom)); }
+
+  /* Cards / editor / wake / overlays → full-screen sheets (no centered card on a phone). */
+  .modal-layer { padding: 0; }
+  .modal, .modal.sheet, .modal.wide, .modal.cardview {
+    width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh;
+    border-radius: 0; margin: 0;
+  }
+
+  /* Chat: drop the background image + readability veil on mobile — keep it light and
+     legible on a small screen (the chara's bubbles are the content). */
+  .chat-bg, .chat-veil { display: none !important; }
+}
