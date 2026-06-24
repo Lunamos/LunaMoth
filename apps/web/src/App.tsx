@@ -12,6 +12,7 @@ import { Deck } from "./views/Deck";
 import { Gateways } from "./views/Gateways";
 import { Settings } from "./views/Settings";
 import { Chat } from "./views/Chat";
+import { useUpdateNudge } from "./components/settings/UpdatePane";
 
 /* The shell — providers + sidebar + the routed view. Hash routing (useHashRoute)
    switches the main pane; the chara page is a full-bleed view without the board
@@ -27,6 +28,7 @@ function ConnDot() {
 
 function Shell() {
   const route = useHashRoute();
+  useUpdateNudge(); // once-per-version, non-blocking changelog nudge
 
   // #statusbar lives BELOW #app, not inside it: #app is a flex ROW (sidebar +
   // main) sized to calc(100vh - statusbar-h), and the status bar is the 24px

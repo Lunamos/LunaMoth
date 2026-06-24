@@ -5,6 +5,7 @@ import { initTheme } from "./theme";
 import { mintAuthCookie } from "./rpc";
 import "./styles/global.css";
 import "./styles/mobile.css";  // small-screen overrides — loaded after global.css so they win
+import "./styles/updates.css";  // Settings · 关于 update section — isolated from global.css
 
 initTheme();
 // Mint the auth cookie before the first asset/image renders (fire-and-forget;

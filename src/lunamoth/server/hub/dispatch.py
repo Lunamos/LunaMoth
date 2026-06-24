@@ -26,6 +26,7 @@ from . import cards as _cards
 from . import config as _config
 from . import models as _models
 from . import sessions as _sessions
+from . import updates as _updates
 from ._common import HubRpcError, _await_supervisor, _meta
 
 _log = logging.getLogger("lunamoth.server.hub")
@@ -201,6 +202,8 @@ class HubDispatcher:
             "models.list": self._models_list,
             "transcribe.card": self._transcribe_card,
             "open.path": lambda p: _sessions.open_path(str(p.get("path") or ""), reveal=bool(p.get("reveal"))),
+            "update.status": lambda p: _updates.status(force=bool(p.get("force"))),
+            "update.apply": lambda p: _updates.apply(),
         }
 
     # -- handlers ---------------------------------------------------------------

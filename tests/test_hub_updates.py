@@ -1,0 +1,87 @@
+"""Update/changelog backend (server/hub/updates.py) — version compare, status shape,
+caching, and offline fallback. Fully mocked: never touches the network or git in CI."""
+import json
+
+import pytest
+
+from lunamoth.server.hub import updates as U
+
+
+def test_norm_orders_versions():
+    assert U._norm("v0.1.10") > U._norm("v0.1.2")  # numeric, not lexical
+    assert U._norm("0.1.1") == U._norm("v0.1.1")  # leading v optional
+    assert U._norm("v1.0.0") > U._norm("v0.9.9")
+    assert U._norm("") == (0,)
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    monkeypatch.setattr(U.S, "lunamoth_home", lambda: tmp_path)
+    return tmp_path
+
+
+def _releases(*tags):
+    return [{"tag": t, "name": t, "body": f"notes {t}", "published_at": "", "url": "", "prerelease": False}
+            for t in tags]
+
+
+def test_status_wheel_update_available(home, monkeypatch):
+    monkeypatch.setattr(U, "_is_dev", lambda: False)
+    monkeypatch.setattr(U, "_fetch_releases", lambda: _releases("v0.1.2", "v0.1.1"))
+    monkeypatch.setattr(U, "__version__", "0.1.1")
+    s = U.status(force=True)
+    assert s["channel"] == "wheel"
+    assert s["latest"] == "v0.1.2"
+    assert s["update_available"] is True
+    assert [r["tag"] for r in s["releases"]] == ["v0.1.2", "v0.1.1"]
+
+
+def test_status_wheel_up_to_date(home, monkeypatch):
+    monkeypatch.setattr(U, "_is_dev", lambda: False)
+    monkeypatch.setattr(U, "_fetch_releases", lambda: _releases("v0.1.1"))
+    monkeypatch.setattr(U, "__version__", "0.1.1")
+    assert U.status(force=True)["update_available"] is False
+
+
+def test_status_dev_uses_commits_behind(home, monkeypatch):
+    # On a dev checkout, being behind main signals an update even with no newer tag.
+    monkeypatch.setattr(U, "_is_dev", lambda: True)
+    monkeypatch.setattr(U, "_fetch_releases", lambda: _releases("v0.1.1"))
+    monkeypatch.setattr(U, "_commits_behind", lambda: 3)
+    monkeypatch.setattr(U, "__version__", "0.1.1")
+    s = U.status(force=True)
+    assert s["channel"] == "dev"
+    assert s["behind"] == 3
+    assert s["update_available"] is True
+
+
+def test_status_caches_within_ttl(home, monkeypatch):
+    calls = {"n": 0}
+
+    def fetch():
+        calls["n"] += 1
+        return _releases("v0.1.1")
+
+    monkeypatch.setattr(U, "_is_dev", lambda: False)
+    monkeypatch.setattr(U, "_fetch_releases", fetch)
+    monkeypatch.setattr(U, "_commits_behind", lambda: None)
+    U.status(force=True)
+    U.status()  # within TTL → served from the stamp, no second fetch
+    assert calls["n"] == 1
+
+
+def test_status_fetch_failure_keeps_cached(home, monkeypatch):
+    monkeypatch.setattr(U, "_is_dev", lambda: False)
+    monkeypatch.setattr(U, "_commits_behind", lambda: None)
+    monkeypatch.setattr(U, "_fetch_releases", lambda: _releases("v0.2.0"))
+    U.status(force=True)  # seeds the cache with a release
+    monkeypatch.setattr(U, "_fetch_releases", lambda: (_ for _ in ()).throw(OSError("offline")))
+    s = U.status(force=True)  # fetch raises → falls back to cached releases
+    assert s["latest"] == "v0.2.0"
+
+
+def test_stamp_roundtrip(home):
+    U._write_stamp({"checked_at": 123, "releases": _releases("v0.1.0")})
+    data = json.loads((home / "update_check.json").read_text())
+    assert data["checked_at"] == 123
+    assert U._read_stamp()["releases"][0]["tag"] == "v0.1.0"

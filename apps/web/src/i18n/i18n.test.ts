@@ -77,8 +77,12 @@ describe("I18N strings map", () => {
   // (polaris-hint — the 理想 pane shows the value or the empty/CTA line, no preamble) → 625.
   // The structured world-book editor added 11 (wb-add, wb-gen, wb-expand, wb-empty,
   // wb-reorder, wb-type-tip, wb-key-ph, wb-key-del, wb-del, wb-content-ph, wb-gen-empty) → 636.
-  it("preserves the full key set from the source dict (636 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(636);
+  // The Settings · 关于 update + changelog pane (coupled to GitHub Releases) added 18
+  // (upd-current, upd-ch-dev, upd-ch-wheel, upd-check, upd-checking, upd-available,
+  // upd-uptodate, upd-apply, upd-applying, upd-done, upd-restart, upd-failed,
+  // upd-changelog, upd-installed, upd-no-notes, upd-behind, upd-nudge, upd-nudge-view) → 654.
+  it("preserves the full key set from the source dict (654 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(654);
   });
 
   it("every value is a [zh, en] string tuple", () => {

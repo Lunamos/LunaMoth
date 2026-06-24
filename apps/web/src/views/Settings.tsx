@@ -15,6 +15,7 @@ import { useHub } from "../state/hub";
 import { applyTheme, currentThemePref, type ThemePref } from "../theme";
 import { ModelPane } from "../components/settings/ModelPane";
 import { KeysPane } from "../components/settings/KeysPane";
+import { UpdatePane } from "../components/settings/UpdatePane";
 import { deckToast } from "../components/ui/deckToast";
 import { rpcErrText } from "../lib/status";
 
@@ -183,6 +184,7 @@ export function Settings() {
                 <div>{version ? `LunaMoth v${version}` : "LunaMoth"}</div>
                 <div>{t("about-text")}</div>
               </div>
+              <UpdatePane />
             </div>
           )}
         </div>

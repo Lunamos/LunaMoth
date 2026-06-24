@@ -653,6 +653,26 @@ export const I18N = {
   "matte-downloading": ["下载中…", "Downloading…"],
   "matte-installed": ["已下载", "Downloaded"],
   "matte-dl-failed": ["下载失败", "Download failed"],
+
+  // Settings · 关于 — software update + changelog (coupled to GitHub Releases).
+  "upd-current": ["当前版本", "Current version"],
+  "upd-ch-dev": ["开发版", "dev build"],
+  "upd-ch-wheel": ["安装版", "release"],
+  "upd-check": ["检查更新", "Check for updates"],
+  "upd-checking": ["检查中…", "Checking…"],
+  "upd-available": ["有可用更新", "Update available"],
+  "upd-uptodate": ["已是最新版本", "You're up to date"],
+  "upd-apply": ["立即更新", "Update now"],
+  "upd-applying": ["更新中…", "Updating…"],
+  "upd-done": ["更新完成", "Update complete"],
+  "upd-restart": ["更新已就绪，重启 LunaMoth 后生效", "Update ready — restart LunaMoth to apply"],
+  "upd-failed": ["更新失败", "Update failed"],
+  "upd-changelog": ["更新日志", "Changelog"],
+  "upd-installed": ["当前", "Installed"],
+  "upd-no-notes": ["暂无更新日志", "No release notes yet"],
+  "upd-behind": ["落后 {n} 个提交", "{n} commit(s) behind"],
+  "upd-nudge": ["有新版本可用", "A new version is available"],
+  "upd-nudge-view": ["查看", "View"],
 } as const satisfies Record<string, LangPair>;
 
 export type I18nKey = keyof typeof I18N;
