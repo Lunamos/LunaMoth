@@ -41,7 +41,8 @@ The object must have exactly these keys:
   "world_entries": [{"keys": [string, ...], "content": string, "constant": boolean}],
   "polaris": string,
   "tagline": string,
-  "theme_color": string
+  "theme_color": string,
+  "theme_color_2": string
 }
 
 Requirements:
@@ -53,7 +54,9 @@ Requirements:
 - world_entries: up to 4 lorebook entries (0 is fine). keys are short trigger words/names. At most one entry may be constant=true.
 - polaris: the character's North Star — ONE grand, somewhat abstract ideal it lives toward but can never fully reach or finish (not a task list, not a small goal). A single sentence in the character's spirit. May be "" if none fits.
 - tagline: one line.
-- theme_color: a hex color like "#5B9FD4".
+- theme_color: the character's PRIMARY signature color, a hex like "#5B9FD4".
+- theme_color_2: a SECONDARY accent color (another hex) that pairs with theme_color to form
+  the character's two-color gradient — pick a complementary or analogous accent, not the same color.
 The avatar is NOT generated here — the human uploads one or generates it on demand later."""
 
 _THEME_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -68,6 +71,27 @@ def _theme_color(value: Any) -> str:
     if not isinstance(value, str) or not _THEME_RE.match(value.strip()):
         raise _invalid_draft("theme_color must be a #RRGGBB hex color")
     return value.strip().upper()
+
+
+def _derive_secondary(primary: str) -> str:
+    """A pleasing accent paired with `primary` for the two-color gradient — used when the
+    model omits theme_color_2 so a character ALWAYS gets two colors. Analogous hue shift
+    + a touch lighter (stdlib colorsys, no deps)."""
+    import colorsys
+    r, g, b = (int(primary[1:3], 16), int(primary[3:5], 16), int(primary[5:7], 16))
+    h, lum, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+    r2, g2, b2 = colorsys.hls_to_rgb((h + 0.08) % 1.0, min(1.0, lum + 0.12), s)
+    return "#%02X%02X%02X" % (round(r2 * 255), round(g2 * 255), round(b2 * 255))
+
+
+def _theme_color_2(value: Any, primary: str) -> str:
+    """The secondary accent: the model's value if it's a valid, DISTINCT hex, else a
+    derived accent — so the gradient is never a flat single color."""
+    if isinstance(value, str) and _THEME_RE.match(value.strip()):
+        v = value.strip().upper()
+        if v != primary:
+            return v
+    return _derive_secondary(primary)
 
 
 def _string_field(obj: dict[str, Any], key: str) -> str:
@@ -135,7 +159,7 @@ def _parse_card_draft(raw: str) -> dict[str, Any]:
     # absent and are defaulted — generation should not fail on a small deviation.
     required = {"name", "description"}
     allowed = required | {"user_name", "personality", "scenario", "first_mes",
-                          "world_entries", "polaris", "tagline", "theme_color"}
+                          "world_entries", "polaris", "tagline", "theme_color", "theme_color_2"}
     got = set(obj)
     missing = required - got
     extra = got - allowed
@@ -162,6 +186,7 @@ def _parse_card_draft(raw: str) -> dict[str, Any]:
         "polaris": _validate_polaris(obj.get("polaris")),
         "tagline": opt("tagline"),
         "theme_color": _theme_color(obj.get("theme_color")),
+        "theme_color_2": _theme_color_2(obj.get("theme_color_2"), _theme_color(obj.get("theme_color"))),
     }
     # No avatar is drafted — it's a manual upload/generate step (stored as a sidecar).
     return draft
@@ -338,7 +363,13 @@ def draft_to_card(draft: dict[str, Any], origin_text: str = "", as_draft: bool =
         ext["user_name"] = str(draft["user_name"]).strip()
     if str(draft.get("user_persona") or "").strip():
         ext["user_persona"] = str(draft["user_persona"]).strip()
-    theme = _clean_theme(draft.get("theme"), draft.get("theme_color"))
+    # Two-color theme for the character's gradient (primary signature + secondary accent).
+    # Derive a secondary when one wasn't supplied, so a card always has the dual gradient.
+    tc1 = str(draft.get("theme_color") or "").strip()
+    tc2 = draft.get("theme_color_2")
+    if tc1 and _THEME_RE.match(tc1):
+        tc2 = _theme_color_2(tc2, tc1.upper())
+    theme = _clean_theme({"primary": tc1, "secondary": tc2}, tc1)
     if theme:
         ext["theme"] = theme
     # No avatar from the draft — it's a manual upload/generate step (sidecar).

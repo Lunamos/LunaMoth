@@ -253,10 +253,14 @@ def prompt_for(kind: str, brief: dict, grid: tuple[int, int] | None = None) -> s
     if kind == "avatar":
         # Avatars are intentionally chibi (a cute app-icon bust) regardless of the
         # character's main art style — a tiny realistic bust reads oddly as an icon.
-        return (f"A clean app avatar icon: chibi bust of the SAME character, head and shoulders, "
-                f"friendly warm expression, facing the viewer, centered. {a}. {CHIBI}. A single "
-                f"character. Simple smooth background of a soft gradient tinted "
-                f"{brief.get('theme', '') or '#888'} with a faint sparkle. Iconic and clean. {_GUARDS_FIGURE}")
+        # NB: use the SCENE guards, NOT the figure guards — an avatar is a head-and-
+        # shoulders bust with no hands, so "avoid extra fingers / malformed hands"
+        # only primes the model to draw limbs that don't belong (this matched the dev
+        # genviz.py avatar prompt, which ends simply "Iconic and clean, no text").
+        return (f"A cute app avatar icon: chibi bust portrait of the SAME character. {a}. {CHIBI}. "
+                f"Close-up of head and shoulders, friendly warm expression, facing the viewer, centered. "
+                f"A single character. Simple smooth background of a soft gradient tinted "
+                f"{brief.get('theme', '') or '#888'} with a faint sparkle. Iconic and clean. {_GUARDS_SCENE}")
     if kind == "sprite":
         return (f"A single full-body character standing illustration (full-body character art) of one "
                 f"character alone, no other people. {a}. {pal}. One elegant three-quarter standing pose, "

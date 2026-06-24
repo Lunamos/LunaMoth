@@ -498,8 +498,11 @@ def test_card_save_roundtrips_new_lunamoth_extension_fields():
     assert "avatar_svg" not in ext        # avatar is a separate sidecar, not drafted inline
     assert ext["user_name"] == "visitor"  # who "you" are rides the drafted card
     # Presentation theme is now the dual {primary, secondary}; legacy single
-    # theme_color folds into primary on save.
+    # theme_color folds into primary on save. A secondary is derived when not supplied,
+    # so every drafted card has the two-color gradient (and it's a DISTINCT accent).
     assert ext["theme"]["primary"] == "#7C5CFF"
+    sec = ext["theme"]["secondary"]
+    assert sec.startswith("#") and len(sec) == 7 and sec != "#7C5CFF"
     assert "theme_color" not in ext
     assert ext["force_roleplay"] is True
     assert "embodiment" not in ext        # the legacy string is gone; the field is a bool
