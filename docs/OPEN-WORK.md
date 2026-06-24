@@ -153,6 +153,16 @@ Scoped build plan (when resumed) — incremental, one commit per area, mostly CS
 Effort: medium (a focused pass per view), NOT weeks; reuses all logic/protocol/state. Can't be
 device-tested from here, so resume by piloting Chat first and testing on a real phone, then fan out.
 
+STATUS (2026-06-24, d8b46d3): a FIRST pass landed in a new `apps/web/src/styles/mobile.css`
+(imported after global.css; kept separate to avoid the concurrently-edited global.css). Done at
+`@media(max-width:680px)`: shell left-rail → fixed bottom tab bar (+ `.main` bottom padding,
+status strip hidden); cards/editor/wake/overlays → full-screen sheets; chat drops the bg image
++ veil. Plus the pre-existing 680px rules (board 1-col, deck 2-col, settings stacked, chat panel
+overlay). REMAINING per-view polish: touch-target (44px) sweep; the visuals stage/rail + sticker
+grids on mobile; card-editor tabs / world-book editor; the Profile right-panel as a proper drawer
+(today it's an overlay); composer + attachment tray sizing; deck spine actions; landscape. Resume
+by testing the deployed instance on a phone and tightening per-view from there.
+
 ### Web tools — FUTURE (owner 2026-06-19, deferred LOW; settled — do not re-litigate)
 web_search/web_extract are intentionally OFF (`_WEB_TOOLS_ENABLED = False`). Keeping
 them off makes the chara do less fruitless trial-and-error, and we run no search
