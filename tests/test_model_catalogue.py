@@ -64,3 +64,28 @@ def test_refresh_interval_default_and_override():
     assert M.refresh_interval_seconds() == 3600
     H.save_defaults({"model_refresh_interval": "0"})      # 0/blank/invalid → default
     assert M.refresh_interval_seconds() == 86_400
+    # a fat-fingered tiny value is FLOORED, never honored verbatim (no hot-loop re-pull)
+    H.save_defaults({"model_refresh_interval": "5"})
+    assert M.refresh_interval_seconds() == M._MIN_REFRESH_SECONDS
+    # non-finite text → default, never inf/nan
+    H.save_defaults({"model_refresh_interval": "inf"})
+    assert M.refresh_interval_seconds() == 86_400
+
+
+def test_disk_catalogue_caps_entries(monkeypatch):
+    # More distinct base_urls than the cap → only the newest N persist on disk, so a
+    # once-tried relay / typo'd endpoint can't pile up full /models payloads forever.
+    monkeypatch.setattr(H, "_http_json", lambda *a, **k: _payload("m"))
+    clock = {"t": 1000.0}
+    def tick():
+        clock["t"] += 1.0  # strictly increasing fetched_at → deterministic eviction order
+        return clock["t"]
+    monkeypatch.setattr(M.time, "time", tick)
+    n = M._DISK_CACHE_MAX_ENTRIES + 5
+    for i in range(n):
+        M._models_cache.clear()  # force each base_url through the disk-write path
+        M._catalogue(f"https://e{i}.test/v1", "k", refresh_seconds=1000)
+    disk = json.loads(M._catalogue_cache_path().read_text(encoding="utf-8"))
+    assert len(disk) == M._DISK_CACHE_MAX_ENTRIES
+    assert "https://e0.test/v1" not in disk            # earliest evicted
+    assert f"https://e{n - 1}.test/v1" in disk          # newest kept

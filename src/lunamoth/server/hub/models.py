@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import time
 import urllib.error
@@ -54,12 +55,15 @@ def _http_json(url: str, api_key: str = "", payload: dict | None = None, timeout
 # `model_refresh_interval`). When a provider is unreachable we degrade to the stale
 # disk copy, then to a small curated fallback — so a model picker never goes empty.
 _DEFAULT_REFRESH_SECONDS = 86_400  # one day
+_MIN_REFRESH_SECONDS = 60.0        # floor: the catalogue is metadata, never re-pull more than once a minute
+_DISK_CACHE_MAX_ENTRIES = 32       # cap distinct base_urls on disk so abandoned/typo'd endpoints don't pile up
 _models_cache: dict[str, tuple[float, list[dict]]] = {}  # in-process memo: base_url -> (wall_ts, models)
 
 
 def refresh_interval_seconds() -> float:
     """The configured catalogue refresh interval in seconds (default one day).
-    0 / blank / invalid → the default (never 0, which would re-pull every call)."""
+    0 / blank / invalid / non-finite → the default; a tiny positive value is floored
+    to _MIN_REFRESH_SECONDS so a fat-fingered config can't re-pull /models in a hot loop."""
     try:
         from .config import load_defaults  # local import: avoid any import cycle
         raw = str(load_defaults().get("model_refresh_interval") or "").strip()
@@ -69,7 +73,9 @@ def refresh_interval_seconds() -> float:
         val = float(raw)
     except ValueError:
         return _DEFAULT_REFRESH_SECONDS
-    return val if val > 0 else _DEFAULT_REFRESH_SECONDS
+    if not math.isfinite(val) or val <= 0:
+        return _DEFAULT_REFRESH_SECONDS
+    return max(val, _MIN_REFRESH_SECONDS)
 
 
 def _catalogue_cache_path() -> Path:
@@ -89,6 +95,15 @@ def _save_disk_catalogue(base: str, fetched_at: float, models: list[dict]) -> No
     try:
         data = _load_disk_catalogue()
         data[base] = {"fetched_at": fetched_at, "models": models}
+        if len(data) > _DISK_CACHE_MAX_ENTRIES:
+            # Keep the newest N by fetched_at — a once-tried relay or a typo'd base_url
+            # would otherwise linger forever, each holding a full /models payload.
+            newest = sorted(
+                data.items(),
+                key=lambda kv: kv[1].get("fetched_at", 0.0) if isinstance(kv[1], dict) else 0.0,
+                reverse=True,
+            )[:_DISK_CACHE_MAX_ENTRIES]
+            data = dict(newest)
         path = _catalogue_cache_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
