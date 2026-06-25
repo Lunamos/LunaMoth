@@ -318,8 +318,12 @@ def _complete(defaults: dict[str, str], system: str, user: str, model: str = "",
     }
     if response_format is not None:
         payload["response_format"] = response_format
+    # Key: an explicit overlay (task_defaults routes an aux task onto its own provider
+    # key) wins; else resolve THIS route's key from the keyring (the one store).
+    from ...session.settings import global_api_key
+    key = defaults.get("api_key") or global_api_key(str(defaults.get("provider") or ""), base)
     try:
-        data = _pkg()._http_json(base + "/chat/completions", defaults.get("api_key", ""), payload, timeout=180.0)
+        data = _pkg()._http_json(base + "/chat/completions", key, payload, timeout=180.0)
     except urllib.error.HTTPError as exc:
         detail = _http_error_detail(exc)
         classified = _classify_http_error(exc.code, detail)

@@ -14,19 +14,10 @@ import { useT } from "../../i18n";
 import { useHubApi } from "../../state/hub";
 import { errText, rpcErrText } from "../../lib/status";
 import { deckToast } from "../ui/deckToast";
+import { PROVIDER_PRESETS as PRESETS } from "../../lib/providers";
 
 interface KeyRowData { label: string; provider: string; base_url: string; model: string; has_key: boolean; active: boolean }
 interface TestResult { ok?: boolean; error?: { kind?: string; detail?: string } }
-
-/* Curated OpenAI-compatible providers offered as preset rows (one key each).
-   base_url is editable later via a custom endpoint if a region/path differs. */
-const PRESETS: ReadonlyArray<{ label: string; provider: string; base_url: string; descKey: string }> = [
-  { label: "OpenRouter", provider: "openrouter", base_url: "https://openrouter.ai/api/v1", descKey: "prov-openrouter-desc" },
-  { label: "OpenAI", provider: "openai", base_url: "https://api.openai.com/v1", descKey: "prov-openai-desc" },
-  { label: "火山引擎", provider: "volcano", base_url: "https://ark.cn-beijing.volces.com/api/v3", descKey: "prov-volcano-desc" },
-  { label: "混元", provider: "hunyuan", base_url: "https://api.hunyuan.cloud.tencent.com/v1", descKey: "prov-hunyuan-desc" },
-  { label: "阿里云", provider: "dashscope", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", descKey: "prov-aliyun-desc" },
-];
 
 interface ImageProviderRow { id: string; label: string; has_key: boolean; active: boolean }
 

@@ -38,31 +38,100 @@ def _global_home() -> Path:
     return Path(os.getenv("LUNAMOTH_HOME", Path.home() / ".lunamoth")).expanduser().resolve()
 
 
-def global_api_key(provider: str = "", base_url: str = "") -> str:
-    """Resolve the provider key from a GLOBAL store, never a per-session config.
+# Map a provider id to the display label the webui Providers pane uses, so a key
+# migrated out of the legacy top-level slot lands under the right preset row.
+_PROVIDER_LABELS = {
+    "openrouter": "OpenRouter", "openai": "OpenAI", "volcano": "火山引擎",
+    "hunyuan": "混元", "dashscope": "阿里云",
+}
 
-    Order: the web keyring (~/.lunamoth/desktop.json) — a NAMED `keys` entry whose
-    route (provider+base_url) matches this session's, else the default top-level
-    key — then the CLI global config.json. The route match preserves the
-    multi-key-per-chara feature (a chara woken with a named key still uses it)
-    without storing the secret in the session. "" if none."""
-    want_p = (provider or "").strip().lower()
-    want_b = (base_url or "").strip().rstrip("/").lower()
+
+def _norm(s: object) -> str:
+    return str(s or "").strip().rstrip("/").lower()
+
+
+def migrate_legacy_default_key() -> None:
+    """One-time: fold a legacy top-level desktop.json ``api_key`` into the keyring (the
+    ONE key store) and drop the top-level secret. The keyring is now the single source
+    of provider keys; the active selection is the NON-secret ``active_key_label`` (+
+    provider/base_url/model). Idempotent — a no-op once there is no top-level key."""
+    path = _global_home() / "desktop.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(raw, dict):
+        return
+    key = str(raw.get("api_key") or "")
+    if not key:
+        return  # already migrated / never had a top-level key
+    provider = str(raw.get("provider") or "")
+    base_url = str(raw.get("base_url") or "")
+    keys = raw.get("keys") if isinstance(raw.get("keys"), dict) else {}
+    # Reuse an existing keyring entry on the same route (the common webui case where
+    # use_key already wrote one); otherwise synthesize one from the top-level route.
+    match = next((lbl for lbl, it in keys.items()
+                  if isinstance(it, dict) and it.get("api_key")
+                  and _norm(it.get("base_url")) == _norm(base_url)
+                  and _norm(it.get("provider")) == _norm(provider)), None)
+    if match is None:
+        label = _PROVIDER_LABELS.get(_norm(provider).rstrip("/"), "") or provider or "default"
+        if label in keys:  # don't clobber a differently-routed entry under this label
+            label = f"{label} · {base_url or provider}"
+        keys[label] = {"provider": provider, "base_url": base_url,
+                       "api_key": key, "model": str(raw.get("model") or "")}
+        match = label
+    raw["keys"] = keys
+    if not str(raw.get("active_key_label") or ""):
+        raw["active_key_label"] = match  # the legacy top-level key WAS the active default
+    raw.pop("api_key", None)  # the keyring is the source now — drop the duplicate secret
+    try:
+        path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def global_api_key(provider: str = "", base_url: str = "") -> str:
+    """Resolve the provider key from the GLOBAL keyring, never a per-session config.
+
+    The webui keyring (~/.lunamoth/desktop.json ``keys``) is the ONE key store. An
+    EXPLICIT route (provider+base_url) → the named entry on that exact route (the
+    multi-key-per-chara / alt-account feature). An EMPTY base_url means "the active
+    default route" → the entry named by the top-level ``active_key_label`` (else a
+    provider match). Falls back to the CLI global config.json (the terminal install's
+    single-key store). "" if none."""
+    want_p = _norm(provider)
+    want_b = _norm(base_url)
     try:
         raw = json.loads((_global_home() / "desktop.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         raw = {}
     if isinstance(raw, dict):
-        # A named key on the exact same route wins (e.g. a chara on an alt account).
+        if raw.get("api_key"):  # legacy top-level key present → fold it into the keyring once
+            migrate_legacy_default_key()
+            try:
+                raw = json.loads((_global_home() / "desktop.json").read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                raw = {}
+        keys = raw.get("keys") if isinstance(raw.get("keys"), dict) else {}
         if want_b:
-            keys = raw.get("keys") if isinstance(raw.get("keys"), dict) else {}
+            # Explicit route → the named entry on that exact provider+base_url.
             for item in keys.values():
                 if (isinstance(item, dict) and item.get("api_key")
-                        and str(item.get("base_url") or "").strip().rstrip("/").lower() == want_b
-                        and str(item.get("provider") or "").strip().lower() == want_p):
+                        and _norm(item.get("base_url")) == want_b
+                        and _norm(item.get("provider")) == want_p):
                     return str(item["api_key"])
-        if str(raw.get("api_key") or ""):
-            return str(raw["api_key"])
+        else:
+            # Default route → the active label's key (then a provider match as a backstop).
+            active = keys.get(str(raw.get("active_key_label") or ""))
+            if (isinstance(active, dict) and active.get("api_key")
+                    and (not want_p or _norm(active.get("provider")) == want_p)):
+                return str(active["api_key"])
+            for item in keys.values():
+                if (isinstance(item, dict) and item.get("api_key")
+                        and _norm(item.get("provider")) == want_p):
+                    return str(item["api_key"])
     try:
         raw2 = json.loads((_default_config_dir() / "config.json").read_text(encoding="utf-8"))
         if isinstance(raw2, dict) and str(raw2.get("api_key") or ""):

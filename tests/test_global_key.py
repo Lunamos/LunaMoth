@@ -95,6 +95,44 @@ def test_named_key_resolved_by_route(session_env):
     assert S.load_settings().api_key == "sk-DEFAULT"
 
 
+def test_migrate_legacy_default_key_folds_into_keyring(session_env):
+    """A legacy top-level api_key is folded into the keyring (the one store): an entry
+    on the top-level route, active_key_label set, and the top-level secret dropped."""
+    home, _ = session_env
+    (home / "desktop.json").write_text(json.dumps({
+        "provider": "openrouter", "base_url": "https://openrouter.ai/api/v1",
+        "api_key": "sk-LEGACY", "model": "m/x",
+    }), encoding="utf-8")
+    S.migrate_legacy_default_key()
+    raw = json.loads((home / "desktop.json").read_text(encoding="utf-8"))
+    assert "api_key" not in raw                      # top-level secret dropped
+    assert raw["active_key_label"] == "OpenRouter"   # active pointer set to the new entry
+    entry = raw["keys"]["OpenRouter"]
+    assert entry["api_key"] == "sk-LEGACY"
+    assert entry["base_url"] == "https://openrouter.ai/api/v1" and entry["model"] == "m/x"
+    # idempotent: a second run is a byte-identical no-op
+    before = (home / "desktop.json").read_text(encoding="utf-8")
+    S.migrate_legacy_default_key()
+    assert (home / "desktop.json").read_text(encoding="utf-8") == before
+
+
+def test_migrate_reuses_existing_route_entry_without_clobber(session_env):
+    """When the keyring already has an entry on the top-level route, migration REUSES it
+    (no synthetic duplicate, the existing secret untouched) and just drops the top-level."""
+    home, _ = session_env
+    (home / "desktop.json").write_text(json.dumps({
+        "provider": "openrouter", "base_url": "https://openrouter.ai/api/v1", "api_key": "sk-TOP",
+        "keys": {"mine": {"provider": "openrouter", "base_url": "https://openrouter.ai/api/v1",
+                          "api_key": "sk-MINE", "model": "m"}},
+    }), encoding="utf-8")
+    S.migrate_legacy_default_key()
+    raw = json.loads((home / "desktop.json").read_text(encoding="utf-8"))
+    assert "api_key" not in raw
+    assert list(raw["keys"]) == ["mine"]                # reused — no synthetic entry
+    assert raw["keys"]["mine"]["api_key"] == "sk-MINE"  # existing secret untouched
+    assert raw["active_key_label"] == "mine"
+
+
 def test_resolve_named_key_reads_keyring(session_env):
     """resolve_named_key returns a keyring entry's provider/base_url/api_key/model
     (used by /provider to switch a chara's provider); empty for unknown/keyless."""

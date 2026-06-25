@@ -38,8 +38,11 @@ def rpc_error(method, params=None):
 
 
 def set_defaults():
-    H.save_defaults({"provider": "openrouter", "base_url": "https://example.invalid/v1",
-                     "api_key": "sk-test", "model": "test/model"})
+    # The keyring is the ONE key store: seed a default provider key + activate it (the
+    # product's provider→key→model path), not a legacy top-level api_key.
+    H.save_key("default", provider="openrouter", base_url="https://example.invalid/v1",
+               api_key="sk-test", model="test/model")
+    H.use_key("default")
 
 
 def wake_session():
@@ -489,11 +492,13 @@ def test_keys_roundtrip_never_echoes_secrets():
     set_defaults()
     keys = result("keys.save", {"label": "work", "provider": "openrouter",
                                 "base_url": "https://or.example/v1", "api_key": "sk-work-1"})
-    assert keys == [{"label": "work", "provider": "openrouter", "base_url": "https://or.example/v1",
-                     "model": "", "has_key": True, "active": False}]
+    work = next(k for k in keys if k["label"] == "work")
+    assert work == {"label": "work", "provider": "openrouter", "base_url": "https://or.example/v1",
+                    "model": "", "has_key": True, "active": False}
     # update without api_key keeps the stored secret
     keys = result("keys.save", {"label": "work", "model": "deepseek/v4"})
-    assert keys[0]["model"] == "deepseek/v4" and keys[0]["has_key"] is True
+    work = next(k for k in keys if k["label"] == "work")
+    assert work["model"] == "deepseek/v4" and work["has_key"] is True
     raw = json.loads(H.desktop_config_path().read_text(encoding="utf-8"))
     assert raw["keys"]["work"]["api_key"] == "sk-work-1"
     # a new label without api_key is a visible error
@@ -1086,9 +1091,10 @@ def test_use_key_activates_and_delete_removes():
                          "base_url": "https://or.example/v1", "api_key": "sk-home-9", "model": "m/x"})
     pub = result("defaults.use_key", {"label": "home"})
     assert pub["has_key"] is True and "api_key" not in pub and pub["model"] == "m/x"
-    assert result("keys.list")[0]["active"] is True
+    rows = result("keys.list")
+    assert next(r for r in rows if r["label"] == "home")["active"] is True
     result("keys.delete", {"label": "home"})
-    assert result("keys.list") == []
+    assert "home" not in [r["label"] for r in result("keys.list")]
     assert rpc_error("defaults.use_key", {"label": "home"})["code"] == -32035
 
 

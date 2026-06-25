@@ -45,6 +45,7 @@ def user_worlds_dir() -> Path:
 # matte_model: the active local matting (抠像) model id, set in Settings·生图 and
 # read by lunamoth.visuals.matte.selected_model(). Not a secret.
 _DEFAULT_FIELDS = ("provider", "base_url", "api_key", "model", "ui_lang", "ui_theme",
+                   "active_key_label",
                    "image_provider", "image_model", "matte_model",
                    "reasoning", "vision_model", "vision_provider",
                    "card_model", "card_provider",
@@ -58,9 +59,21 @@ _SECRET_FIELDS = ("api_key",)
 def _read_desktop_raw() -> dict[str, Any]:
     try:
         raw = json.loads(desktop_config_path().read_text(encoding="utf-8"))
-        return raw if isinstance(raw, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}
+    if not isinstance(raw, dict):
+        return {}
+    # The keyring is the ONE key store: fold any legacy top-level `api_key` into it on
+    # read (idempotent; only fires while a top-level secret is still present), so the
+    # UI's active/has-key view matches the runtime's keyring resolution.
+    if raw.get("api_key"):
+        from ...session import settings as _S
+        _S.migrate_legacy_default_key()
+        try:
+            raw = json.loads(desktop_config_path().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+    return raw if isinstance(raw, dict) else {}
 
 
 def _write_desktop_raw(raw: dict[str, Any]) -> None:
@@ -105,9 +118,11 @@ def _keys_map(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def list_keys() -> list[dict[str, Any]]:
-    """Named keys with the secret reduced to its presence — values never travel."""
+    """Named keys with the secret reduced to its presence — values never travel. The
+    ACTIVE entry is the one named by the non-secret ``active_key_label`` (the keyring is
+    the single source; the active selection is a label pointer, not a secret copy)."""
     raw = _read_desktop_raw()
-    active_key = str(raw.get("api_key") or "")
+    active_label = str(raw.get("active_key_label") or "")
     out = []
     for label, item in sorted(_keys_map(raw).items()):
         secret = str(item.get("api_key") or "")
@@ -117,9 +132,17 @@ def list_keys() -> list[dict[str, Any]]:
             "base_url": str(item.get("base_url") or ""),
             "model": str(item.get("model") or ""),
             "has_key": bool(secret),
-            "active": bool(secret) and secret == active_key,
+            "active": bool(secret) and label == active_label,
         })
     return out
+
+
+def active_key() -> str:
+    """The active default route's key, resolved from the keyring (server-side only —
+    never sent to a client). Empty when no provider key is configured."""
+    from ...session.settings import global_api_key
+    raw = _read_desktop_raw()
+    return global_api_key(str(raw.get("provider") or ""), str(raw.get("base_url") or ""))
 
 
 def resolve_key(label: str) -> dict[str, str] | None:
@@ -190,12 +213,19 @@ def task_defaults(defaults: dict[str, Any], provider_label: str) -> dict[str, An
 
 
 def use_key(label: str) -> dict[str, Any]:
-    """Copy a named key into the top-level defaults (= defaults.set fields)."""
-    item = _keys_map(_read_desktop_raw()).get(str(label or ""))
+    """Make a named keyring entry the ACTIVE default: copy its NON-secret route
+    (provider/base_url/model) into the top-level defaults + record active_key_label.
+    The secret stays in the keyring (the one store) — never duplicated top-level."""
+    label = str(label or "")
+    item = _keys_map(_read_desktop_raw()).get(label)
     if item is None or not item.get("api_key"):
         raise RpcError(-32035, f"no such key: {label}")
-    updates = {k: str(item[k]) for k in ("provider", "base_url", "api_key", "model") if item.get(k)}
-    return _public_defaults(save_defaults(updates))
+    updates = {k: str(item[k]) for k in ("provider", "base_url", "model") if item.get(k)}
+    updates["active_key_label"] = label
+    public = _public_defaults(save_defaults(updates))
+    from ...session.settings import migrate_legacy_default_key
+    migrate_legacy_default_key()  # clean any stale top-level secret left by an older use_key
+    return public
 
 
 def _key_overrides(label: str) -> dict[str, str]:
@@ -209,7 +239,10 @@ def _key_overrides(label: str) -> dict[str, str]:
 def _public_defaults(data: dict[str, str]) -> dict[str, Any]:
     """Defaults with every secret reduced to its presence (never echo secrets)."""
     out: dict[str, Any] = {k: v for k, v in data.items() if k not in _SECRET_FIELDS}
-    out["has_key"] = bool(data.get("api_key"))
+    # has_key = the ACTIVE default route resolves a key from the keyring (the one store),
+    # not a top-level secret copy.
+    from ...session.settings import global_api_key
+    out["has_key"] = bool(global_api_key(str(data.get("provider") or ""), str(data.get("base_url") or "")))
     # has_image_key = the ACTIVE image provider has a key in the unified keyring
     # (drives the visuals editor's generate affordance + the 提供商 status).
     raw = _read_desktop_raw()

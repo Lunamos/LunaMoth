@@ -488,7 +488,10 @@ def wake(card_path: str, name: str = "", isolation: str = "sandbox",
         # A named key (webui-needs #10): its provider/base_url/api_key drive
         # this chara; its model fills in only when wake didn't pick one.
         defaults = {**defaults, **_pkg()._key_overrides(key)}  # wake's `model` param still wins below
-    if not (defaults.get("base_url") and defaults.get("api_key")) and defaults.get("provider") != "mock":
+    # The key rides the keyring (resolved by route) unless a named-key override set it.
+    from ...session.settings import global_api_key
+    eff_key = defaults.get("api_key") or global_api_key(str(defaults.get("provider") or ""), str(defaults.get("base_url") or ""))
+    if not (defaults.get("base_url") and eff_key) and defaults.get("provider") != "mock":
         raise RpcError(-32030, "no model configured — set up a provider first")
     session_name = _slug(name or Path(card_path).stem)
     base = session_name

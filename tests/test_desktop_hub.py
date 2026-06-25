@@ -42,8 +42,11 @@ def luna_card_path():
 
 
 def set_defaults():
-    H.save_defaults({"provider": "openrouter", "base_url": "https://example.invalid/v1",
-                     "api_key": "sk-test", "model": "test/model"})
+    # The keyring is the ONE key store: seed a default provider key + activate it (the
+    # product's provider→key→model path), not a legacy top-level api_key.
+    H.save_key("default", provider="openrouter", base_url="https://example.invalid/v1",
+               api_key="sk-test", model="test/model")
+    H.use_key("default")
 
 
 def draft_payload():
@@ -91,7 +94,8 @@ def test_defaults_never_echo_the_key():
     assert r["has_key"] is True
     assert "api_key" not in r
     raw = json.loads(H.desktop_config_path().read_text(encoding="utf-8"))
-    assert raw["api_key"] == "sk-test"  # stored, just never echoed
+    assert raw["keys"]["default"]["api_key"] == "sk-test"  # stored in the keyring, never echoed
+    assert "api_key" not in raw  # no top-level secret copy — the keyring is the one store
 
 
 def test_defaults_set_ignores_unknown_fields():

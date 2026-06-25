@@ -41,7 +41,7 @@ export const I18N = {
   "go-settings": ["去设置", "Open settings"],
   "gate-title": ["先连接一个模型", "Connect a model to begin"],
   "gate-sub": ["你的角色用它来思考与行动；密钥只留在这台电脑上。", "Your characters think and act with it — the key never leaves this computer."],
-  "gate-key-ph": ["粘贴 OpenRouter API Key…", "Paste your OpenRouter API key…"],
+  "gate-key-ph": ["粘贴该提供商的 API Key…", "Paste the provider's API key…"],
   "gate-openrouter-note": ["在 openrouter.ai/keys 一键创建，一个 key 通向所有主流模型。", "Create one at openrouter.ai/keys — one key reaches every major model."],
   "gate-advanced": ["更多选项 →", "More options →"],
   "gate-continue": ["继续", "Continue"],

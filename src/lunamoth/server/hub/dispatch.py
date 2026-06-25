@@ -689,7 +689,7 @@ class HubDispatcher:
         return _models.test_key(
             provider=str(p.get("provider") or defaults.get("provider", "")),
             base_url=str(p.get("base_url") or defaults.get("base_url", "")),
-            api_key=str(p.get("api_key") or defaults.get("api_key", "")),
+            api_key=str(p.get("api_key") or _config.active_key()),
             model=str(p.get("model") or defaults.get("model", "")),
         )
 
@@ -699,7 +699,7 @@ class HubDispatcher:
         # rather than presenting a guess as live). _catalogue_meta never raises.
         defaults = _config.load_defaults()
         base = str(p.get("base_url") or defaults.get("base_url", ""))
-        key = str(p.get("api_key") or defaults.get("api_key", ""))
+        key = str(p.get("api_key") or _config.active_key())
         models, source = _models._catalogue_meta(base, key)
         out = []
         for m in models:
