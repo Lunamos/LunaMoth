@@ -78,6 +78,33 @@ export const GW_PLATFORMS: Record<string, GwPlatform> = {
       { key: "api_base", label: "gw-f-tg-api-base", secret: false, help: "gw-h-tg-api-base", ph: "https://api.telegram.org" },
     ],
   },
+  discord: {
+    label: "gw-discord-label",
+    blurb: "gw-discord-blurb",
+    note: "gw-discord-note",
+    required: [
+      { key: "bot_token", label: "gw-f-discord-token", secret: true, help: "gw-h-discord-token" },
+    ],
+    recommended: [
+      { key: "owner_id", label: "gw-f-owner-id", secret: false, help: "gw-h-owner-id" },
+      { key: "channel_id", label: "gw-f-channel-id", secret: false, help: "gw-h-channel-id" },
+    ],
+    advanced: [],
+  },
+  slack: {
+    label: "gw-slack-label",
+    blurb: "gw-slack-blurb",
+    note: "gw-slack-note",
+    required: [
+      { key: "bot_token", label: "gw-f-slack-bot-token", secret: true, help: "gw-h-slack-bot-token" },
+      { key: "app_token", label: "gw-f-slack-app-token", secret: true, help: "gw-h-slack-app-token" },
+    ],
+    recommended: [
+      { key: "owner_id", label: "gw-f-owner-id", secret: false, help: "gw-h-owner-id" },
+      { key: "channel_id", label: "gw-f-channel-id", secret: false, help: "gw-h-channel-id" },
+    ],
+    advanced: [],
+  },
 };
 
 export interface MessagingConfig {

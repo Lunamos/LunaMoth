@@ -172,6 +172,9 @@ export function GatewayPane({ name, platform: plat }: { name: string; platform: 
       </div>
 
       <div className="gw-blurb">{t(spec.blurb)}</div>
+      {/* Setup note for non-QR platforms (the QR ones show it in the QR section
+          below). Carries the must-know hint, e.g. Discord's Message Content intent. */}
+      {spec.note && !spec.qr && <div className="gw-blurb gw-note">{t(spec.note)}</div>}
       {spec.pending && <div className="gw-banner draft-note">{t(spec.pending)}</div>}
 
       {/* QR is the login path; once running there's nothing to scan. */}

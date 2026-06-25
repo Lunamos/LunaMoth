@@ -86,8 +86,13 @@ describe("I18N strings map", () => {
   // The model picker's offline/cached-list notice (model-list-stale) → 656.
   // Removed the hardcoded recommended-model quick-picks (model-note-flash/pro) → 654.
   // The force-sandbox distribution lock notice (p-sandbox-locked) → 655.
-  it("preserves the full key set from the source dict (655 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(655);
+  // Surfacing the Discord + Slack gateways in the deck added 16 (gw-f-owner-id,
+  // gw-h-owner-id, gw-f-channel-id, gw-h-channel-id, gw-discord-label, gw-discord-blurb,
+  // gw-discord-note, gw-f-discord-token, gw-h-discord-token, gw-slack-label,
+  // gw-slack-blurb, gw-slack-note, gw-f-slack-bot-token, gw-h-slack-bot-token,
+  // gw-f-slack-app-token, gw-h-slack-app-token) → 671.
+  it("preserves the full key set from the source dict (671 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(671);
   });
 
   it("every value is a [zh, en] string tuple", () => {
