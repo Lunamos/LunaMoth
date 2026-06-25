@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- intentional co-location: this module exports a provider/component alongside its hooks or pure helpers, imported widely; splitting it purely for dev fast-refresh isn't worth the import churn. */
 /* Card visual helpers — React ports of app.js themeOf/themeStyle/avatarSrc/
  * dataUriSvg/avatarNode/cardVisual (app.js:221-275). Presentation only; degrades
  * to a palette+glyph fallback when a card carries no art. (Deck-track owned —

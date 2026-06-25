@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- intentional co-location: this module exports a provider/component alongside its hooks or pure helpers, imported widely; splitting it purely for dev fast-refresh isn't worth the import churn. */
 /* Overlay context — the single host for the Track-C overlays (first-run,
  * create-flow, builtin carousel, avatar editor, import). The vanilla app.js kept
  * each overlay as a fixed DOM node toggled by class; in the SPA any view opens one

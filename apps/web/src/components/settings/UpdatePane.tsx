@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- intentional co-location: this module exports a provider/component alongside its hooks or pure helpers, imported widely; splitting it purely for dev fast-refresh isn't worth the import churn. */
 /* Settings · 关于 — software update + changelog, coupled to GitHub Releases (backend
  * server/hub/updates.py). We CHECK + surface the release notes and offer a one-click
  * in-place update, but never auto-update. The first-open nudge (useUpdateNudge, mounted

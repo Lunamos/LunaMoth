@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- intentional co-location: this module exports a provider/component alongside its hooks or pure helpers, imported widely; splitting it purely for dev fast-refresh isn't worth the import churn. */
 /* React i18n — a reactive port of front/web/i18n.js's lang store + t().
  *
  * The JS original kept a module-global `_lang` and re-painted the DOM via

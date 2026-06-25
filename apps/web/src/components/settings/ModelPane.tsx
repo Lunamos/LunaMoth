@@ -94,11 +94,10 @@ export function ModelPane() {
   const model = defaults.model || "";
   const isOpenRouter = (defaults.base_url || "").includes("openrouter.ai");
 
-  const capNote = (m: ModelInfo) => `${t("cap-tools-short")}${m.tools ? "✓" : "✗"} · ${t("cap-vision-short")}${m.vision ? "✓" : "✗"}`;
-
   const providerOptions: SelectOption[] = keys.map((k) => ({ value: k.label, label: k.label, note: k.provider || undefined }));
 
   const modelOptions: SelectOption[] = useMemo(() => {
+    const capNote = (m: ModelInfo) => `${t("cap-tools-short")}${m.tools ? "✓" : "✗"} · ${t("cap-vision-short")}${m.vision ? "✓" : "✗"}`;
     const recIds = new Set(RECOMMENDED.map((r) => r.id));
     const rec: SelectOption[] = RECOMMENDED.map((r) => ({ value: r.id, label: r.id, note: t(r.note as TKey), group: t("model-recommended") }));
     const rest = models

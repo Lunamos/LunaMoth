@@ -42,7 +42,7 @@ export interface TaskModel {
 /* The functions that can run on their own model. Order = display order.
    Every "keyprovider" task follows ONE pattern: pick a saved provider + a model,
    persisting {<task>_provider, <task>_model}. Adding audio later = one more row. */
-export const TASKS: ReadonlyArray<TaskModel> = [
+const TASKS: ReadonlyArray<TaskModel> = [
   { key: "vision", labelKey: "aux-vision", descKey: "aux-vision-desc", field: "vision_model", providerField: "vision_provider", source: "keyprovider" },
   { key: "card", labelKey: "aux-card", descKey: "aux-card-desc", field: "card_model", providerField: "card_provider", source: "keyprovider" },
   { key: "imageprompt", labelKey: "aux-imgprompt", descKey: "aux-imgprompt-desc", field: "image_prompt_model", providerField: "image_prompt_provider", source: "keyprovider" },

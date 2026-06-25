@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- intentional co-location: this module exports a provider/component alongside its hooks or pure helpers, imported widely; splitting it purely for dev fast-refresh isn't worth the import churn. */
 /* CardField — the editable card field + labelled block + inline ✦ AI rewrite,
  * React ports of app.js:76 cardFieldEl / 84 cardBlockEl / 52 aiEditButton /
  * 58 openAiFieldEdit / 90 runFieldRewrite. A field is an uncontrolled
