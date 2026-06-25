@@ -9,7 +9,7 @@
  * line; busy + text stages the message. Attachments stage as chips, read to base64.
  */
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { FileText, FolderOpen, Image as ImageIcon, ClipboardPaste, Link2 } from "lucide-react";
 import { useT, useLang } from "../../i18n";
 import { errMsg } from "../../lib/status";
@@ -103,6 +103,11 @@ export function Composer({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // Drag-and-drop file upload. A depth counter balances the dragenter/dragleave
+  // that bubble from child elements, so the overlay doesn't flicker as the cursor
+  // moves over the stage/popups inside the wrap.
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
 
   // The slash palette: open while the box is exactly `/<partial>` (no space yet),
   // not streaming, not Esc-dismissed. A space (= entering args) closes it.
@@ -145,6 +150,35 @@ export function Composer({
         onError(errMsg(e));
       }
     }
+  };
+
+  // Only FILE drags raise the drop hint — dragging selected text or an image
+  // within the page (types without "Files") must not trigger it.
+  const dragHasFiles = (e: DragEvent<HTMLDivElement>) =>
+    Array.from(e.dataTransfer?.types || []).includes("Files");
+  const onDragEnter = (e: DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragging(true);
+  };
+  const onDragOver = (e: DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  };
+  const onDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(e)) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragging(false);
+  };
+  const onDrop = (e: DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragging(false);
+    const files = e.dataTransfer?.files;
+    if (files && files.length) void stageFiles(files);
   };
 
   const pick = (accept: string, directory = false) => {
@@ -246,8 +280,18 @@ export function Composer({
   const showStop = streaming && text.trim().length === 0;
 
   return (
-    <div className="composer-wrap" ref={wrapRef}>
+    <div
+      className="composer-wrap"
+      ref={wrapRef}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       {statusSlot}
+      <div className="drop-overlay" hidden={!dragging}>
+        <span>{t("attach-drop")}</span>
+      </div>
 
       {paletteOpen && (
         <div className="composer-pop slash-pop" role="listbox">
