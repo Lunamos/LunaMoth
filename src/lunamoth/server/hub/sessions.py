@@ -304,6 +304,9 @@ def wake(card_path: str, name: str = "", isolation: str = "sandbox",
         session_name = f"{base}-{n}"
         n += 1
     iso = S.normalize_isolation(isolation)  # legacy dir/local/docker → admin
+    from ...session.isolation import force_sandbox
+    if force_sandbox():
+        iso = "sandbox"  # distribution lock: wake every chara jailed regardless of the request
     meta = S.create_session(session_name, isolation=iso if iso in S.ISOLATION_LEVELS else "sandbox")
 
     frozen = meta.root / "card.json"
@@ -521,6 +524,10 @@ def set_isolation(meta: S.SessionMeta, isolation: str) -> dict[str, Any]:
     iso = S.normalize_isolation(str(isolation or ""))  # legacy dir/local/docker → admin
     if iso not in S.ISOLATION_LEVELS:
         raise RpcError(-32602, f"isolation must be one of {sorted(S.ISOLATION_LEVELS)}")
+    from ...session.isolation import force_sandbox
+    if force_sandbox() and iso != "sandbox":
+        # Distribution lock: this server pins every chara to the sandbox; admin is refused.
+        raise RpcError(-32602, "sandbox is enforced on this server (admin isolation is disabled)")
     try:
         cfg = json.loads(meta.config_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:

@@ -404,6 +404,10 @@ function ProfilePane({ stream, name }: { stream: CharaStream; name: string }) {
 function SettingsPane({ stream, name }: { stream: CharaStream; name: string }) {
   const t = useT();
   const { hub } = useHubApi();
+  // Distribution lock (server LUNAMOTH_FORCE_SANDBOX): the board state reports it; the
+  // sandbox toggle below is then shown ON, greyed, and non-interactive.
+  const { snapshot: hubSnap } = useHubState();
+  const forceSandbox = !!(hubSnap as { force_sandbox?: boolean } | null)?.force_sandbox;
   const snap = (stream.snapshot as Snapshot | null) || {};
   const quiet = Number(snap.quiet) || 300;
   const patience = Number(snap.patience) || 600;
@@ -495,8 +499,15 @@ function SettingsPane({ stream, name }: { stream: CharaStream; name: string }) {
         <label>{t("p-sandbox")}</label>
         <div className="why">{t("p-sandbox-sub")}</div>
         <div className="ctl">
-          <button className={"switch" + (sandboxOn ? " on" : "")} onClick={() => setSandbox(!sandboxOn)} />
-          {sandboxOn !== activeSandbox && <span className="fact-hint">{t("mod-next-start")}</span>}
+          <button
+            className={"switch" + (forceSandbox || sandboxOn ? " on" : "") + (forceSandbox ? " locked" : "")}
+            disabled={forceSandbox}
+            aria-disabled={forceSandbox}
+            onClick={() => !forceSandbox && setSandbox(!sandboxOn)}
+          />
+          {forceSandbox
+            ? <span className="fact-hint">{t("p-sandbox-locked")}</span>
+            : sandboxOn !== activeSandbox && <span className="fact-hint">{t("mod-next-start")}</span>}
         </div>
       </div>
       <div className="pfield" style={{ marginTop: 16 }}>

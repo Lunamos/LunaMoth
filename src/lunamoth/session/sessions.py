@@ -38,6 +38,12 @@ ISOLATION_TO_BACKEND = {"sandbox": "sandbox", "admin": "admin"}
 
 
 def isolation_to_backend(isolation: str) -> str:
+    # The distribution lock pins every chara to the sandbox jail at launch (the child's
+    # LUNAMOTH_PY_BACKEND), regardless of its stored isolation. backend() clamps again at
+    # runtime, but launching jailed from the start is the clean guarantee.
+    from .isolation import force_sandbox
+    if force_sandbox():
+        return "sandbox"
     return ISOLATION_TO_BACKEND.get(isolation, "sandbox")
 
 # Legacy isolation values mapped on read so old session configs keep working.

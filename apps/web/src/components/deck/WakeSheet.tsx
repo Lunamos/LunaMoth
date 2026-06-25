@@ -30,6 +30,9 @@ export function WakeSheet({ card, onClose }: { card: DeckCard; onClose: () => vo
   const { hub, snapshot, refresh } = useHub();
   const nav = useNavigate();
   const defaults = (snapshot?.defaults as { model?: string }) || {};
+  // Distribution lock (server LUNAMOTH_FORCE_SANDBOX): wake is pinned to sandbox; the
+  // toggle is shown ON, greyed, and non-interactive (the server clamps it regardless).
+  const forceSandbox = !!(snapshot as { force_sandbox?: boolean } | null)?.force_sandbox;
 
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [name, setName] = useState(card.name);
@@ -166,11 +169,13 @@ export function WakeSheet({ card, onClose }: { card: DeckCard; onClose: () => vo
             <div className="switch-row">
               <div className="tx">
                 <b>{t("p-sandbox")}</b>
-                <small>{t("wake-iso-sub")}</small>
+                <small>{forceSandbox ? t("p-sandbox-locked") : t("wake-iso-sub")}</small>
               </div>
               <button
-                className={"switch" + (iso === "sandbox" ? " on" : "")}
-                onClick={() => setIso((v) => (v === "sandbox" ? "admin" : "sandbox"))}
+                className={"switch" + (forceSandbox || iso === "sandbox" ? " on" : "") + (forceSandbox ? " locked" : "")}
+                disabled={forceSandbox}
+                aria-disabled={forceSandbox}
+                onClick={() => !forceSandbox && setIso((v) => (v === "sandbox" ? "admin" : "sandbox"))}
               />
             </div>
             <div className="switch-row">

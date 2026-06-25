@@ -856,6 +856,9 @@ body.dark .ctx-big .ctx-ring.hot{background:conic-gradient(var(--amber) calc(var
 }
 .switch.on{background:var(--green)}
 .switch.on::after{left:16px}
+/* Locked/disabled switch (e.g. the force-sandbox distribution lock): visibly greyed +
+   non-interactive while still showing its on/off position. */
+.switch:disabled,.switch.locked{opacity:.4; cursor:not-allowed}
 .pfield{margin-bottom:16px}
 .pfield label{display:block; font-size:12.5px; font-weight:550; margin-bottom:2px}
 .pfield .why{font-size:11px; color:var(--text-3); line-height:1.5; margin-bottom:6px}

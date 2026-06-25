@@ -85,8 +85,9 @@ describe("I18N strings map", () => {
   // dropped wb-reorder, added wb-move-up + wb-move-down → 655.
   // The model picker's offline/cached-list notice (model-list-stale) → 656.
   // Removed the hardcoded recommended-model quick-picks (model-note-flash/pro) → 654.
-  it("preserves the full key set from the source dict (654 keys)", () => {
-    expect(Object.keys(I18N).length).toBe(654);
+  // The force-sandbox distribution lock notice (p-sandbox-locked) → 655.
+  it("preserves the full key set from the source dict (655 keys)", () => {
+    expect(Object.keys(I18N).length).toBe(655);
   });
 
   it("every value is a [zh, en] string tuple", () => {

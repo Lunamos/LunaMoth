@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ... import __version__
+from ...session import isolation as _isolation
 from ...session import sessions as S
 from ...session.settings import PRESETS
 from ..dispatch import RpcError, error_response, ok_response, _normalize_request
@@ -219,6 +220,8 @@ class HubDispatcher:
             "sessions": sessions,
             "cards": _cards.list_cards(),
             "home": str(S.lunamoth_home()),
+            # Distribution lock (LUNAMOTH_FORCE_SANDBOX): the UI greys the sandbox toggle.
+            "force_sandbox": _isolation.force_sandbox(),
         }
 
     def _sessions_list(self, p: dict[str, Any]) -> Any:

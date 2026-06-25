@@ -485,6 +485,10 @@ def cmd_desktop(args: argparse.Namespace) -> int:
 
     if getattr(args, "debug", False):
         os.environ["LUNAMOTH_DEBUG"] = "1"
+    # Distribution lock: set the env BEFORE spawning so the supervisor + every chara child
+    # (which inherit it) pin to the sandbox jail and refuse admin. Env or flag, either works.
+    if getattr(args, "force_sandbox", False):
+        os.environ["LUNAMOTH_FORCE_SANDBOX"] = "1"
     host = getattr(args, "host", None) or "127.0.0.1"
     # An explicit token may come from --token OR the LUNAMOTH_TOKEN env (the Docker
     # entrypoint sets the latter, generating one if unset). Either counts as the
@@ -974,6 +978,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--token", default="", help="gateway token (auto-generated if omitted)")
     sp.add_argument("--no-open", action="store_true", help="don't open the browser")
     sp.add_argument("--daemon", action="store_true", help="start lunamothd in the background")
+    sp.add_argument("--force-sandbox", action="store_true",
+                    help="pin every chara to the sandbox jail; disable admin isolation (for distributing the service). "
+                         "Equivalent to LUNAMOTH_FORCE_SANDBOX=1.")
     sp.add_argument("--debug", action="store_true", help="DEBUG-level diagnostics")
     sp.set_defaults(func=cmd_desktop)
 

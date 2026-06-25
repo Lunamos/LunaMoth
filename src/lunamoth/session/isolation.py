@@ -73,14 +73,27 @@ class JailUnavailableError(RuntimeError):
     """
 
 
+def force_sandbox() -> bool:
+    """Distribution lock: when ``LUNAMOTH_FORCE_SANDBOX`` is set at startup, EVERY chara
+    is pinned to the sandbox jail and ``admin`` is refused — so a hosted/shared LunaMoth
+    can't be talked (or configured) out of its jail. Read live from the env so the
+    supervisor + every chara child (which inherit it) agree."""
+    return os.environ.get("LUNAMOTH_FORCE_SANDBOX", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def backend() -> str:
     """Isolation mechanism for this session (LUNAMOTH_PY_BACKEND: sandbox|admin).
 
     Legacy values (``dir``/``local``/``docker``) normalize to ``admin`` so old
-    session configs keep working without migration.
+    session configs keep working without migration. When force_sandbox() is on, an
+    ``admin`` resolution is clamped to ``sandbox`` HERE — the one authority every tool
+    runner + permissions() read — so even a stale env/config can never run unconfined.
     """
     raw = os.environ.get("LUNAMOTH_PY_BACKEND", os.environ.get("LUNAMOSS_PY_BACKEND", "sandbox")).strip().lower()
-    return "admin" if raw in {"admin", "dir", "local", "docker"} else raw
+    b = "admin" if raw in {"admin", "dir", "local", "docker"} else raw
+    if b == "admin" and force_sandbox():
+        return "sandbox"
+    return b
 
 
 def os_sandbox_available() -> bool:
