@@ -87,6 +87,30 @@
     padding: 0 6px; cursor: pointer;
   }
   .panel-mhead b { font-size: 15px; }
+
+  /* Chat header, WeChat-style: a compact nav bar — back · avatar · NAME · panel button
+     — with the sub-view tabs (Chat/Works/Terminal/Homepage) on a second, horizontally
+     scrollable row. Keeps the chara name prominent (it used to collide with, and was then
+     dropped for, the 4 tabs) and the tabs never fight it for width. */
+  .chat-head { flex-wrap: wrap; height: auto; min-height: 48px; padding: 6px 10px; }
+  .chat-head .grow { display: none; }
+  .chat-head .who { display: block; flex: 1 1 auto; min-width: 0; }
+  .chat-head .who b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-tabs { order: 9; flex: 1 1 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 6px 0 0; }
+
+  /* Providers pane: each row is name + a masked-key/actions cluster that doesn't fit on
+     one phone line — "Replace" clipped off-screen and a CJK provider name wrapped one
+     character per line. Stack it: the name takes the first line (full width, no per-char
+     wrap), the key/actions wrap onto lines below, indented under the name. */
+  .prov-row { flex-wrap: wrap; align-items: flex-start; row-gap: 8px; }
+  .prov-meta { flex: 1 1 auto; }
+  .prov-key { flex: 1 1 100%; flex-wrap: wrap; padding-left: 20px; justify-content: flex-start; }
+  .prov-input { flex: 1 1 180px; width: auto; max-width: none; }
+
+  /* Card editor tab strip (Profile/Visual/Expressions/World/…) → scroll instead of
+     clipping when the labels don't all fit on a phone. */
+  .cardview .cv-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .cardview .cv-tab { flex: none; padding-left: 12px; padding-right: 12px; }
 }
 
 @keyframes panel-page-in {
