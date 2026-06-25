@@ -21,6 +21,7 @@ import { Select, type SelectOption } from "./Select";
 import { Segmented } from "../ui/Segmented";
 import { TaskModels, type ImageProvider } from "./TaskModels";
 import { MatteSection } from "./MattePane";
+import { REASONING_EFFORTS as REASONING } from "../../lib/providers";
 import type { TKey } from "../../i18n";
 import type { ModelInfo } from "../deck/types";
 
@@ -38,8 +39,6 @@ interface Defaults {
 }
 interface KeyRow { label: string; provider: string; base_url: string; model: string; has_key: boolean; active: boolean }
 interface TestResult { ok?: boolean; error?: { kind?: string }; capabilities?: { tools?: boolean; vision?: boolean } }
-
-const REASONING = ["off", "low", "medium", "high"] as const;
 
 export function ModelPane() {
   const t = useT();

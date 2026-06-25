@@ -69,7 +69,9 @@ def test_provider_presets_in_sync_py_ts():
     # would mislabel a migrated key or point a provider row at the wrong endpoint.
     from lunamoth.session import settings as S
     ts = (_REPO / "apps/web/src/lib/providers.ts").read_text(encoding="utf-8")
-    body = ts[ts.index("PROVIDER_PRESETS"):]
+    # anchor on the declaration, not the first mention (the file's doc-comment also
+    # names PROVIDER_PRESETS) — otherwise a comment edit could skew the parse.
+    body = ts[ts.index("export const PROVIDER_PRESETS"):]
 
     def field(row: str, name: str) -> str:
         m = re.search(rf'\b{name}:\s*"([^"]*)"', row)
@@ -96,13 +98,15 @@ def test_live_providers_match_across_core_and_session():
 
 def test_reasoning_efforts_in_sync_py_ts():
     # The reasoning-effort enum: a Python validation tuple (settings.REASONING_EFFORTS)
-    # + the SPA's ModelPane picker. A new tier added to one drifts picker vs validator.
+    # + the ONE TS copy in lib/providers.ts (imported by BOTH ModelPane and ChatPanel,
+    # so there's no per-component literal to drift). A new tier added to one side drifts
+    # the picker vs the validator.
     from lunamoth.session import settings as S
-    ts = (_REPO / "apps/web/src/components/settings/ModelPane.tsx").read_text(encoding="utf-8")
-    m = re.search(r"const REASONING\s*=\s*\[(.*?)\]", ts, re.DOTALL)
-    assert m, "could not find REASONING in ModelPane.tsx"
+    ts = (_REPO / "apps/web/src/lib/providers.ts").read_text(encoding="utf-8")
+    m = re.search(r"REASONING_EFFORTS\s*=\s*\[(.*?)\]", ts, re.DOTALL)
+    assert m, "could not find REASONING_EFFORTS in lib/providers.ts"
     ts_efforts = tuple(re.findall(r'"([^"]+)"', m.group(1)))
-    assert ts_efforts == S.REASONING_EFFORTS, "ModelPane REASONING drifted from settings.REASONING_EFFORTS"
+    assert ts_efforts == S.REASONING_EFFORTS, "lib/providers.ts REASONING_EFFORTS drifted from settings.REASONING_EFFORTS"
 
 
 def test_life_state_words_in_sync_py_ts():

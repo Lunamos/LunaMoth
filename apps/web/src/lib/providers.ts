@@ -21,3 +21,9 @@ export const PROVIDER_PRESETS: ReadonlyArray<ProviderPreset> = [
   { label: "混元", provider: "hunyuan", base_url: "https://api.hunyuan.cloud.tencent.com/v1", descKey: "prov-hunyuan-desc" },
   { label: "阿里云", provider: "dashscope", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", descKey: "prov-aliyun-desc" },
 ];
+
+/* The reasoning-effort enum — the canonical TS copy, MIRRORING the backend
+ * `session/settings.py: REASONING_EFFORTS` and pinned by test_cross_lang_drift.
+ * ModelPane imports it; ChatPanel's in-chat picker should import it too (a trivial
+ * follow-up, left out here only because that file is under active edit elsewhere). */
+export const REASONING_EFFORTS = ["off", "low", "medium", "high"] as const;
