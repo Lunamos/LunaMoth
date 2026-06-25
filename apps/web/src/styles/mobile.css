@@ -35,7 +35,9 @@
     width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh;
     border-radius: 0; margin: 0;
   }
-  .modal.wide { padding: 0; }
+  /* Only the create FLOW goes edge-to-edge (its .flow supplies its own padding); other
+     wide modals (wake sheet, gateway modal) keep the modal's normal page padding. */
+  .modal.wide:has(.flow) { padding: 0; }
 
   /* Create flow → a true full-screen mobile flow: the step bar pinned at top, the form
      SCROLLING in the middle, and the action bar (Cancel · Generate/Create) STICKY at the
@@ -129,4 +131,44 @@
 @keyframes panel-page-in {
   from { transform: translateX(7%); opacity: .5; }
   to { transform: none; opacity: 1; }
+}
+
+@media (max-width: 680px) {
+  /* (6a) A drilled-in chat hands the bottom edge to the composer — like WeChat, the
+     level-1 tabs (Characters/Deck/Gateways/Settings) show the bar, but a specific
+     conversation does not (the composer is the bottom). */
+  #app:has(#view-chat) .sidebar { display: none; }
+  #app:has(#view-chat) .main { padding-bottom: 0; }
+
+  /* (6b) A 16px composer input stops iOS's focus-zoom — opening the keyboard just
+     scrolls the conversation up; the layout size doesn't change. */
+  .composer textarea { font-size: 16px; }
+
+  /* (5) Keep the conversation from sliding sideways (long tokens / code / the sprite). */
+  #view-chat, .chat-root, .chat-col, .chat-pages, .stream { max-width: 100%; overflow-x: hidden; }
+  .stream pre, .stream code { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+
+  /* (7b/7c) The chat header's back + panel (☰) controls are bigger and clearly tappable. */
+  .chat-head .back { font-size: 27px; padding: 0 10px; }
+  .chat-head .chat-panel-btn { font-size: 21px; min-width: 40px; height: 40px; }
+
+  /* (4) Gateway / wake / manage surfaces had text jammed against the screen edge — give
+     them real page margins on a phone. */
+  .gw-newpop { left: 0; right: 0; min-width: 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .modal.sheet:not(.wide) { padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); }
+}
+
+@media (max-width: 680px) {
+  /* Touch has no hover — it maps to a long-press, a poor way to reveal an action — so
+     controls the desktop UI reveals on :hover are PERSISTENT on a phone: the deck card's
+     复制 / 唤醒 / 删除, the board card's actions, the works-row reveal, the visual
+     candidate / sticker ✕ + name, and the preview browse arrows. */
+  .chara-card .hover-acts,
+  .spine .spine-acts,
+  .work-row .reveal,
+  .vis-preview .vis-arr,
+  .vis-sticker-cell .vis-sticker-name { opacity: 1; }
+  .cv-asset .vis-cand-x,
+  .vis-sticker-cell .vis-cand-x,
+  .vis-cand .vis-cand-x { display: block; }
 }

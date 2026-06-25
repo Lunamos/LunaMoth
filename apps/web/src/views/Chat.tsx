@@ -69,23 +69,15 @@ export function Chat({ name, sub }: { name: string; sub: ChatSub }) {
     });
   };
   // Tapping the chara avatar opens the profile panel (the standard messaging pattern;
-  // the avatar already looks tappable). No-op if it's already open.
-  const openPanel = () => { if (!panelOpen) togglePanel(); };
-
   return (
     <div className="view active" id="view-chat">
       <div className="chat-root" id="chat-root" data-life={lifeAttr}>
         <div className="chat-col">
           <div className="chat-head">
-            <button className="back" onClick={() => nav("#/")}>
+            <button className="back" onClick={() => nav("#/")} aria-label={t("back")}>
               ‹
             </button>
-            <div
-              className={`avatar-s avatar-btn ${avatarUri ? "" : paletteClass(stream.charName)}`}
-              role="button"
-              aria-label={t("p-profile")}
-              onClick={openPanel}
-            >
+            <div className={`avatar-s ${avatarUri ? "" : paletteClass(stream.charName)}`}>
               {avatarUri ? (
                 <img src={avatarUri} alt="" loading="lazy" decoding="async" />
               ) : (
@@ -147,8 +139,12 @@ export function Chat({ name, sub }: { name: string; sub: ChatSub }) {
                 ⚠︎⌁
               </button>
             )}
-            <button className={`icon-btn${panelOpen ? " on" : ""}`} onClick={togglePanel}>
-              ▤
+            <button
+              className={`icon-btn chat-panel-btn${panelOpen ? " on" : ""}`}
+              onClick={togglePanel}
+              aria-label={t("p-profile")}
+            >
+              ☰
             </button>
           </div>
 

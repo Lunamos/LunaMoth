@@ -189,13 +189,14 @@ export function CardEditor({
       tagline: fTagline.current?.value(),
     });
 
+  // Only the read-only EXPLANATIONS remain (built-in / PNG — they say why fields are
+  // locked). The "edits write back to the deck" + "editing a running chara" banners were
+  // dropped as noise (the frozen-by chip + the activation badges already convey it).
   const note: TKey | "" = card.builtin
     ? "cv-builtin-note"
     : !isJson
       ? "cv-png-note"
-      : card.frozen
-        ? "av-frozen-note"
-        : "";
+      : "";
 
   // ── field-level AUTO-SAVE (no whole-card replace, no Save button) ──────────────
   // Every editable card (deck template OR a living chara's own card) saves on blur /
@@ -387,14 +388,7 @@ export function CardEditor({
         className="cardview"
         onBlurCapture={editable ? liveSaveDebounced : undefined}
       >
-        {note && (
-          <div className="cv-note cv-note-top">
-            {note === "av-frozen-note" ? t(note, { names: (card.used_by || []).join("、") }) : t(note)}
-          </div>
-        )}
-        {liveCard && (
-          <div className="cv-live-note">{t("cv-live-edit-note", { name: card.owner || charName })}</div>
-        )}
+        {note && <div className="cv-note cv-note-top">{t(note)}</div>}
         {liveCard && liveSession?.card_dirty && (
           <div className="cv-apply-banner">
             <span>{t("cv-apply-pending")}</span>

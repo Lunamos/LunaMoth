@@ -257,7 +257,14 @@ class CharacterCard:
         names = opts if isinstance(opts, list) else []
         if not names:
             sel = self.assets().get(kind)
-            names = [sel] if isinstance(sel, str) and sel else []
+            if isinstance(sel, str) and sel:
+                names = [sel]
+            elif kind == "avatar":
+                # The avatar lives in lunamoth.avatar_file (its own field), not assets.avatar —
+                # fold it in so the current avatar (any of png/jpg/webp/svg) shows as the lone
+                # candidate on a pre-gallery / bundled card instead of an empty gallery.
+                af = self.avatar_file()
+                names = [af] if af else []
         out = []
         for v in names:
             p = self._resolve(self._asset_rel(v))
