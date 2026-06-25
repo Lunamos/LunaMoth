@@ -14,9 +14,11 @@ from ..protocol import SAY, TextDelta
 from ..protocol.api import CharaHandle
 from .access import RefusalThrottle, sender_allowed, warn_if_open_allowlist
 from .base import Adapter, DeliveryDeferred, InboundMessage
+from .discord import DiscordAdapter
 from .filters import is_silence_narration
 from .media import deliver_image_url, deliver_media, extract_outbound, missing_media_note
 from .qq import QQAdapter
+from .slack import SlackAdapter
 from .telegram import TelegramAdapter
 from .text import split_text
 from .weixin import WeixinAdapter
@@ -117,7 +119,7 @@ def make_adapters(config: dict[str, Any]) -> list[Adapter]:
     for name, adapter_config in adapters.items():
         if not isinstance(adapter_config, dict):
             raise ValueError(f"adapter {name!r} config must be an object")
-        if name not in ("weixin", "qq", "telegram"):
+        if name not in ("weixin", "qq", "telegram", "discord", "slack"):
             raise ValueError(f"unknown messaging adapter {name!r}")
         if not adapter_enabled(adapter_config, legacy=legacy):
             continue
@@ -127,6 +129,10 @@ def make_adapters(config: dict[str, Any]) -> list[Adapter]:
             out.append(QQAdapter(adapter_config))
         elif name == "telegram":
             out.append(TelegramAdapter(adapter_config))
+        elif name == "discord":
+            out.append(DiscordAdapter(adapter_config))
+        elif name == "slack":
+            out.append(SlackAdapter(adapter_config))
     return out
 
 
