@@ -63,6 +63,27 @@ def test_disk_log_scrubber_covers_every_shared_prefix():
     assert all(p in log._REDACT.pattern for p in config.SECRET_PREFIX_PATTERNS)
 
 
+def test_provider_presets_in_sync_py_ts():
+    # The webui provider list (id · label · base_url) lives in Python (settings.PROVIDER_
+    # PRESETS, also driving the migration's labels) + a TS mirror the SPA renders. A drift
+    # would mislabel a migrated key or point a provider row at the wrong endpoint.
+    from lunamoth.session import settings as S
+    ts = (_REPO / "apps/web/src/lib/providers.ts").read_text(encoding="utf-8")
+    body = ts[ts.index("PROVIDER_PRESETS"):]
+
+    def field(row: str, name: str) -> str:
+        m = re.search(rf'\b{name}:\s*"([^"]*)"', row)
+        return m.group(1) if m else ""
+
+    ts_presets = [{"provider": field(r, "provider"), "label": field(r, "label"), "base_url": field(r, "base_url")}
+                  for r in re.findall(r"\{([^}]*)\}", body) if field(r, "provider")]
+    py_presets = [{"provider": p["provider"], "label": p["label"], "base_url": p["base_url"]}
+                  for p in S.PROVIDER_PRESETS]
+    assert ts_presets == py_presets, (
+        "lib/providers.ts drifted from settings.PROVIDER_PRESETS — update both (same order)"
+    )
+
+
 def test_browser_shares_the_one_exfil_regex():
     # The browser navigation guard must be the SAME compiled regex as the fetch/URL
     # guard (deduped), so the two can't drift apart.

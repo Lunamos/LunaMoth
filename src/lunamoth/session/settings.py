@@ -38,12 +38,18 @@ def _global_home() -> Path:
     return Path(os.getenv("LUNAMOTH_HOME", Path.home() / ".lunamoth")).expanduser().resolve()
 
 
-# Map a provider id to the display label the webui Providers pane uses, so a key
-# migrated out of the legacy top-level slot lands under the right preset row.
-_PROVIDER_LABELS = {
-    "openrouter": "OpenRouter", "openai": "OpenAI", "volcano": "火山引擎",
-    "hunyuan": "混元", "dashscope": "阿里云",
-}
+# The webui provider presets (id · label · base_url) — the ONE backend copy. The SPA's
+# apps/web/src/lib/providers.ts mirrors it (CSS/TS can't import Python; pinned equal by a
+# cross-language drift test). A key folded out of the legacy top-level slot is labelled by
+# these too, so it lands under the right Providers-pane row.
+PROVIDER_PRESETS: tuple[dict[str, str], ...] = (
+    {"provider": "openrouter", "label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1"},
+    {"provider": "openai", "label": "OpenAI", "base_url": "https://api.openai.com/v1"},
+    {"provider": "volcano", "label": "火山引擎", "base_url": "https://ark.cn-beijing.volces.com/api/v3"},
+    {"provider": "hunyuan", "label": "混元", "base_url": "https://api.hunyuan.cloud.tencent.com/v1"},
+    {"provider": "dashscope", "label": "阿里云", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+)
+_PROVIDER_LABELS = {p["provider"]: p["label"] for p in PROVIDER_PRESETS}
 
 
 def _norm(s: object) -> str:

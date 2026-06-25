@@ -2,7 +2,10 @@
  * each. Shared by the Providers settings pane (KeysPane) and the first-run model
  * gate (ModelGate) so the welcome key entry uses the SAME provider→key→model model
  * as Settings (not an OpenRouter-only special case). base_url can be overridden via
- * a custom endpoint when a region/path differs. */
+ * a custom endpoint when a region/path differs.
+ *
+ * MIRRORS the backend source `session/settings.py: PROVIDER_PRESETS` (TS can't import
+ * Python). The two are pinned equal by tests/test_cross_lang_drift.py — edit BOTH. */
 
 export interface ProviderPreset {
   label: string;
