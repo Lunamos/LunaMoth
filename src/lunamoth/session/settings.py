@@ -98,9 +98,11 @@ def migrate_legacy_default_key() -> None:
     if not str(raw.get("active_key_label") or ""):
         raw["active_key_label"] = match  # the legacy top-level key WAS the active default
     raw.pop("api_key", None)  # the keyring is the source now — drop the duplicate secret
+    from ..config import atomic_write_text
     try:
-        path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
-        path.chmod(0o600)
+        # atomic (temp + os.replace, 0600): a crash mid-migration must never tear the
+        # keyring file (it holds every provider secret).
+        atomic_write_text(path, json.dumps(raw, ensure_ascii=False, indent=2), private=True)
     except OSError:
         pass
 

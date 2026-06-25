@@ -108,8 +108,7 @@ def test_key_rotation_is_obsolete_after_sec2():
     """SEC-2: the provider key is resolved globally at load, never copied into a
     session config. So waking embeds no key, defaults.set reports no rotation
     candidates, and defaults.apply_key is a harmless no-op."""
-    H.save_defaults({"provider": "openrouter", "base_url": "https://example.invalid/v1",
-                     "api_key": "old-key", "model": "test/model"})
+    set_defaults()  # keyring is the one store (provider key + active_key_label), no top-level api_key
     a = result("session.wake", {"card": luna_card_path(), "name": "same"})
     same = S.load_session(a["name"])
     cfg = json.loads(same.config_path.read_text(encoding="utf-8"))
@@ -117,6 +116,9 @@ def test_key_rotation_is_obsolete_after_sec2():
 
     saved = result("defaults.set", {"api_key": "new-key"})
     assert saved["key_update_candidates"] == []  # nothing needs per-session rotation
+    # defaults.set can NEVER persist a top-level secret — the keyring is the one store.
+    raw = json.loads(H.desktop_config_path().read_text(encoding="utf-8"))
+    assert "api_key" not in raw
 
     applied = result("defaults.apply_key", {"names": [same.name]})
     assert applied == {"updated": [], "skipped": [], "candidates": []}

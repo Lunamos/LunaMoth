@@ -44,15 +44,21 @@ def user_worlds_dir() -> Path:
 # provider has a key).
 # matte_model: the active local matting (抠像) model id, set in Settings·生图 and
 # read by lunamoth.visuals.matte.selected_model(). Not a secret.
-_DEFAULT_FIELDS = ("provider", "base_url", "api_key", "model", "ui_lang", "ui_theme",
+# NOTE: `api_key` is deliberately NOT a default field. The keyring ("keys" map) is
+# the ONE secret store; the active default route is the non-secret `active_key_label`
+# pointer, and every consumer resolves the key from the keyring by route
+# (global_api_key / active_key). So a top-level api_key can never be written here —
+# save_defaults can't persist it, and any legacy one is migrated into the keyring +
+# purged on read/write (see _read_desktop_raw / save_defaults).
+_DEFAULT_FIELDS = ("provider", "base_url", "model", "ui_lang", "ui_theme",
                    "active_key_label",
                    "image_provider", "image_model", "matte_model",
                    "reasoning", "vision_model", "vision_provider",
                    "card_model", "card_provider",
                    "image_prompt_model", "image_prompt_provider", "model_context",
                    "model_refresh_interval")
-# Default fields whose value is a secret: stripped from every public payload,
-# surfaced only as a has_<field> presence flag.
+# Defensive: should a raw top-level api_key ever appear (legacy file, older client),
+# strip it from every public payload — it's surfaced only as a has_key presence flag.
 _SECRET_FIELDS = ("api_key",)
 
 
@@ -98,6 +104,7 @@ def save_defaults(updates: dict[str, str]) -> dict[str, str]:
     for k in _DEFAULT_FIELDS:
         if k in updates and isinstance(updates[k], str):
             raw[k] = updates[k]
+    raw.pop("api_key", None)  # the keyring is the one store — never persist a top-level secret
     _write_desktop_raw(raw)
     return {k: raw[k] for k in _DEFAULT_FIELDS if isinstance(raw.get(k), str)}
 

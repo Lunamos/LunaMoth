@@ -655,15 +655,12 @@ class HubDispatcher:
         return {"providers": _config.image_providers.catalogue(_config._read_desktop_raw(), _image_models)}
 
     def _defaults_set(self, p: dict[str, Any]) -> Any:
+        # api_key is not a default field (the keyring is the one store), so it's
+        # filtered out of `updates` here and can never be written top-level.
         updates = {k: v for k, v in p.items() if k in _config._DEFAULT_FIELDS and isinstance(v, str)}
-        before = _config.load_defaults()
         defaults = _config.save_defaults(updates)
         public = _config._public_defaults(defaults)
-        changed_key = "api_key" in updates and updates.get("api_key") != before.get("api_key")
-        if changed_key and defaults.get("api_key"):
-            public["key_update_candidates"] = _config.key_update_candidates(defaults)
-        else:
-            public["key_update_candidates"] = []
+        public["key_update_candidates"] = []  # obsolete since SEC-2 (kept for client contract)
         return public
 
     def _defaults_apply_key(self, p: dict[str, Any]) -> Any:
