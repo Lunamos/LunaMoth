@@ -1277,16 +1277,17 @@ def test_defaults_persist_image_provider_and_model():
     assert got["image_model"] == "google/gemini-2.5-flash-image-preview"
 
 
-def test_safe_extensions_secondary_only_theme_does_not_raise():
+def test_safe_extensions_secondary_only_theme_is_dropped():
     # A card whose theme has a secondary color but no valid primary used to crash
-    # the card view with KeyError 'primary' ("handler error: 'primary'") — the UI
-    # mirror to the legacy theme_color must guard the missing primary.
+    # the card view with KeyError 'primary' ("handler error: 'primary'"). Root fix:
+    # a theme REQUIRES a primary, so _clean_theme drops a primary-less {secondary}
+    # entirely — no theme, no theme_color, no crash.
     out = H._safe_extensions_for_ui({"lunamoth": {"theme": {"secondary": "#abcdef"}}})
-    theme = out["lunamoth"]["theme"]
-    assert theme == {"secondary": "#ABCDEF"}  # colors are normalized to uppercase
+    assert "theme" not in out["lunamoth"]
     assert "theme_color" not in out["lunamoth"]
-    # A primary present still mirrors into the legacy field.
+    # A primary present survives and still mirrors into the legacy field.
     out2 = H._safe_extensions_for_ui(
         {"lunamoth": {"theme": {"primary": "#112233", "secondary": "#445566"}}}
     )
+    assert out2["lunamoth"]["theme"] == {"primary": "#112233", "secondary": "#445566"}
     assert out2["lunamoth"]["theme_color"] == "#112233"

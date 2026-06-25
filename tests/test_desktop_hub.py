@@ -523,6 +523,24 @@ def test_card_save_roundtrips_new_lunamoth_extension_fields():
     assert mine["tagline"] == "A gentle keeper of orbital lanterns"
 
 
+def test_draft_theme_always_has_valid_primary_and_secondary():
+    """A drafted card ALWAYS carries a valid {primary, secondary}: the primary
+    falls back to the deck color when the model omits/garbles theme_color, and
+    the secondary is derived. A primary-less theme (which crashed the card view)
+    can never be generated."""
+    from lunamoth.server.hub.card_draft import _DEFAULT_THEME_PRIMARY
+    # No theme_color at all → fallback primary + derived distinct secondary.
+    no_theme = {k: v for k, v in draft_payload().items() if k != "theme_color"}
+    t1 = H.draft_to_card(no_theme)["data"]["extensions"]["lunamoth"]["theme"]
+    assert t1["primary"] == _DEFAULT_THEME_PRIMARY
+    assert t1["secondary"].startswith("#") and t1["secondary"] != t1["primary"]
+    # A garbage primary but a VALID secondary must NOT yield a secondary-only theme.
+    t2 = H.draft_to_card({**no_theme, "theme_color": "not-a-color", "theme_color_2": "#445566"})[
+        "data"]["extensions"]["lunamoth"]["theme"]
+    assert t2["primary"] == _DEFAULT_THEME_PRIMARY
+    assert t2["secondary"] == "#445566"
+
+
 def test_card_studio_actor_embodiment_feeds_prompt_bridge(tmp_path, monkeypatch):
     """Studio-saved `extensions.lunamoth.force_roleplay=true` is read by the prompt machine."""
     card = H.draft_to_card({

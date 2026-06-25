@@ -14,7 +14,11 @@ from typing import Any
 from ...content.cards import detect_language
 from ...content.knobs import normalize_force_roleplay
 from ..dispatch import RpcError
-from ._common import HubRpcError, _clean_theme
+from ._common import HubRpcError, _clean_theme_color
+
+# The deck's signature blue — the fallback primary when a draft omits or garbles
+# its theme_color, so a generated card ALWAYS carries a valid {primary, secondary}.
+_DEFAULT_THEME_PRIMARY = "#5B9FD4"
 
 
 def _pkg():
@@ -446,15 +450,12 @@ def draft_to_card(draft: dict[str, Any], origin_text: str = "", as_draft: bool =
         ext["user_name"] = str(draft["user_name"]).strip()
     if str(draft.get("user_persona") or "").strip():
         ext["user_persona"] = str(draft["user_persona"]).strip()
-    # Two-color theme for the character's gradient (primary signature + secondary accent).
-    # Derive a secondary when one wasn't supplied, so a card always has the dual gradient.
-    tc1 = str(draft.get("theme_color") or "").strip()
-    tc2 = draft.get("theme_color_2")
-    if tc1 and _THEME_RE.match(tc1):
-        tc2 = _theme_color_2(tc2, tc1.upper())
-    theme = _clean_theme({"primary": tc1, "secondary": tc2}, tc1)
-    if theme:
-        ext["theme"] = theme
+    # Two-color theme for the character's gradient. A generated card ALWAYS gets a
+    # valid {primary, secondary}: the primary falls back to the deck's signature
+    # color when the model omits/garbles it (never a primary-less theme, which used
+    # to crash the card view), and the secondary is derived when missing or a dupe.
+    primary = _clean_theme_color(draft.get("theme_color")) or _DEFAULT_THEME_PRIMARY
+    ext["theme"] = {"primary": primary, "secondary": _theme_color_2(draft.get("theme_color_2"), primary)}
     # No avatar from the draft — it's a manual upload/generate step (sidecar).
     # The card FIELD is a boolean force_roleplay (True ≡ the old "actor" stance).
     # Accept the boolean from a UI draft, or a legacy `embodiment: "actor"` string.

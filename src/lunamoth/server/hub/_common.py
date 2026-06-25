@@ -186,7 +186,14 @@ def _clean_theme_color(value: Any) -> str:
 def _clean_theme(value: Any, legacy: Any = None) -> dict[str, str]:
     """Normalize the dual theme `{primary, secondary}`; back-compat with the
     legacy single `theme_color`. Returns only the keys that have a valid color
-    (an empty dict when nothing is set)."""
+    (an empty dict when nothing is set).
+
+    INVARIANT: a theme MUST have a primary — a secondary alone is dropped. A
+    secondary-only dict used to slip through every write path (the editor's
+    secondary picker patched just `{secondary}` onto a primary-less card) and
+    crashed the card view with `KeyError: 'primary'`. Enforcing it here, the one
+    chokepoint all writes pass through, makes the bad state impossible to persist
+    and heals legacy cards on their next sanitize."""
     primary = ""
     secondary = ""
     if isinstance(value, dict):
@@ -194,9 +201,9 @@ def _clean_theme(value: Any, legacy: Any = None) -> dict[str, str]:
         secondary = _clean_theme_color(value.get("secondary"))
     if not primary:
         primary = _clean_theme_color(legacy)
-    out: dict[str, str] = {}
-    if primary:
-        out["primary"] = primary
+    if not primary:
+        return {}
+    out: dict[str, str] = {"primary": primary}
     if secondary:
         out["secondary"] = secondary
     return out

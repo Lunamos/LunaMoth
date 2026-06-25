@@ -499,8 +499,11 @@ export function CardEditor({
                         <span>{t("cv-theme-primary")}</span>
                       </label>
                       <label className="cv-swatch cv-swatch-edit">
+                        {/* carry a primary fallback: a theme needs a primary, so the
+                            backend drops a primary-less {secondary} — without this the
+                            picked secondary would silently vanish on a theme-less card. */}
                         <input type="color" defaultValue={th.secondary || "#888888"}
-                          onBlur={(e) => void patchExt({ theme: { secondary: e.target.value } })} />
+                          onBlur={(e) => void patchExt({ theme: { primary: th.primary || "#5b9fd4", secondary: e.target.value } })} />
                         <span>{t("cv-theme-secondary")}</span>
                       </label>
                     </>

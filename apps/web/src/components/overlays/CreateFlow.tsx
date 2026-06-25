@@ -74,6 +74,11 @@ export function CreateFlow({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<Step>("tell");
   const [origin, setOrigin] = useState("");
   const draftRef = useRef<NormalizedDraft | null>(null);
+  // The deck path this draft lives at, captured from the first save. Every
+  // later from_draft (re-save OR land) reuses it so we OVERWRITE one file
+  // instead of letting save_card auto-name a `-2` duplicate — that left a
+  // stray un-woken draft beside the landed/woken card.
+  const draftPathRef = useRef<string>("");
 
   // Dirty-guard (shared hook): typing the telling or any shape-step edit flags
   // dirty, so a stray Esc/backdrop/Cancel can't throw away a half-built character.
@@ -105,12 +110,22 @@ export function CreateFlow({ onClose }: { onClose: () => void }) {
             onBack={() => setStep("tell")}
             saveDraft={async (data) => {
               draftRef.current = data;
-              await hub.call("card.from_draft", { draft: data, origin, as_draft: true }, 30000);
-              await injectExtras(hub, data, undefined);
+              const r = await hub.call<{ path: string }>(
+                "card.from_draft",
+                { draft: data, origin, as_draft: true, path: draftPathRef.current || undefined },
+                30000,
+              );
+              draftPathRef.current = r.path;
+              await injectExtras(hub, data, r.path);
             }}
             land={async (data) => {
               draftRef.current = data;
-              const r = await hub.call<{ path: string }>("card.from_draft", { draft: data, origin }, 30000);
+              const r = await hub.call<{ path: string }>(
+                "card.from_draft",
+                { draft: data, origin, path: draftPathRef.current || undefined },
+                30000,
+              );
+              draftPathRef.current = r.path;
               await injectExtras(hub, data, r.path);
               await refresh();
               return r.path;
