@@ -282,6 +282,11 @@ class WebHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(data)))
+        # nosniff: the inline media lane (audio/video/pdf) serves chara-written files
+        # same-origin, so never let a browser sniff a mislabeled payload into HTML/JS —
+        # matches the hardened /home route. Declared media types aren't sniffed anyway,
+        # but this removes the dependence on per-browser heuristics.
+        self.send_header("X-Content-Type-Options", "nosniff")
         if disposition:
             self.send_header("Content-Disposition", disposition)
         self.send_header("Cache-Control", cache)

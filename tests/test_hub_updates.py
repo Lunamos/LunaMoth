@@ -41,10 +41,17 @@ def test_update_restart_without_supervisor_tells_client_to_do_it_by_hand():
     assert out["ok"] is False and "manual" in out["error"].lower()
 
 
-def test_relaunch_argv_reruns_the_cli_module():
+def test_relaunch_argv_pins_resolved_ports():
     from lunamoth.server.supervisor.core import Supervisor
-    argv = Supervisor._relaunch_argv()
-    assert argv[1:3] == ["-m", "lunamoth.front.cli"]  # re-run the new code on the same args
+    # The launch uses --port 0 / --ws-port 0 (OS-assigned); the re-exec MUST substitute
+    # the actually-bound ports, else the new process rebinds random ports and strands clients.
+    argv = Supervisor._relaunch_argv(
+        8123, 9456,
+        ["desktop", "--host", "127.0.0.1", "--port", "0", "--ws-port", "0", "--no-open"],
+    )
+    assert argv[1:3] == ["-m", "lunamoth.front.cli"]  # re-run the new code
+    assert "0" not in argv  # the placeholder ports are gone
+    assert argv[-4:] == ["--port", "8123", "--ws-port", "9456"]  # resolved ports pinned
 
 
 @pytest.fixture

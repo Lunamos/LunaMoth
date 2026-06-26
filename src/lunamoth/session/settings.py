@@ -273,7 +273,8 @@ class Settings:
     # NOTE: there is deliberately no `lang` setting. Language is not a user choice —
     # it is a property of the active character card (a .zh card speaks zh, a .en card
     # speaks en). The engine and tools are language-agnostic.
-    py_backend: str = "sandbox"  # sandbox (OS jail, default) | admin (no jail, trusted operator)
+    # (There is no py_backend field: the jail is NOT a config.json fact — it's derived
+    # from session.json `isolation` via meta.env()→LUNAMOTH_PY_BACKEND, the one authority.)
     # SillyTavern-compatible persona. Empty character_path => built-in default persona.
     # The card is the ONE external file: its embedded character_book is the world.
     character_path: str = ""
@@ -383,7 +384,6 @@ _ENV_MAP: dict[str, tuple[str, ...]] = {
     "model": ("OPENAI_MODEL",),
     "temperature": ("LLM_TEMPERATURE",),
     "max_tokens": ("LLM_MAX_TOKENS",),
-    "py_backend": ("LUNAMOTH_PY_BACKEND", "LUNAMOSS_PY_BACKEND"),
     "character_path": ("LUNAMOTH_CHARACTER", "LUNAMOSS_CHARACTER"),
     "user_name": ("LUNAMOTH_USER", "LUNAMOSS_USER"),
     "tui_theme_path": ("LUNAMOTH_THEME", "LUNAMOSS_THEME"),
@@ -568,7 +568,11 @@ def load_settings() -> Settings:
         except OSError:
             pass  # keyring not writable — leave the key in config.json rather than orphan it
     global_key = global_api_key(provider, base_url)
-    data["api_key"] = env_key or global_key  # the loaded config.json value is NEVER used
+    # Resolve: env > keyring > the embedded legacy key. The legacy fallback only bites
+    # when the keyring couldn't be written (read-only home), so the chara still works
+    # THIS session instead of authing with an empty key — and it's still never written
+    # back to config.json (the strip below is gated independently, not on this).
+    data["api_key"] = env_key or global_key or legacy_key
     # config.json must never hold the secret (session OR global) — strip it on read, but
     # ONLY once the key is preserved elsewhere (keyring has it, or the env provides it).
     # Stripping with nothing to fall back to would destroy the only copy.

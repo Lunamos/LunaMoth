@@ -98,16 +98,20 @@ def fetch_releases(timeout: float = _TIMEOUT) -> list[dict[str, Any]]:
 
 
 def latest_wheel_url() -> str | None:
-    """The newest release's wheel asset URL, or None if unreachable / none published."""
+    """The NEWEST release's wheel asset URL, or None if unreachable / it has no wheel.
+
+    Only the newest release counts — the same one ``status()`` advertises as ``latest``.
+    If that release carries no wheel (notes-only, or a lagging upload), return None so
+    ``apply()`` fails honestly rather than silently installing an OLDER wheel while the
+    UI claimed the newer version was installed."""
     try:
         rels = fetch_releases()
     except (urllib.error.URLError, OSError, ValueError, TimeoutError,
             subprocess.TimeoutExpired):
         return None
-    for rel in rels:  # newest first; first one carrying a wheel wins
-        if rel.get("wheel_url"):
-            return str(rel["wheel_url"])
-    return None
+    if not rels:
+        return None
+    return str(rels[0].get("wheel_url") or "") or None
 
 
 def apply() -> dict[str, Any]:

@@ -115,6 +115,20 @@ def test_fetch_releases_extracts_the_wheel_asset_url(monkeypatch):
     assert rels[0]["wheel_url"] == "https://x/w.whl"  # the .whl asset, not SHA256SUMS
 
 
+def test_latest_wheel_url_uses_newest_release_only(monkeypatch):
+    """Aligns with status(): if the NEWEST release has no wheel, return None (apply fails
+    honestly) rather than silently reaching back to an OLDER wheel than was advertised."""
+    monkeypatch.setattr(updater, "fetch_releases", lambda timeout=6.0: [
+        {"tag": "v0.2.0", "wheel_url": ""},                       # newest, no wheel yet
+        {"tag": "v0.1.9", "wheel_url": "https://x/old.whl"},      # older, has one
+    ])
+    assert updater.latest_wheel_url() is None
+    monkeypatch.setattr(updater, "fetch_releases", lambda timeout=6.0: [
+        {"tag": "v0.2.0", "wheel_url": "https://x/new.whl"},
+    ])
+    assert updater.latest_wheel_url() == "https://x/new.whl"
+
+
 def test_find_uv_falls_back_to_known_location(tmp_path, monkeypatch):
     import shutil as _sh
 

@@ -618,12 +618,31 @@ class Supervisor:
 
     # ── self-restart (run the freshly-installed code) ──────────────────────────
     @staticmethod
-    def _relaunch_argv() -> list[str]:
+    def _relaunch_argv(http_port: int, ws_port: int, argv: "list[str] | None" = None) -> list[str]:
         """The command to re-exec this same supervisor. ``sys.executable``'s venv now
         holds the new code after ``uv tool install --force``; ``-m lunamoth.front.cli``
-        + the original args (``desktop --host … --port … --token …``) relaunch it
-        identically on the same ports."""
-        return [sys.executable, "-m", "lunamoth.front.cli", *sys.argv[1:]]
+        + the original args relaunch it.
+
+        Crucially we PIN the RESOLVED ports: the daemon/desktop launch uses ``--port 0
+        --ws-port 0`` (OS-assigned), so replaying ``0`` would rebind to DIFFERENT random
+        ports and strand every client on the dead old port. Substitute the actually-bound
+        ports so the new process comes up on the SAME ones (the old listeners are
+        close-on-exec, freed by exec; SO_REUSEADDR rebinds), and clients reconnect."""
+        args = list(argv if argv is not None else sys.argv[1:])
+        out: list[str] = []
+        skip = False
+        for a in args:
+            if skip:
+                skip = False
+                continue
+            if a in ("--port", "--ws-port"):
+                skip = True  # drop the flag AND its following value
+                continue
+            if a.startswith("--port=") or a.startswith("--ws-port="):
+                continue
+            out.append(a)
+        out += ["--port", str(http_port), "--ws-port", str(ws_port)]
+        return [sys.executable, "-m", "lunamoth.front.cli", *out]
 
     async def restart_self(self) -> None:
         """Relaunch this supervisor IN PLACE (os.execv — same PID, so daemon.json stays
@@ -634,7 +653,7 @@ class Supervisor:
         _log.info("[RESTART] relaunching supervisor into updated code")
         with contextlib.suppress(Exception):
             await self.shutdown()  # children/gateways/pty stopped + httpd closed
-        argv = self._relaunch_argv()
+        argv = self._relaunch_argv(self.http_port, self.ws_port)
         try:
             os.execv(sys.executable, argv)  # never returns on success
         except OSError as exc:

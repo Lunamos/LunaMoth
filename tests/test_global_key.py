@@ -70,6 +70,22 @@ def test_load_strips_legacy_embedded_session_key(session_env):
     assert "api_key" not in raw              # and the stale copy is stripped from disk
 
 
+def test_readonly_home_keeps_the_embedded_key_usable_this_session(session_env, monkeypatch):
+    """If the keyring can't be written (read-only home), the fold fails — the chara must
+    still authenticate with the embedded key THIS session (not an empty key), and the disk
+    copy is NOT stripped (so it survives). The key is still never written back to config.json."""
+    home, sess = session_env
+
+    def _boom(*a, **k):
+        raise OSError("read-only home")
+    monkeypatch.setattr(S, "save_global_key", _boom)
+    _write_session(sess, {"provider": "openrouter", "api_key": "sk-EMBED"})
+    st = S.load_settings()
+    assert st.api_key == "sk-EMBED"  # falls back to the embedded key (not "")
+    raw = json.loads((sess / "config.json").read_text(encoding="utf-8"))
+    assert raw.get("api_key") == "sk-EMBED"  # not stripped — it's the only copy
+
+
 def test_load_folds_orphan_session_key_instead_of_destroying_it(session_env):
     """A session config carrying a legacy api_key with an EMPTY keyring must NOT have its
     only copy destroyed: it's folded into the keyring (preserved), then the disk copy is
