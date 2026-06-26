@@ -79,6 +79,20 @@ export function CreateFlow({ onClose }: { onClose: () => void }) {
   // instead of letting save_card auto-name a `-2` duplicate — that left a
   // stray un-woken draft beside the landed/woken card.
   const draftPathRef = useRef<string>("");
+  // Save-draft and land are the same write (card.from_draft persists the whole
+  // card, user_name/user_persona included); they differ only by the as_draft flag
+  // and that land refreshes + returns. One helper keeps the path-reuse contract
+  // (capture r.path back into the ref) in a single place so it can't drift.
+  const fromDraft = async (data: NormalizedDraft, asDraft: boolean): Promise<string> => {
+    draftRef.current = data;
+    const r = await hub.call<{ path: string }>(
+      "card.from_draft",
+      { draft: data, origin, as_draft: asDraft || undefined, path: draftPathRef.current || undefined },
+      30000,
+    );
+    draftPathRef.current = r.path;
+    return r.path;
+  };
 
   // Dirty-guard (shared hook): typing the telling or any shape-step edit flags
   // dirty, so a stray Esc/backdrop/Cancel can't throw away a half-built character.
@@ -109,26 +123,12 @@ export function CreateFlow({ onClose }: { onClose: () => void }) {
             origin={origin}
             onBack={() => setStep("tell")}
             saveDraft={async (data) => {
-              draftRef.current = data;
-              const r = await hub.call<{ path: string }>(
-                "card.from_draft",
-                { draft: data, origin, as_draft: true, path: draftPathRef.current || undefined },
-                30000,
-              );
-              draftPathRef.current = r.path;
-              await injectExtras(hub, data, r.path);
+              await fromDraft(data, true);
             }}
             land={async (data) => {
-              draftRef.current = data;
-              const r = await hub.call<{ path: string }>(
-                "card.from_draft",
-                { draft: data, origin, path: draftPathRef.current || undefined },
-                30000,
-              );
-              draftPathRef.current = r.path;
-              await injectExtras(hub, data, r.path);
+              const path = await fromDraft(data, false);
               await refresh();
-              return r.path;
+              return path;
             }}
             afterLand={(path, name) => {
               onClose();
@@ -148,31 +148,6 @@ export function CreateFlow({ onClose }: { onClose: () => void }) {
       </div>
     </DeckModal>
   );
-}
-
-/* user_name / user_persona ride extensions.lunamoth (app.js injectUserFields).
-   Best-effort: the card itself is already saved. Visuals (avatar/sprite/background)
-   are no longer set here — they're done after the card lands, in the card editor's
-   视觉 tab (the R9 VisualEditor). */
-async function injectExtras(
-  hub: ReturnType<typeof useHub>["hub"],
-  draft: NormalizedDraft,
-  path: string | undefined,
-): Promise<void> {
-  if (!path) return;
-  if (!draft.user_name && !draft.user_persona) return;
-  try {
-    const full = await hub.call<{ raw?: { data?: Record<string, unknown> } }>("card.read", { path }, 20000);
-    if (!full.raw || !full.raw.data) return;
-    const ext = (full.raw.data.extensions = (full.raw.data.extensions as Record<string, unknown>) || {});
-    const lm = ((ext as { lunamoth?: Record<string, unknown> }).lunamoth =
-      ((ext as { lunamoth?: Record<string, unknown> }).lunamoth || {}) as Record<string, unknown>);
-    lm.user_name = draft.user_name;
-    lm.user_persona = draft.user_persona;
-    await hub.call("card.save", { data: full.raw, path }, 20000);
-  } catch {
-    /* user fields are best-effort */
-  }
 }
 
 /* ------------------------------ TELL STEP ------------------------------ */

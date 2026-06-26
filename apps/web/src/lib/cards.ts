@@ -103,6 +103,10 @@ export function toWorldEntries(raw: ReadonlyArray<unknown> | undefined): WorldEn
 const HEX6 = /^#[0-9a-fA-F]{6}$/;
 const isHex = (v: unknown): boolean => HEX6.test(String(v || ""));
 
+/** The deck's signature blue — the fallback primary when a card has no usable
+ * theme color (mirrors the backend `_DEFAULT_THEME_PRIMARY`). */
+export const DEFAULT_THEME_PRIMARY = "#5B9FD4";
+
 /** Fill every field, fold legacy aliases, coerce the theme + force_roleplay.
  *  app.js:2056 normalizeDraft (verbatim semantics). */
 export function normalizeDraft(d: RawDraft | null | undefined): NormalizedDraft {
@@ -131,7 +135,7 @@ export function normalizeDraft(d: RawDraft | null | undefined): NormalizedDraft 
     ? String(th.primary).toUpperCase()
     : isHex(draft.theme_color)
       ? String(draft.theme_color).toUpperCase()
-      : "#5B9FD4";
+      : DEFAULT_THEME_PRIMARY;
   const secondary = isHex(th.secondary) ? String(th.secondary).toUpperCase() : "";
   draft.theme = { primary, secondary };
   delete draft.theme_color;

@@ -14,7 +14,7 @@ import { useT, type TKey } from "../../i18n";
 import { useHubApi, useHubState } from "../../state/hub";
 import { rpcErrText } from "../../lib/status";
 import { glyphOf, paletteClass } from "../../lib/format";
-import { serializeCardFields, toWorldEntries, type WorldEntryFull, type CardData } from "../../lib/cards";
+import { serializeCardFields, toWorldEntries, DEFAULT_THEME_PRIMARY, type WorldEntryFull, type CardData } from "../../lib/cards";
 import { CardField, CardBlock, cardCtxString, type FieldHandle } from "./CardField";
 import { WorldBookEditor } from "./WorldBookEditor";
 import { Avatar, avatarSrc, themeOf, themeStyle } from "./visual";
@@ -494,7 +494,7 @@ export function CardEditor({
                     <>
                       {/* editable: native color pickers, committed on blur via card.patch */}
                       <label className="cv-swatch cv-swatch-edit">
-                        <input type="color" defaultValue={th.primary || "#5b9fd4"}
+                        <input type="color" defaultValue={th.primary || DEFAULT_THEME_PRIMARY}
                           onBlur={(e) => void patchExt({ theme: { primary: e.target.value } })} />
                         <span>{t("cv-theme-primary")}</span>
                       </label>
@@ -503,7 +503,7 @@ export function CardEditor({
                             backend drops a primary-less {secondary} — without this the
                             picked secondary would silently vanish on a theme-less card. */}
                         <input type="color" defaultValue={th.secondary || "#888888"}
-                          onBlur={(e) => void patchExt({ theme: { primary: th.primary || "#5b9fd4", secondary: e.target.value } })} />
+                          onBlur={(e) => void patchExt({ theme: { primary: th.primary || DEFAULT_THEME_PRIMARY, secondary: e.target.value } })} />
                         <span>{t("cv-theme-secondary")}</span>
                       </label>
                     </>
