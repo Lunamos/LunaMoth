@@ -167,7 +167,29 @@ class LunaMothAgent:
             context_window=self.context_limit(),
         )
 
-    def swap_model(self, model: str) -> None:
+    @staticmethod
+    def _strip_reasoning_continuity(session: "Session | None") -> None:
+        """Drop accumulated provider continuity blocks — reasoning_details and
+        per-tool-call extra_content — from the live context on a route swap.
+
+        These are opaque, provider-signed blocks (Anthropic thinking signatures,
+        Gemini thought_signature) that only the route that emitted them can verify.
+        After /provider or /model the next request goes somewhere that never
+        produced them, so replaying them is meaningless and a strict OpenAI-
+        compatible endpoint can 400 on the foreign field. extra_content is already
+        route-gated in llm._messages; render() replays reasoning_details
+        UNCONDITIONALLY, so without this a cross-provider swap poisons every
+        subsequent turn until /reset. Costs only one turn of reasoning continuity.
+        No-op when there's no live session (a swap with no context to clean)."""
+        if session is None:
+            return
+        for msg in session.context.messages:
+            msg.pop("reasoning_details", None)
+            for tc in msg.get("tool_calls") or []:
+                if isinstance(tc, dict):
+                    tc.pop("extra_content", None)
+
+    def swap_model(self, model: str, session: "Session | None" = None) -> None:
         """Session-scoped model hot-swap (/model): rebuilds only the LLM client.
 
         The /model command persists this to the chara's session config (so it
@@ -175,10 +197,11 @@ class LunaMothAgent:
         not invalidated (provider prompt caches are per-model anyway)."""
         self.settings.model = model.strip()
         self.llm = LLMClient(self.settings.to_llm_config())
+        self._strip_reasoning_continuity(session)  # a cross-family model can't replay the old blocks
         self.audit.write("model_swap", model=self.settings.model)
 
     def swap_provider(self, *, provider: str, base_url: str, api_key: str,
-                      model: str | None = None) -> None:
+                      model: str | None = None, session: "Session | None" = None) -> None:
         """Switch THIS chara's provider live (and the model, if the key carries
         one), rebuilding the LLM client. The /provider command persists the
         provider/base_url/model to the chara's session config; the api_key is
@@ -189,6 +212,7 @@ class LunaMothAgent:
         if model:
             self.settings.model = model.strip()
         self.llm = LLMClient(self.settings.to_llm_config())
+        self._strip_reasoning_continuity(session)  # the new route never produced the old blocks
         self.audit.write("provider_swap", provider=self.settings.provider,
                          model=self.settings.model)
 

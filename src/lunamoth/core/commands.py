@@ -293,7 +293,7 @@ def _steps(agent, session, arg: str) -> Reply:
 def _model(agent, session, arg: str) -> Reply:
     want = arg.strip()
     if want:
-        agent.swap_model(want)
+        agent.swap_model(want, session=session)
         # Persist to THIS chara's session config so the choice survives a child
         # restart (board off→on, crash respawn, daemon restart, reboot). Only the
         # model id changes — the provider/key stay the same — so within a session
@@ -325,7 +325,8 @@ def _provider(agent, session, arg: str) -> Reply:
     # and never written to the session (SEC-2). The key carries its own default
     # model; adopt it so the chara lands on a model the provider actually serves.
     agent.swap_provider(provider=entry["provider"], base_url=entry["base_url"],
-                        api_key=entry["api_key"], model=entry.get("model") or None)
+                        api_key=entry["api_key"], model=entry.get("model") or None,
+                        session=session)
     _persist(agent, provider=agent.settings.provider, base_url=agent.settings.base_url,
              model=agent.settings.model)
     return Reply(True,
