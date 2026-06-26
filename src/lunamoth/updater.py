@@ -29,6 +29,7 @@ from .config import find_uv
 
 REPO = "Lunamos/LunaMoth"
 EXTRAS = "server,messaging"  # mirror install.sh's `lunamoth[server,messaging]`
+_INSTALL_URL = f"https://raw.githubusercontent.com/{REPO}/main/install.sh"
 _RELEASES_PATH = f"repos/{REPO}/releases?per_page=10"
 _RELEASES_API = f"https://api.github.com/{_RELEASES_PATH}"
 _TIMEOUT = 6.0
@@ -42,6 +43,16 @@ APP_DIR = Path(__file__).resolve().parents[2]
 
 def is_dev() -> bool:
     return (APP_DIR / ".git").exists()
+
+
+def manual_command() -> str:
+    """The copy-paste command to update BY HAND — the always-works fallback when the
+    in-app update fails (AstrBot hands package-manager installs the command rather than
+    doing in-place surgery; same idea). A wheel re-runs install.sh (full re-resolve +
+    `uv tool install --force` + browser/ffmpeg setup); a dev checkout pulls + syncs."""
+    if is_dev():
+        return f"cd {APP_DIR} && git pull --ff-only origin main && uv sync"
+    return f"curl -fsSL {_INSTALL_URL} | bash"
 
 
 def fetch_releases(timeout: float = _TIMEOUT) -> list[dict[str, Any]]:
@@ -101,26 +112,29 @@ def latest_wheel_url() -> str | None:
 
 def apply() -> dict[str, Any]:
     """Run the channel-aware in-place update. BLOCKING (run off the event loop).
-    Returns ``{ok, output, restart_required}`` — the running process keeps the OLD
-    code until it restarts, so the UI tells the user to restart."""
+    Returns ``{ok, output, restart_required, manual_command}`` — the running process
+    keeps the OLD code until it restarts, so the UI tells the user to restart. Every
+    failure carries the manual command so the user always has a guaranteed way out."""
+    def _fail(output: str) -> dict[str, Any]:
+        # Always hand back the by-hand command — the AstrBot lesson: when the
+        # automatic path can't do it, tell the user exactly what to run.
+        return {"ok": False, "restart_required": False, "manual_command": manual_command(),
+                "output": f"{output}\n\nTo update manually, run:\n  {manual_command()}"}
+
     uv = find_uv()
     if uv is None:
-        return {"ok": False,
-                "output": "uv not found — reinstall via install.sh (it drops uv in ~/.lunamoth/bin)",
-                "restart_required": False}
+        return _fail("uv not found — it should live in ~/.lunamoth/bin (install.sh puts it there)")
     if is_dev():
         git = shutil.which("git")
         if not git:
-            return {"ok": False, "output": "git not found", "restart_required": False}
+            return _fail("git not found")
         steps = [[git, "-C", str(APP_DIR), "pull", "--ff-only", "origin", "main"],
                  [uv, "sync", "--project", str(APP_DIR)]]
     else:
         url = latest_wheel_url()
         if not url:
-            return {"ok": False, "restart_required": False,
-                    "output": ("could not resolve the latest release wheel — GitHub may be "
-                               "unreachable, or a private repo (install the gh CLI and "
-                               "`gh auth login`, or reinstall via install.sh with GITHUB_TOKEN)")}
+            return _fail("could not resolve the latest release wheel — GitHub may be unreachable, "
+                         "or a private repo (install the gh CLI and `gh auth login`)")
         # Reinstall from the LATEST wheel URL — `uv tool upgrade` is a no-op on a
         # URL-pinned tool, so this is the only thing that actually moves the version.
         steps = [[uv, "tool", "install", "--force", f"lunamoth[{EXTRAS}] @ {url}"]]
@@ -130,8 +144,9 @@ def apply() -> dict[str, Any]:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=_APPLY_TIMEOUT)
         except (subprocess.TimeoutExpired, OSError) as e:
             log.append(f"$ {' '.join(map(str, cmd))}\n{e}")
-            return {"ok": False, "output": "\n".join(log), "restart_required": False}
+            return _fail("\n".join(log))
         log.append(f"$ {' '.join(map(str, cmd))}\n{((p.stdout or '') + (p.stderr or '')).strip()}")
         if p.returncode != 0:
-            return {"ok": False, "output": "\n".join(log), "restart_required": False}
-    return {"ok": True, "output": "\n".join(log), "restart_required": True}
+            return _fail("\n".join(log))
+    return {"ok": True, "output": "\n".join(log), "restart_required": True,
+            "manual_command": manual_command()}

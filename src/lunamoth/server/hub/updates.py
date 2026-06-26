@@ -112,6 +112,9 @@ def status(force: bool = False) -> dict[str, Any]:
         "update_available": update_available,
         "releases": releases,
         "checked_at": _read_stamp().get("checked_at") or time.time(),
+        # The by-hand command — always present so the UI can offer it as the fallback
+        # when the in-app update can't run (the AstrBot pattern).
+        "manual_command": _updater.manual_command(),
     }
 
 

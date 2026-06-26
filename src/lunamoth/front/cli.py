@@ -791,7 +791,8 @@ def _update_wheel(args: argparse.Namespace) -> int:
     result = updater.apply()
     print(result.get("output") or "")
     if not result.get("ok"):
-        print("error: update failed (see output above).", file=sys.stderr)
+        # apply()'s output already includes the manual command; nudge to it explicitly.
+        print(f"\nupdate failed. To update by hand:\n  {updater.manual_command()}", file=sys.stderr)
         return 1
     print("updated. restart lunamoth to run the new version.")
     return 0

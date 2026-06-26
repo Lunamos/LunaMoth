@@ -690,6 +690,9 @@ export const I18N = {
   "upd-behind": ["落后 {n} 个提交", "{n} commit(s) behind"],
   "upd-nudge": ["有新版本可用", "A new version is available"],
   "upd-nudge-view": ["查看", "View"],
+  "upd-manual": ["或手动更新", "Or update manually"],
+  "upd-copy": ["复制", "Copy"],
+  "upd-copied": ["已复制", "Copied"],
 } as const satisfies Record<string, LangPair>;
 
 export type I18nKey = keyof typeof I18N;

@@ -53,6 +53,24 @@ def test_apply_without_uv_is_a_clear_error(monkeypatch):
     assert "uv not found" in res["output"]
 
 
+def test_every_failure_hands_back_the_manual_command(monkeypatch):
+    # The AstrBot lesson: when the automatic path can't run, always tell the user
+    # exactly what to type. Every failure carries the manual command.
+    monkeypatch.setattr(updater, "find_uv", lambda: None)
+    res = updater.apply()
+    assert res["ok"] is False
+    assert res["manual_command"] == updater.manual_command()
+    assert updater.manual_command() in res["output"]
+
+
+def test_manual_command_is_channel_aware(monkeypatch):
+    monkeypatch.setattr(updater, "is_dev", lambda: False)
+    assert "install.sh" in updater.manual_command()  # wheel → re-run the installer
+    monkeypatch.setattr(updater, "is_dev", lambda: True)
+    cmd = updater.manual_command()
+    assert "git pull" in cmd and "uv sync" in cmd  # dev → pull + sync
+
+
 def test_apply_dev_pulls_then_syncs(monkeypatch):
     monkeypatch.setattr(updater, "is_dev", lambda: True)
     monkeypatch.setattr(updater, "find_uv", lambda: "/fake/uv")

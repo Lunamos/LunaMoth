@@ -29,6 +29,7 @@ export interface UpdateStatus {
   update_available: boolean;
   releases: Release[];
   checked_at: number;
+  manual_command?: string;
 }
 
 const errMsg = (e: unknown) => (e as { message?: string })?.message ?? "";
@@ -94,6 +95,15 @@ export function UpdatePane() {
     load(false); // cached status on open (force=false)
   }, [load]);
 
+  const copyManual = () => {
+    const cmd = status?.manual_command;
+    if (!cmd) return;
+    void navigator.clipboard?.writeText(cmd).then(
+      () => deckToast(t("upd-copied")),
+      () => {/* clipboard blocked — the command is shown inline regardless */},
+    );
+  };
+
   const apply = () => {
     setApplying(true);
     const stop = deckWorkingToast(t("upd-applying"));
@@ -104,7 +114,8 @@ export function UpdatePane() {
           setDone(true);
           deckToast(t("upd-done"));
         } else {
-          deckToast(`${t("upd-failed")}: ${(r.output || "").slice(-240)}`, true);
+          // Auto-update failed — point the user at the by-hand command (always shown below too).
+          deckToastAction(`${t("upd-failed")}: ${(r.output || "").slice(-200)}`, t("upd-copy"), copyManual, 12000);
         }
       })
       .catch((e) => deckToast(rpcErrText(t, { message: errMsg(e) }), true))
@@ -149,6 +160,16 @@ export function UpdatePane() {
         ) : (
           <div className="upd-banner">{t("upd-uptodate")}</div>
         ))}
+
+      {/* Always-available fallback: if the one-click update can't run, the user has
+          the exact command to run by hand (the AstrBot pattern). */}
+      {status?.update_available && status.manual_command && (
+        <div className="upd-manual">
+          <span className="upd-manual-lbl">{t("upd-manual")}</span>
+          <code className="upd-manual-cmd">{status.manual_command}</code>
+          <button className="btn soft" onClick={copyManual}>{t("upd-copy")}</button>
+        </div>
+      )}
 
       {done && <div className="upd-note">{t("upd-restart")}</div>}
 
