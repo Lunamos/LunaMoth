@@ -371,7 +371,9 @@ def wake(card_path: str, name: str = "", isolation: str = "sandbox",
         # — so vision_model is NOT copied per-chara any more.)
         "reasoning": str(defaults.get("reasoning") or cfg["reasoning"]),
         "character_path": str(frozen),
-        "py_backend": S.isolation_to_backend(meta.isolation),
+        # config.json mirrors the AUTHORITY field name (session.json `isolation`),
+        # never the derived py_backend — one field, read by downgrade_admin_sessions.
+        "isolation": meta.isolation,
     })
     cfg.pop("api_key", None)
     if toolpack:
@@ -575,19 +577,29 @@ def stop_daemon(meta: S.SessionMeta) -> bool:
     return True
 
 
+class _TranscriptReadError(Exception):
+    """The transcript DB EXISTS but couldn't be read (locked by a running chara,
+    corrupt, schema-mismatch). Distinct from 'no transcript yet' (db absent → "")
+    so the export surfaces it instead of silently shipping an empty file."""
+
+
 def _transcript_export_jsonl(meta: S.SessionMeta) -> str:
     """Hermes-style complete conversation export of the CURRENT epoch, read
     straight from the session's transcript DB (read-only — works while the
     chara is stopped). Every row (chat/think/struct/tool/summary) becomes one
     JSON line, oldest first; struct/tool rows expanded back to their full
-    message dict. The hub reads the DB directly (never imports core/)."""
+    message dict. The hub reads the DB directly (never imports core/).
+
+    Returns "" for a never-run chara (no DB). Raises _TranscriptReadError when the
+    DB exists but can't be read — a real failure the caller must surface, never a
+    silent empty export."""
     db = meta.sandbox_dir / "transcript.db"
     if not db.exists():
         return ""
     try:
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
-    except sqlite3.Error:
-        return ""
+    except sqlite3.Error as e:
+        raise _TranscriptReadError(f"could not open the transcript DB ({e})") from e
     try:
         try:
             row = conn.execute("SELECT value FROM meta WHERE key='epoch'").fetchone()
@@ -599,8 +611,8 @@ def _transcript_export_jsonl(meta: S.SessionMeta) -> str:
                 "SELECT id, ts, role, content, kind FROM messages WHERE epoch=? ORDER BY id",
                 (epoch,),
             ).fetchall()
-        except sqlite3.Error:
-            return ""
+        except sqlite3.Error as e:
+            raise _TranscriptReadError(f"could not read transcript rows ({e})") from e
     finally:
         conn.close()
     out_lines: list[str] = []
@@ -640,7 +652,20 @@ def export_session(meta: S.SessionMeta) -> dict[str, Any]:
     stamp = time.strftime("%Y%m%d-%H%M%S")
     target = target_dir / f"lunamoth-{meta.name}-{stamp}.zip"
 
-    conversation = _transcript_export_jsonl(meta)
+    # The conversation jsonl is a convenience view; the raw transcript.db rides in
+    # the zip regardless. If the DB exists but can't be read, DON'T ship a silently
+    # empty file claiming success — write an honest marker and report the error,
+    # while still producing the zip (which carries the raw DB for recovery).
+    errors: list[str] = []
+    try:
+        conversation = _transcript_export_jsonl(meta)
+    except _TranscriptReadError as e:
+        errors.append(str(e))
+        conversation = json.dumps(
+            {"_export_error": f"the transcript could not be read: {e}. "
+             "The raw transcript.db is still included in the zip."},
+            ensure_ascii=False,
+        ) + "\n"
     conv_path = target_dir / f"lunamoth-{meta.name}-{stamp}-conversation.jsonl"
     conv_path.write_text(conversation, encoding="utf-8")
 
@@ -666,6 +691,8 @@ def export_session(meta: S.SessionMeta) -> dict[str, Any]:
     result: dict[str, Any] = {"path": str(target), "conversation": str(conv_path)}
     if requests_path is not None:
         result["requests"] = str(requests_path)
+    if errors:
+        result["errors"] = errors  # the zip shipped, but surface what couldn't be read
     return result
 
 
