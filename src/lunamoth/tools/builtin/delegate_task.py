@@ -41,7 +41,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from ..registry import registry, tool_error
+from ..registry import TOOL_ERROR_KEY, registry, tool_error
 
 logger = logging.getLogger("lunamoth.tools.delegate_task")
 
@@ -231,7 +231,13 @@ def _run_single_child(task_index: int, goal: str, context: str | None,
         is_err = False
         try:
             parsed = json.loads(text)
-            is_err = isinstance(parsed, dict) and "error" in parsed
+            # Match the gateway's _is_error_json: the explicit __tool_error__
+            # sentinel is authoritative, and a bare "error" key counts only when
+            # non-empty — a success carrying "error": null (e.g. a background
+            # launch) must NOT be misread as a worker failure.
+            is_err = isinstance(parsed, dict) and (
+                bool(parsed.get(TOOL_ERROR_KEY)) or parsed.get("error") not in (None, "")
+            )
         except (json.JSONDecodeError, TypeError):
             pass
         tool_trace.append({"tool": name, "args_bytes": len(raw),

@@ -211,10 +211,23 @@ def terminal(args: dict, ctx) -> str:
     # The runner already clamps the timeout into [1, 600] and appends a note, so
     # an over-limit foreground timeout is clamped (not rejected) — no fallback.
     if pty:
-        out = _run_foreground_pty(command, ctx, timeout=eff, workdir=wd)
-    else:
-        out = ctx.run_terminal(command, timeout=eff, workdir=wd)
-    return out.strip()
+        return _run_foreground_pty(command, ctx, timeout=eff, workdir=wd).strip()
+    term = ctx.run_terminal_result(command, timeout=eff, workdir=wd)
+    out = (term.text or "").strip()
+    # A refused run (isolation jail unavailable → the command NEVER executed) or a
+    # timeout is a real failure, not a result — surface it as a tool_error so the
+    # chara is told the cause and the loop guard counts it, instead of a plain
+    # string the gateway reads as success. A non-zero exit stays plain text
+    # (hermes parity: the exit code is in the output and the model reads it).
+    if term.refused or term.timed_out:
+        return tool_error(
+            out or ("the command was refused (isolation jail unavailable)"
+                    if term.refused else f"the command timed out after {eff}s"),
+            output=out,
+            exit_code=term.exit_code if term.exit_code is not None else -1,
+            status="refused" if term.refused else "timeout",
+        )
+    return out
 
 
 def _run_foreground_pty(command, ctx, *, timeout, workdir) -> str:

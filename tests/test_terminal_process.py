@@ -46,7 +46,12 @@ class _FakeCtx:
         return self.state.permissions()
 
     def run_terminal(self, command, *, timeout, workdir=None, browser=False):
-        from lunamoth.tools.runner import run_terminal as _run
+        return self.run_terminal_result(
+            command, timeout=timeout, workdir=workdir, browser=browser
+        ).text
+
+    def run_terminal_result(self, command, *, timeout, workdir=None, browser=False):
+        from lunamoth.tools.runner import run_terminal_result as _run
         perms = self.state.permissions()
         return _run(
             command,
