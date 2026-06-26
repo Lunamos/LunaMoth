@@ -76,6 +76,7 @@ export interface CharaStream {
   /** run a slash command; returns its reply text (or null). */
   runCommand: (line: string, quiet?: boolean) => Promise<string | null>;
   interrupt: () => void;
+  forceStop: () => void;
   /** refresh the right-panel snapshot on demand. */
   refreshSnapshot: () => Promise<Snapshot | null>;
   permissionReply: (id: string, granted: boolean) => void;
@@ -299,6 +300,19 @@ export function useCharaStream(name: string): CharaStream {
     clientRef.current?.interrupt().catch(() => {});
   }, []);
 
+  const forceStop = useCallback(() => {
+    // Escape hatch: there is NO server liveness signal, so if a turn never closes the
+    // awaited send() promise never settles and `streaming` would stay true forever,
+    // freezing the composer on ■. A second press of stop force-resets the LOCAL state
+    // so the user is never permanently stuck; any late frames from the orphaned turn
+    // are ignored once we're idle, and the next send re-checks the server's busy-state.
+    clientRef.current?.interrupt().catch(() => {});
+    if (clientRef.current) clientRef.current.streaming = false;
+    appTurnRef.current = false;
+    setStreaming(false);
+    finalize();
+  }, [finalize]);
+
   const note = useCallback(
     (msg: string) => {
       if (!msg) return;
@@ -389,6 +403,7 @@ export function useCharaStream(name: string): CharaStream {
     send,
     runCommand,
     interrupt,
+    forceStop,
     refreshSnapshot,
     permissionReply,
     clarifyReply,

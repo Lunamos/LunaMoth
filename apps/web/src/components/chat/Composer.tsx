@@ -56,6 +56,7 @@ export function Composer({
   statusSlot,
   onSend,
   onInterrupt,
+  onForceStop,
   onCommand,
   onError,
 }: {
@@ -66,6 +67,7 @@ export function Composer({
   statusSlot?: ReactNode;
   onSend: (text: string, atts: StagedAttachment[]) => void;
   onInterrupt: () => void;
+  onForceStop: () => void;
   onCommand: (line: string) => void;
   onError: (msg: string) => void;
 }) {
@@ -258,6 +260,12 @@ export function Composer({
   const onSendClick = () => {
     const hasText = text.trim().length > 0;
     if (streaming && !hasText) {
+      if (stopping) {
+        // Second press: the polite interrupt didn't land (a turn the server never
+        // closed). Force-reset locally so ■ never permanently freezes the composer.
+        onForceStop();
+        return;
+      }
       setStopping(true);
       onInterrupt();
     } else {
@@ -401,7 +409,8 @@ export function Composer({
         />
         <button
           className={showStop ? `stop${stopping ? " stopping" : ""}` : "send"}
-          disabled={stopping && showStop}
+          // Stays pressable while "stopping": a second press is the escape hatch that
+          // force-resets a turn the server never closed (no liveness signal exists).
           onClick={onSendClick}
         >
           {showStop ? "■" : "↑"}

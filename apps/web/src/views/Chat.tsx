@@ -348,6 +348,7 @@ function ChatStreamPage({
         statusSlot={workText ? <div className={`work-status ${workCls}`}>{workText}</div> : null}
         onSend={stream.send}
         onInterrupt={stream.interrupt}
+        onForceStop={stream.forceStop}
         onCommand={(line) => void stream.runCommand(line)}
         onError={stream.note}
       />
