@@ -95,6 +95,46 @@ def test_named_key_resolved_by_route(session_env):
     assert S.load_settings().api_key == "sk-DEFAULT"
 
 
+def test_save_global_key_writes_keyring_and_resolves(session_env):
+    """The terminal setup path writes its key into the keyring (the ONE store) and
+    makes it the active default route — never a config.json copy."""
+    home, _ = session_env
+    label = S.save_global_key("openrouter", "https://openrouter.ai/api/v1", "sk-NEW", model="m/x")
+    raw = json.loads((home / "desktop.json").read_text(encoding="utf-8"))
+    assert "api_key" not in raw                       # never a top-level secret
+    assert raw["keys"][label]["api_key"] == "sk-NEW"
+    assert raw["active_key_label"] == label
+    assert S.global_api_key("openrouter", "https://openrouter.ai/api/v1") == "sk-NEW"  # explicit route
+    assert S.global_api_key("openrouter", "") == "sk-NEW"                              # default route
+    # Re-run on the same route reuses the entry — no duplicate label, secret updated.
+    S.save_global_key("openrouter", "https://openrouter.ai/api/v1", "sk-NEW2")
+    raw2 = json.loads((home / "desktop.json").read_text(encoding="utf-8"))
+    assert list(raw2["keys"]) == [label]
+    assert raw2["keys"][label]["api_key"] == "sk-NEW2"
+    assert S.save_global_key("openrouter", "x", "") == ""  # empty key → no-op
+
+
+def test_load_folds_legacy_global_config_key_into_keyring(tmp_path, monkeypatch):
+    """The OLD terminal store: a key embedded in the GLOBAL config.json. On load it is
+    folded into the keyring (not orphaned) and stripped from config.json — config.json
+    is no longer a key store, so the second-copy drift can't happen."""
+    home = tmp_path / "home"
+    home.mkdir(parents=True)
+    monkeypatch.setenv("LUNAMOTH_HOME", str(home))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(S, "CONFIG_DIR", home.resolve())              # global config dir (NOT under sessions/)
+    monkeypatch.setattr(S, "CONFIG_PATH", (home / "config.json").resolve())
+    (home / "config.json").write_text(json.dumps({
+        "provider": "openrouter", "base_url": "https://openrouter.ai/api/v1",
+        "api_key": "sk-OLDCLI", "model": "m"}), encoding="utf-8")
+    st = S.load_settings()
+    assert st.api_key == "sk-OLDCLI"                                  # resolved via the keyring, not orphaned
+    cfg = json.loads((home / "config.json").read_text(encoding="utf-8"))
+    assert "api_key" not in cfg                                       # stripped from config.json
+    desk = json.loads((home / "desktop.json").read_text(encoding="utf-8"))
+    assert any(v.get("api_key") == "sk-OLDCLI" for v in desk["keys"].values())  # now in the keyring
+
+
 def test_migrate_legacy_default_key_folds_into_keyring(session_env):
     """A legacy top-level api_key is folded into the keyring (the one store): an entry
     on the top-level route, active_key_label set, and the top-level secret dropped."""

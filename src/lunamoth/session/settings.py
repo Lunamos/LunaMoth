@@ -108,52 +108,95 @@ def migrate_legacy_default_key() -> None:
 
 
 def global_api_key(provider: str = "", base_url: str = "") -> str:
-    """Resolve the provider key from the GLOBAL keyring, never a per-session config.
+    """Resolve the provider key from the GLOBAL keyring — the ONE key store.
 
-    The webui keyring (~/.lunamoth/desktop.json ``keys``) is the ONE key store. An
-    EXPLICIT route (provider+base_url) → the named entry on that exact route (the
-    multi-key-per-chara / alt-account feature). An EMPTY base_url means "the active
-    default route" → the entry named by the top-level ``active_key_label`` (else a
-    provider match). Falls back to the CLI global config.json (the terminal install's
-    single-key store). "" if none."""
+    The keyring is ~/.lunamoth/desktop.json ``keys`` (written by the webui AND the
+    terminal setup flows, via save_global_key). An EXPLICIT route (provider+base_url)
+    → the named entry on that exact route (the multi-key-per-chara / alt-account
+    feature). An EMPTY base_url means "the active default route" → the entry named by
+    the top-level ``active_key_label`` (else a provider match). "" if none.
+
+    There is no config.json fallback any more: config.json never stores a secret, so
+    a single store can't drift from a stale CLI copy (env OPENAI_API_KEY still wins,
+    applied by load_settings)."""
     want_p = _norm(provider)
     want_b = _norm(base_url)
     try:
         raw = json.loads((_global_home() / "desktop.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         raw = {}
-    if isinstance(raw, dict):
-        if raw.get("api_key"):  # legacy top-level key present → fold it into the keyring once
-            migrate_legacy_default_key()
-            try:
-                raw = json.loads((_global_home() / "desktop.json").read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                raw = {}
-        keys = raw.get("keys") if isinstance(raw.get("keys"), dict) else {}
-        if want_b:
-            # Explicit route → the named entry on that exact provider+base_url.
-            for item in keys.values():
-                if (isinstance(item, dict) and item.get("api_key")
-                        and _norm(item.get("base_url")) == want_b
-                        and _norm(item.get("provider")) == want_p):
-                    return str(item["api_key"])
-        else:
-            # Default route → the active label's key (then a provider match as a backstop).
-            active = keys.get(str(raw.get("active_key_label") or ""))
-            if (isinstance(active, dict) and active.get("api_key")
-                    and (not want_p or _norm(active.get("provider")) == want_p)):
-                return str(active["api_key"])
-            for item in keys.values():
-                if (isinstance(item, dict) and item.get("api_key")
-                        and _norm(item.get("provider")) == want_p):
-                    return str(item["api_key"])
-    try:
-        raw2 = json.loads((_default_config_dir() / "config.json").read_text(encoding="utf-8"))
-        if isinstance(raw2, dict) and str(raw2.get("api_key") or ""):
-            return str(raw2["api_key"])
-    except (OSError, json.JSONDecodeError):
-        pass
+    if not isinstance(raw, dict):
+        return ""
+    if raw.get("api_key"):  # legacy top-level key present → fold it into the keyring once
+        migrate_legacy_default_key()
+        try:
+            raw = json.loads((_global_home() / "desktop.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+    keys = raw.get("keys") if isinstance(raw.get("keys"), dict) else {}
+    if want_b:
+        # Explicit route → the named entry on that exact provider+base_url.
+        for item in keys.values():
+            if (isinstance(item, dict) and item.get("api_key")
+                    and _norm(item.get("base_url")) == want_b
+                    and _norm(item.get("provider")) == want_p):
+                return str(item["api_key"])
+    else:
+        # Default route → the active label's key (then a provider match as a backstop).
+        active = keys.get(str(raw.get("active_key_label") or ""))
+        if (isinstance(active, dict) and active.get("api_key")
+                and (not want_p or _norm(active.get("provider")) == want_p)):
+            return str(active["api_key"])
+        for item in keys.values():
+            if (isinstance(item, dict) and item.get("api_key")
+                    and _norm(item.get("provider")) == want_p):
+                return str(item["api_key"])
     return ""
+
+
+def save_global_key(provider: str, base_url: str, api_key: str, *,
+                    model: str = "", label: str = "") -> str:
+    """Write a provider key into the GLOBAL keyring (~/.lunamoth/desktop.json ``keys``)
+    — the ONE key store, shared with the webui — and make it the active default route.
+
+    The terminal setup flows (wizard / TUI welcome) call this so a CLI-entered key
+    lands in the same store the desktop app reads, NOT a second config.json copy.
+    Reuses an existing entry on the same provider+base_url route (no duplicate label
+    on re-run). Returns the label written; "" (no-op) on an empty key."""
+    api_key = (api_key or "").strip()
+    if not api_key:
+        return ""
+    provider = (provider or "").strip()
+    base_url = (base_url or "").strip().rstrip("/")
+    path = _global_home() / "desktop.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    keys = raw.get("keys") if isinstance(raw.get("keys"), dict) else {}
+    if not label:
+        # Reuse an existing entry on the same route; else label by the provider preset.
+        label = next((lbl for lbl, it in keys.items()
+                      if isinstance(it, dict)
+                      and _norm(it.get("base_url")) == _norm(base_url)
+                      and _norm(it.get("provider")) == _norm(provider)), "")
+        if not label:
+            label = _PROVIDER_LABELS.get(_norm(provider), "") or provider or "default"
+    prev = keys.get(label) if isinstance(keys.get(label), dict) else {}
+    keys[label] = {"provider": provider, "base_url": base_url, "api_key": api_key,
+                   "model": model or str(prev.get("model") or "")}
+    raw["keys"] = keys
+    raw["active_key_label"] = label  # this is now the active default route
+    raw["provider"] = provider       # keep the keyring's default-route fields in sync
+    raw["base_url"] = base_url
+    if model:
+        raw["model"] = model
+    raw.pop("api_key", None)  # never a top-level secret — the keys map is the store
+    from ..config import atomic_write_text
+    atomic_write_text(path, json.dumps(raw, ensure_ascii=False, indent=2), private=True)
+    return label
 
 
 def global_vision_route() -> dict[str, str]:
@@ -514,16 +557,22 @@ def load_settings() -> Settings:
                         pass
         except (json.JSONDecodeError, OSError):
             pass
-    # SEC-2: resolve the provider key from a GLOBAL store (env override > global
-    # keyring), NOT from this (possibly per-session) config. The global wins over
-    # any legacy copy embedded in a session file.
+    # SEC-2: the provider key is resolved from the GLOBAL keyring (env override >
+    # keyring), NEVER from config.json — config.json is no longer a key store.
     env_key = os.environ.get("OPENAI_API_KEY") or ""
-    global_key = global_api_key(str(data.get("provider") or ""), str(data.get("base_url") or ""))
-    resolved = env_key or global_key or str(data.get("api_key") or "")
-    data["api_key"] = resolved
-    # Migration: a session config must not carry the secret. If a legacy one does
-    # (and a global copy exists so we never orphan the only key), strip it on read.
-    if global_key and _is_session_config() and CONFIG_PATH.exists():
+    legacy_key = str(data.get("api_key") or "")  # a secret still embedded in config.json (pre-keyring)
+    provider = str(data.get("provider") or "")
+    base_url = str(data.get("base_url") or "")
+    # One-time fold: a legacy GLOBAL-config key (the old terminal store) is moved into
+    # the keyring so it isn't orphaned when we stop reading config.json — then it's
+    # stripped from disk below. (A session-config key is never folded: the keyring
+    # already owns it; it's only stripped.)
+    if legacy_key and not _is_session_config() and not global_api_key(provider, base_url):
+        save_global_key(provider, base_url, legacy_key, model=str(data.get("model") or ""))
+    global_key = global_api_key(provider, base_url)
+    data["api_key"] = env_key or global_key  # the loaded config.json value is NEVER used
+    # config.json must never hold the secret (session OR global) — strip it on read.
+    if legacy_key and CONFIG_PATH.exists():
         try:
             raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
             if isinstance(raw, dict) and raw.get("api_key"):
@@ -537,9 +586,9 @@ def load_settings() -> Settings:
 def save_settings(settings: Settings) -> Path:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     data = asdict(settings)
-    # SEC-2: never persist the provider key into a per-session config — it lives in
-    # the global keyring and is resolved at load. (The global config keeps it.)
-    if _is_session_config():
-        data.pop("api_key", None)
+    # SEC-2: NEVER persist the provider key into config.json — session OR global. The
+    # ONE store is the global keyring (write via save_global_key); config.json holds
+    # only non-secret route/overrides. This is what kills the second-copy drift.
+    data.pop("api_key", None)
     CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return CONFIG_PATH

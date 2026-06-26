@@ -35,7 +35,7 @@ from ...presence import normalize_mode
 from ...protocol import Notice, TextDelta, ThinkDelta, ToolEnd, ToolStart
 from ...protocol.api import GRANT_WORDS, CharaHandle, estimate_tokens
 from ...session.cleanup import clean_runtime_sandbox
-from ...session.settings import config_path, load_settings, save_settings
+from ...session.settings import config_path, load_settings, save_global_key, save_settings
 from .welcome import WelcomeScreen, _discover
 
 _log = get_logger("tui")
@@ -378,6 +378,9 @@ class LunaMothTUI(App):
         if result is not None:
             theme_changed = result.tui_theme_path != self.settings.tui_theme_path
             self.settings = result
+            # The keyring is the ONE key store — save_settings never persists api_key,
+            # so route the welcome-screen key there (no-op on an empty key / mock).
+            save_global_key(result.provider, result.base_url, result.api_key, model=result.model)
             save_settings(result)
             self.handle.reconfigure(result)
             self.mode = normalize_mode(result.mode)

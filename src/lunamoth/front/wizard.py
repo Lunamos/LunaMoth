@@ -16,7 +16,13 @@ import sys
 
 from ..config import ROOT
 from ..content.knobs import embodiment_copy, normalize_embodiment
-from ..session.settings import PRESETS, Settings, load_settings, save_settings
+from ..session.settings import (
+    PRESETS,
+    Settings,
+    load_settings,
+    save_global_key,
+    save_settings,
+)
 
 
 def _say(text: str = "") -> None:
@@ -156,6 +162,10 @@ def run_wizard(non_interactive_ok: bool = True) -> Settings:
     _choose_character(settings)
     _choose_embodiment(settings)
 
+    # The keyring is the ONE key store — save_settings never persists api_key, so a
+    # CLI-entered key (typed or preset-provided, e.g. Ollama's "ollama") is routed
+    # here. No-op on an empty key / the mock provider.
+    save_global_key(settings.provider, settings.base_url, settings.api_key, model=settings.model)
     save_settings(settings)
     _say("\nentering the cocoon …")
     return settings
