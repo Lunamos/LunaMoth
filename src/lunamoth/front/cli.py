@@ -733,7 +733,8 @@ def cmd_setup_browser(args: argparse.Namespace) -> int:
 
 
 def _uv_path() -> str:
-    return shutil.which("uv") or str(S.lunamoth_home() / "bin" / "uv")
+    from ..config import find_uv
+    return find_uv() or str(S.lunamoth_home() / "bin" / "uv")
 
 
 def cmd_update(args: argparse.Namespace) -> int:
@@ -775,26 +776,24 @@ def _update_dev_checkout(args: argparse.Namespace) -> int:
 
 
 def _update_wheel(args: argparse.Namespace) -> int:
-    # Wheel install (the user channel): `uv tool upgrade` pulls the newest
-    # version uv can resolve for this package. The wheel carries the built
-    # frontend (front/webui/), so there's no node/build step here.
-    uv = _uv_path()
-    if not (Path(uv).exists() or shutil.which("uv")):
-        print("error: uv not found; reinstall via install.sh", file=sys.stderr)
-        return 1
+    # Wheel install (the user channel): reinstall from the LATEST release wheel URL
+    # via the shared self-update core. `uv tool upgrade` is a no-op on a URL-pinned
+    # tool (install.sh pins `lunamoth @ <wheel-url>`), so it could never upgrade —
+    # the core fetches the newest release wheel and `uv tool install --force`s it.
+    # The wheel carries the built frontend (front/webui/), so there's no node step.
+    from .. import updater
     if args.check:
-        print("wheel install — run `lunamoth update` to fetch the latest release")
-        return 0
-    print("updating lunamoth (wheel) ...")
-    proc = subprocess.run([uv, "tool", "upgrade", "lunamoth"])
-    if proc.returncode != 0:
-        print(
-            "error: `uv tool upgrade lunamoth` failed; reinstall the latest "
-            "release via install.sh (private repo: set GITHUB_TOKEN)",
-            file=sys.stderr,
-        )
-        return proc.returncode
-    print("updated.")
+        url = updater.latest_wheel_url()
+        print("could not reach GitHub to check for updates" if not url
+              else f"latest release wheel: {url}\nrun `lunamoth update` to install it")
+        return 0 if url else 1
+    print("updating lunamoth (wheel) — fetching the latest release ...")
+    result = updater.apply()
+    print(result.get("output") or "")
+    if not result.get("ok"):
+        print("error: update failed (see output above).", file=sys.stderr)
+        return 1
+    print("updated. restart lunamoth to run the new version.")
     return 0
 
 
@@ -819,6 +818,10 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
              "ready" if (_cli and _chromium) else "run `lunamoth setup browser` to enable")
     except Exception:
         line("browser tools (optional)", False, "run `lunamoth setup browser`")
+    # ffmpeg backs the chara's video/audio work (best-effort installed by install.sh).
+    _ffmpeg = shutil.which("ffmpeg")
+    _ffmpeg_hint = "brew install ffmpeg" if sys.platform == "darwin" else "apt/dnf install ffmpeg"
+    line("ffmpeg (optional)", bool(_ffmpeg), _ffmpeg or f"missing — {_ffmpeg_hint}")
     print(f"  home: {S.lunamoth_home()}  sessions: {len(S.list_sessions())}")
     # Diagnostics live per chara, next to its audit trail.
     for m in S.list_sessions():

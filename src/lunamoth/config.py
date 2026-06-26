@@ -103,6 +103,27 @@ def atomic_write_text(path: Path, text: str, *, private: bool = False) -> None:
         raise
 
 
+def find_uv() -> "str | None":
+    """Locate the ``uv`` binary robustly — the ONE resolver every uv caller uses.
+
+    LunaMoth is uv-based (install.sh drops uv in ~/.lunamoth/bin), but a desktop /
+    Electron launch does NOT inherit the shell PATH, so ``shutil.which`` alone misses
+    it — a real cause of 'uv not found' in the update + matte installers. Fall back to
+    the known install locations. Returns None only if uv is genuinely absent."""
+    import shutil
+
+    found = shutil.which("uv")
+    if found:
+        return found
+    home = Path(os.getenv("LUNAMOTH_HOME") or (Path.home() / ".lunamoth"))
+    for p in (home / "bin" / "uv",
+              Path.home() / ".local" / "bin" / "uv",
+              Path.home() / ".cargo" / "bin" / "uv"):
+        if p.exists():
+            return str(p)
+    return None
+
+
 def content_dir(name: str) -> Path:
     """Resolve a bundled-content dir (``cards`` / ``toolpacks``).
 

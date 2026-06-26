@@ -1,0 +1,137 @@
+"""Self-update core — resolve the latest GitHub Release and reinstall IN PLACE.
+
+Flat / backend-neutral (like config.py) so the CLI (``front/cli.py``) and the hub
+update RPC (``server/hub/updates.py``) share ONE implementation instead of two that
+drift. Two install channels mirror ``install.sh``:
+
+  * dev / git checkout  → ``git pull --ff-only`` + ``uv sync``.
+  * wheel (the default) → installed by ``uv tool install --force
+    "lunamoth[...] @ <release-wheel-URL>"`` — a URL-PINNED tool. The mature in-place
+    upgrade is therefore "fetch the LATEST release's wheel URL + reinstall", NOT
+    ``uv tool upgrade`` (a no-op on a URL-pinned tool: the recorded requirement is a
+    fixed URL with no newer version to resolve — the reason the update button never
+    actually upgraded).
+
+uv is located via ``config.find_uv`` (a desktop launch doesn't inherit the shell
+PATH, so plain ``which`` misses it). Failures surface verbatim — no fake success.
+"""
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+from .config import find_uv
+
+REPO = "Lunamos/LunaMoth"
+EXTRAS = "server,messaging"  # mirror install.sh's `lunamoth[server,messaging]`
+_RELEASES_PATH = f"repos/{REPO}/releases?per_page=10"
+_RELEASES_API = f"https://api.github.com/{_RELEASES_PATH}"
+_TIMEOUT = 6.0
+_APPLY_TIMEOUT = 300.0  # under the webui's 320s update.apply RPC timeout → a clean error, not an orphaned install
+
+# The install dir / checkout root: src/lunamoth/updater.py → parents[2]. For a dev
+# install this is the git checkout (has .git); for a wheel it's inside the uv tool
+# venv (no .git) — the same root server/hub/updates.py and install.sh reason about.
+APP_DIR = Path(__file__).resolve().parents[2]
+
+
+def is_dev() -> bool:
+    return (APP_DIR / ".git").exists()
+
+
+def fetch_releases(timeout: float = _TIMEOUT) -> list[dict[str, Any]]:
+    """Releases (newest first), each with a ``wheel_url`` (its .whl asset). Prefers the
+    gh CLI (authed — handles a private repo, no anon rate limit), else unauth HTTP.
+    Raises on a hard fetch failure (caller decides whether to fall back to a cache)."""
+    data: Any = None
+    gh = shutil.which("gh")
+    if gh:
+        try:
+            p = subprocess.run([gh, "api", _RELEASES_PATH],
+                               capture_output=True, text=True, timeout=timeout)
+            if p.returncode == 0:
+                data = json.loads(p.stdout)
+        except (subprocess.SubprocessError, OSError, ValueError):
+            data = None
+    if data is None:
+        req = urllib.request.Request(
+            _RELEASES_API,
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "lunamoth"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 - fixed GitHub URL
+            data = json.loads(r.read().decode("utf-8"))
+    out: list[dict[str, Any]] = []
+    for rel in data if isinstance(data, list) else []:
+        if not isinstance(rel, dict) or rel.get("draft"):
+            continue
+        wheel = ""
+        for a in rel.get("assets") or []:
+            if isinstance(a, dict) and str(a.get("name") or "").endswith(".whl"):
+                wheel = str(a.get("browser_download_url") or "")
+                break
+        out.append({
+            "tag": str(rel.get("tag_name") or ""),
+            "name": str(rel.get("name") or rel.get("tag_name") or ""),
+            "body": str(rel.get("body") or ""),
+            "published_at": str(rel.get("published_at") or ""),
+            "url": str(rel.get("html_url") or ""),
+            "prerelease": bool(rel.get("prerelease")),
+            "wheel_url": wheel,
+        })
+    return out
+
+
+def latest_wheel_url() -> str | None:
+    """The newest release's wheel asset URL, or None if unreachable / none published."""
+    try:
+        rels = fetch_releases()
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError,
+            subprocess.TimeoutExpired):
+        return None
+    for rel in rels:  # newest first; first one carrying a wheel wins
+        if rel.get("wheel_url"):
+            return str(rel["wheel_url"])
+    return None
+
+
+def apply() -> dict[str, Any]:
+    """Run the channel-aware in-place update. BLOCKING (run off the event loop).
+    Returns ``{ok, output, restart_required}`` — the running process keeps the OLD
+    code until it restarts, so the UI tells the user to restart."""
+    uv = find_uv()
+    if uv is None:
+        return {"ok": False,
+                "output": "uv not found — reinstall via install.sh (it drops uv in ~/.lunamoth/bin)",
+                "restart_required": False}
+    if is_dev():
+        git = shutil.which("git")
+        if not git:
+            return {"ok": False, "output": "git not found", "restart_required": False}
+        steps = [[git, "-C", str(APP_DIR), "pull", "--ff-only", "origin", "main"],
+                 [uv, "sync", "--project", str(APP_DIR)]]
+    else:
+        url = latest_wheel_url()
+        if not url:
+            return {"ok": False, "restart_required": False,
+                    "output": ("could not resolve the latest release wheel — GitHub may be "
+                               "unreachable, or a private repo (install the gh CLI and "
+                               "`gh auth login`, or reinstall via install.sh with GITHUB_TOKEN)")}
+        # Reinstall from the LATEST wheel URL — `uv tool upgrade` is a no-op on a
+        # URL-pinned tool, so this is the only thing that actually moves the version.
+        steps = [[uv, "tool", "install", "--force", f"lunamoth[{EXTRAS}] @ {url}"]]
+    log: list[str] = []
+    for cmd in steps:
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=_APPLY_TIMEOUT)
+        except (subprocess.TimeoutExpired, OSError) as e:
+            log.append(f"$ {' '.join(map(str, cmd))}\n{e}")
+            return {"ok": False, "output": "\n".join(log), "restart_required": False}
+        log.append(f"$ {' '.join(map(str, cmd))}\n{((p.stdout or '') + (p.stderr or '')).strip()}")
+        if p.returncode != 0:
+            return {"ok": False, "output": "\n".join(log), "restart_required": False}
+    return {"ok": True, "output": "\n".join(log), "restart_required": True}

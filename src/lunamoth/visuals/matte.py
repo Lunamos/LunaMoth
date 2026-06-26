@@ -134,19 +134,10 @@ def deps_progress() -> dict:
 
 
 def _find_uv() -> "str | None":
-    """Locate the ``uv`` binary. LunaMoth is uv-based (install.sh drops it in
-    ~/.lunamoth/bin), but a GUI app launched from Finder doesn't inherit the shell
-    PATH, so check the common install locations too. None if genuinely absent."""
-    import shutil
-    found = shutil.which("uv")
-    if found:
-        return found
-    for p in (Path.home() / ".lunamoth" / "bin" / "uv",
-              Path.home() / ".local" / "bin" / "uv",
-              Path.home() / ".cargo" / "bin" / "uv"):
-        if p.exists():
-            return str(p)
-    return None
+    """Locate the ``uv`` binary — the shared resolver (config.find_uv), which checks
+    PATH plus the known install dirs (a GUI launch doesn't inherit the shell PATH)."""
+    from ..config import find_uv
+    return find_uv()
 
 
 def _visuals_pkgs() -> list[str]:
