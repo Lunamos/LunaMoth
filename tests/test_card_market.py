@@ -75,7 +75,7 @@ _DETAIL = {
 def _import(monkeypatch, detail=_DETAIL, cover=b"\x89PNG\r\n\x1a\nrest"):
     saved = {}
     monkeypatch.setattr(M, "_get_json", lambda url: detail)
-    monkeypatch.setattr(M, "_request", lambda url: cover)
+    monkeypatch.setattr(M, "_request", lambda url, headers=None: cover)
     monkeypatch.setattr(M._cards, "save_card", lambda card: saved.update(card=card) or {"path": "/deck/witch.json"})
     calls = []
     monkeypatch.setattr(M._avatars, "asset_save", lambda *a, **k: calls.append(("asset_save", a)))
@@ -125,7 +125,7 @@ def test_import_nsfw_gate(monkeypatch):
         M.import_card("amy/witch")  # default nsfw=False → refused
     # explicit opt-in imports it
     monkeypatch.setattr(M._cards, "save_card", lambda card: {"path": "/deck/x.json"})
-    monkeypatch.setattr(M, "_request", lambda url: b"")
+    monkeypatch.setattr(M, "_request", lambda url, headers=None: b"")
     assert M.import_card("amy/witch", nsfw=True)["path"] == "/deck/x.json"
 
 

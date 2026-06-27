@@ -129,13 +129,17 @@ export function CharactersTab() {
               return (
                 <div className="market-card" key={c.path}>
                   <div className="market-thumb">
-                    {/* loads straight from character-tavern's CDN; hide on error */}
+                    {/* monogram fallback shows when the CDN image can't load (it
+                        hotlink-protects some contexts) — the grid never looks broken */}
+                    <span className="market-thumb-fallback" aria-hidden>
+                      {(c.name || "?").trim().charAt(0).toUpperCase()}
+                    </span>
                     <img
                       src={c.imageUrl}
                       alt={c.name}
                       loading="lazy"
                       onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
+                        (e.currentTarget as HTMLImageElement).style.display = "none";
                       }}
                     />
                     {c.nsfw && <span className="market-badge nsfw">NSFW</span>}

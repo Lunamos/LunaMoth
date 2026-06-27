@@ -2290,8 +2290,12 @@ body.dark .market-tab.active{background:rgba(91,159,212,.18)}
   background:var(--panel); border:1px solid var(--hairline);
 }
 .market-card:hover{border-color:var(--accent); box-shadow:0 4px 16px rgba(20,40,60,.08)}
-.market-thumb{position:relative; aspect-ratio:3/4; background:var(--bg); overflow:hidden}
-.market-thumb img{width:100%; height:100%; object-fit:cover; display:block}
+.market-thumb{position:relative; aspect-ratio:3/4; background:linear-gradient(150deg,var(--accent-soft),var(--bg)); overflow:hidden}
+.market-thumb img{position:relative; width:100%; height:100%; object-fit:cover; display:block}
+.market-thumb-fallback{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-size:48px; font-weight:700; color:var(--accent-deep); opacity:.5; user-select:none;
+}
 .market-badge{
   position:absolute; top:6px; font-size:10px; font-weight:650; padding:2px 6px; border-radius:6px;
   color:#fff; letter-spacing:.3px;

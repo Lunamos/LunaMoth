@@ -48,13 +48,17 @@ _MAX_LIMIT = 40
 _TIMEOUT_S = 15.0
 _NSFW_EXCLUDES = ("nsfw", "explicit", "smut", "porn")
 _UA = "lunamoth-card-market/1.0 (+https://lunamoth.ai)"
+# The image CDN hotlink-protects (403) against non-browser requests; the cover fetch
+# sends a browser-like UA + Referer (see _attach_cover).
+_BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 _DEFAULT_THEME_PRIMARY = "#5B9FD4"  # deck signature blue — the ultimate fallback
 
 
 # ---- HTTP (stdlib; the hub already does outbound HTTP for model calls) ----------
 
-def _request(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "*/*"})
+def _request(url: str, headers: dict[str, str] | None = None) -> bytes:
+    req = urllib.request.Request(url, headers=headers or {"User-Agent": _UA, "Accept": "*/*"})
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT_S) as resp:
             return resp.read()
@@ -189,6 +193,9 @@ def _map_to_card(detail: dict[str, Any]) -> dict[str, Any]:
         "source": "character_tavern",
         "source_path": path,
         "source_url": f"{_PAGE_BASE}/{path}" if path else "",
+        # the cover URL, preserved so the UI can show it browser-side even if the
+        # server can't download the bytes (the CDN hotlink-protects server fetches).
+        "source_image": f"{_IMAGE_BASE}/{path}.png" if path else "",
     }
     if tagline:
         ext["tagline"] = tagline
@@ -217,25 +224,52 @@ def _map_to_card(detail: dict[str, Any]) -> dict[str, Any]:
     return {"version": "1.0", "name": name, "data": data}
 
 
+def _detect_image_ext(raw: bytes) -> str | None:
+    """The real image format from magic bytes (the URL ext lies — a CDN may serve webp).
+    Returns an ext our asset writers accept, or None (skip rather than store garbage)."""
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
 def _attach_cover(card_path: str, image_url: str) -> bool:
     """Best-effort: download the card cover and set it as the keyvisual anchor + avatar.
     The card is the deliverable; a missing/failed image never fails the import — the user
-    can upload or generate visuals afterward (the keyvisual pipeline ref-chains from it)."""
+    can upload or generate visuals afterward (the keyvisual pipeline ref-chains from it).
+
+    Browser-like headers (UA + Referer) are required: character-tavern's image CDN
+    hotlink-protects with a 403 against a bare/non-browser request."""
+    headers = {
+        "User-Agent": _BROWSER_UA,
+        "Accept": "image/avif,image/webp,image/png,image/*,*/*;q=0.8",
+        "Referer": "https://character-tavern.com/",
+    }
     try:
-        raw = _request(image_url)
-    except HubRpcError:
+        raw = _request(image_url, headers=headers)
+    except HubRpcError as e:
+        _log.warning("market import: cover fetch failed for %s — %s", image_url, e)
         return False
-    if not raw or not raw[:8].startswith(b"\x89PNG"):
-        return False  # not a PNG — skip rather than store a bogus asset
+    ext = _detect_image_ext(raw or b"")
+    if ext is None:
+        _log.warning("market import: cover for %s is not a usable image (%d bytes, head=%r)",
+                     image_url, len(raw or b""), (raw or b"")[:16])
+        return False
     b64 = base64.b64encode(raw).decode("ascii")
     ok = False
-    for fn in (lambda: _avatars.asset_save(card_path, "keyvisual", b64, "png"),
-               lambda: _avatars.avatar_upload(card_path, b64, "png")):
+    # keyvisual (the identity anchor) accepts png/jpg/webp; avatar accepts png/jpg only.
+    targets = [("keyvisual", lambda: _avatars.asset_save(card_path, "keyvisual", b64, ext))]
+    if ext in ("png", "jpg"):
+        targets.append(("avatar", lambda: _avatars.avatar_upload(card_path, b64, ext)))
+    for what, fn in targets:
         try:
             fn()
             ok = True
         except Exception:  # noqa: BLE001 - one asset failing must not abort the other / the import
-            _log.warning("market import: attaching cover to %s partially failed", card_path, exc_info=True)
+            _log.warning("market import: attaching cover (%s) to %s failed", what, card_path, exc_info=True)
     return ok
 
 
