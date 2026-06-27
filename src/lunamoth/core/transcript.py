@@ -263,34 +263,29 @@ class TranscriptStore:
         """Like load(), but ALSO carries legacy kind='tool' forensic rows so a
         frontend can show the full recent history (tool calls + results +
         reasoning). The MODEL never sees this view — it is display-only, so the
-        model's replayed context (load() → context.render()) is unchanged."""
+        model's replayed context (load() → context.render()) is unchanged.
+
+        Shows the full RECENT raw conversation (the last ``max_messages`` rows of the
+        epoch), NOT gated to the latest compaction summary the way load() is: the
+        transcript holds every row, and a human reading the chat expects to see the
+        real history, not just what survived the last compaction. 'summary' rows ARE
+        carried (kind="summary") so the frontend can mark each compaction BOUNDARY with
+        a subtle divider — the raw turns are shown in full, the divider just tells the
+        reader "everything above here is condensed in the chara's working memory"."""
         if not self.available:
             return []
         try:
             with self._connect() as conn:
                 epoch = self.epoch()
-                row = conn.execute(
-                    "SELECT MAX(id) FROM messages WHERE epoch=? AND kind='summary'",
-                    (epoch,),
-                ).fetchone()
-                summary_id = int(row[0]) if row and row[0] else None
-                sql = (
+                rows = conn.execute(
                     "SELECT role, content, kind FROM messages "
-                    "WHERE epoch=? AND kind IN ('chat','think','struct','summary','tool')"
-                )
-                params: tuple[int, ...] | tuple[int, int] = (epoch,)
-                if summary_id is not None:
-                    sql += " AND id>=?"
-                    params = (epoch, summary_id)
-                sql += " ORDER BY id"
-                rows = conn.execute(sql, params).fetchall()
+                    "WHERE epoch=? AND kind IN ('chat','think','struct','tool','summary') ORDER BY id",
+                    (epoch,),
+                ).fetchall()
         except (sqlite3.Error, OSError):
             return []
         if max_messages > 0:
-            if rows and rows[0][2] == "summary" and len(rows) > max_messages:
-                rows = [rows[0]] if max_messages <= 1 else [rows[0]] + rows[-(max_messages - 1):]
-            else:
-                rows = rows[-max_messages:]
+            rows = rows[-max_messages:]
         out: list[dict] = []
         for role, content, kind in rows:
             if kind in ("struct", "tool"):

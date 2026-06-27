@@ -231,6 +231,31 @@ describe("StreamModel — restored history", () => {
     const sup = m.items.find((i) => i.kind === "super") as TextItem;
     expect(sup.raw).toBe("important!");
   });
+
+  it("renders a compaction-boundary divider for a summary row, keeping the raw turns", () => {
+    const m = new StreamModel();
+    m.renderRestored([
+      { role: "user", content: "old q" },
+      { role: "assistant", content: "old a" },
+      { role: "system", content: "…summary text…", kind: "summary" },
+      { role: "user", content: "new q" },
+    ]);
+    const divider = m.items.find((i) => i.kind === "system" && i.cls === "compacted");
+    expect(divider).toBeTruthy();
+    // the raw turns around the boundary are still shown in full
+    expect(m.items.filter((i) => i.kind === "user").length).toBe(2);
+    // the summary TEXT itself is never rendered as content
+    expect(m.items.some((i) => i.kind === "system" && i.text.includes("summary text"))).toBe(false);
+  });
+
+  it("coalesces adjacent compaction boundaries into one divider", () => {
+    const m = new StreamModel();
+    m.renderRestored([
+      { role: "system", content: "s1", kind: "summary" },
+      { role: "system", content: "s2", kind: "summary" },
+    ]);
+    expect(m.items.filter((i) => i.kind === "system" && i.cls === "compacted").length).toBe(1);
+  });
 });
 
 describe("tool tally helpers", () => {

@@ -417,6 +417,14 @@ body.technical .chan-badge{display:inline-block}
   content:""; height:1px; flex:1; background:var(--hairline-2);
 }
 .sys-note.arrived{letter-spacing:.2em; opacity:.7}
+/* compaction-boundary divider — a thin labelled rule (mirrors idle-divider). */
+.sys-note.compacted{
+  width:80%; display:flex; align-items:center; gap:10px; justify-content:center;
+  letter-spacing:.06em; color:rgba(147,163,174,.7); font-style:italic;
+}
+.sys-note.compacted::before,.sys-note.compacted::after{
+  content:""; height:1px; flex:1; background:var(--hairline-2);
+}
 .md-pre{
   font-family:var(--mono); font-size:11.5px; background:rgba(20,40,60,.05); border-radius:8px;
   padding:9px 11px; overflow:auto; line-height:1.5; margin:4px 0;

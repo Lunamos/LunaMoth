@@ -299,6 +299,17 @@ export class StreamModel {
     this.items.push({ id: this.nextId(), kind: "system", text: String(text).slice(0, 240), cls });
   }
 
+  /** A compaction-boundary divider (the SystemLine view renders the i18n text for the
+   *  "compacted" class). Coalesces adjacent boundaries so back-to-back summaries don't
+   *  stack two dividers. */
+  compactionMark(): void {
+    this.closeCurrent();
+    this.breakToolGroup();
+    const last = this.items[this.items.length - 1];
+    if (last && last.kind === "system" && last.cls === "compacted") return;
+    this.items.push({ id: this.nextId(), kind: "system", text: "", cls: "compacted" });
+  }
+
   /* ---- finalize a turn (chat.js finalize) ---- */
   finalize(): void {
     this.closeCurrent();
@@ -377,7 +388,10 @@ export class StreamModel {
   // (say + super from speak tool_calls), think blocks, and tool-call chips.
   renderRestored(messages: RestoredMessage[]): void {
     const restoreChips = new Map<string, ToolChip>();
-    for (const m of messages.slice(-80)) {
+    // Render the FULL tail the backend sent (already capped at RESTORE_MAX_MESSAGES).
+    // A previous slice(-80) here truncated the visible history to ~the last 80 rows
+    // (tool/think rows included), so any longer conversation looked incomplete.
+    for (const m of messages) {
       if (!m) continue;
       const content = typeof m.content === "string" ? m.content : "";
       const hasText = content.trim().length > 0;
@@ -385,7 +399,11 @@ export class StreamModel {
         if (!hasText) continue;
         this.pushUser(content, []);
       } else if (m.role === "system") {
-        if (hasText && m.kind !== "summary") this.systemLine(content);
+        // A summary row marks a compaction BOUNDARY: render a subtle divider (not the
+        // summary text) so the reader knows the chara's verbatim memory above here is
+        // condensed, while the raw turns themselves are still shown in full.
+        if (m.kind === "summary") this.compactionMark();
+        else if (hasText) this.systemLine(content);
       } else if (m.role === "tool") {
         if (hasText) this.restoreToolResult(m, restoreChips);
       } else if (m.role === "assistant") {

@@ -211,6 +211,12 @@ function ToolChipRow({ chip, technical }: { chip: ToolGroupItem["chips"][number]
 
 
 function SystemLine({ item }: { item: SystemItem }) {
+  const t = useT();
+  // The compaction-boundary divider carries no text of its own — it renders a fixed
+  // i18n marker telling the reader the chara's verbatim memory above here is condensed.
+  if (item.cls === "compacted") {
+    return <div className="sys-note compacted">{t("compacted-here")}</div>;
+  }
   return <div className={`sys-note${item.cls ? " " + item.cls : ""}`}>{item.text}</div>;
 }
 

@@ -182,6 +182,27 @@ def test_load_display_includes_legacy_tool_rows(tmp_path):
     assert any(m.get("role") == "tool" and m.get("content") == "42" for m in display_view)
 
 
+def test_load_display_shows_full_history_past_a_summary(tmp_path):
+    """Display is NOT gated to the latest compaction summary (the model's load() is).
+    A human reading the chat sees the full raw conversation; the summary block itself
+    is excluded (the raw turns it summarized are right there)."""
+    t = TranscriptStore(tmp_path / "t.db")
+    t.append("user", "old-question")
+    t.append("assistant", "old-answer")
+    t.append("user", "compacted-summary-text", kind="summary")  # a compaction landed here
+    t.append("user", "new-question")
+    t.append("assistant", "new-answer")
+    disp = t.load_display()
+    contents = [m.get("content") for m in disp]
+    assert "old-question" in contents and "new-question" in contents  # full history, not just post-summary
+    # the summary row is carried as a BOUNDARY MARKER (kind="summary") for the frontend
+    # divider — the raw turns it summarized are shown in full above/below it.
+    assert any(m.get("kind") == "summary" for m in disp)
+    # the MODEL view (load) is unchanged — it still drops the pre-summary raw turns
+    model_contents = [m.get("content") for m in t.load()]
+    assert "old-question" not in model_contents
+
+
 @pytest.fixture
 def agent(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "mock")
