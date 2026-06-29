@@ -71,6 +71,10 @@ export function CharactersTab() {
   const [result, setResult] = useState<SearchResult | null>(null);
   const [importing, setImporting] = useState<Set<string>>(new Set());
   const [imported, setImported] = useState<Set<string>>(new Set());
+  // Covers that failed to load — tracked in STATE (not a DOM style mutation), so a
+  // re-search of the same card path re-attempts the load instead of staying hidden
+  // forever (character-tavern's hotlink 403s are intermittent).
+  const [broken, setBroken] = useState<Set<string>>(new Set());
   const reqSeq = useRef(0); // drop stale responses if the user searches again fast
 
   const mark = (set: React.Dispatch<React.SetStateAction<Set<string>>>, path: string, on: boolean) =>
@@ -89,7 +93,10 @@ export function CharactersTab() {
     setError("");
     try {
       const res = await hub.call<SearchResult>("market.search", { query: q, nsfw }, 25000);
-      if (seq === reqSeq.current) setResult(res);
+      if (seq === reqSeq.current) {
+        setResult(res);
+        setBroken(new Set()); // fresh result set → re-attempt every cover
+      }
     } catch (e) {
       if (seq === reqSeq.current) {
         setError(rpcErrText(t, e as { message?: string }));
@@ -112,7 +119,9 @@ export function CharactersTab() {
         if (res?.path) await bringCoverOver(hub, res.path, res.image_url || c.imageUrl);
         mark(setImported, c.path, true);
         deckToast(t("market-added", { name: res?.name || c.name }));
-        await refresh(); // so the deck shows it immediately when the user switches over
+        // The import already succeeded — a refresh blip must NOT turn it into an error
+        // toast, so refresh OUT of the try (its own catch). The deck reflects it on next sync.
+        void refresh().catch(() => {});
       } catch (e) {
         deckToast(rpcErrText(t, e as { message?: string }), true);
       } finally {
@@ -168,14 +177,14 @@ export function CharactersTab() {
                     <span className="market-thumb-fallback" aria-hidden>
                       {(c.name || "?").trim().charAt(0).toUpperCase()}
                     </span>
-                    <img
-                      src={c.imageUrl}
-                      alt={c.name}
-                      loading="lazy"
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).style.display = "none";
-                      }}
-                    />
+                    {!broken.has(c.path) && (
+                      <img
+                        src={c.imageUrl}
+                        alt={c.name}
+                        loading="lazy"
+                        onError={() => mark(setBroken, c.path, true)}
+                      />
+                    )}
                     {c.nsfw && <span className="market-badge nsfw">NSFW</span>}
                     {c.hasLorebook && <span className="market-badge lore">{t("market-lorebook")}</span>}
                   </div>

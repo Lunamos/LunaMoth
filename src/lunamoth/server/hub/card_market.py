@@ -95,11 +95,16 @@ def _truncate(text: str, n: int) -> str:
 
 def _norm_path(value: Any) -> str:
     """A card path is `<author>/<slug>`; tolerate a full page URL or stray slashes.
-    Kept RAW (may contain spaces / unicode) — the API path identity. Encode for URLs."""
+    Kept RAW (may contain spaces / unicode) — the API path identity. Encode for URLs.
+    Traversal segments (`.`/`..`) are rejected → '' (the host is hard-coded so this is
+    hygiene, not an SSRF/write fix, but a card path never legitimately contains them)."""
     p = _s(value)
     if p.startswith("http"):
         p = p.split("/character/", 1)[-1]
-    return p.strip("/")
+    p = p.strip("/")
+    if not p or any(seg in ("", ".", "..") for seg in p.split("/")):
+        return ""
+    return p
 
 
 def _encode_path(path: str) -> str:
@@ -246,7 +251,12 @@ def import_card(path: str, *, nsfw: bool = False) -> dict[str, Any]:
     )
     if not has_identity:
         raise HubRpcError(-32050, "character-tavern returned no usable card definition", {"kind": "market"})
-    if not nsfw and detail.get("isNSFW") is True:
+    # NSFW gate: trust the explicit flag AND the tags — the detail payload doesn't always
+    # echo `isNSFW`, so a tag match (nsfw/explicit/…) is the backstop that keeps a direct
+    # import-by-path from slipping past the search-side `exclude_tags`.
+    detail_tags = {t.lower() for t in _arr(detail.get("tags"))}
+    is_nsfw = detail.get("isNSFW") is True or bool(detail_tags & set(_NSFW_EXCLUDES))
+    if not nsfw and is_nsfw:
         raise HubRpcError(-32602, "this card is marked NSFW; enable NSFW to import it", {"kind": "market"})
     card = _map_to_card(detail)
     saved = _cards.save_card(card)  # writes into the user deck, returns {"path": ...}

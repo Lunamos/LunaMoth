@@ -137,6 +137,26 @@ def test_import_blank_path_errors():
         M.import_card("   ")
 
 
+def test_traversal_path_is_rejected(monkeypatch):
+    # a card path never legitimately contains `.`/`..`; reject it before any fetch
+    # (host is hard-coded so this is hygiene, but the upstream must never be hit with it).
+    called = {"n": 0}
+    monkeypatch.setattr(M, "_get_json", lambda url: called.update(n=called["n"] + 1) or {})
+    with pytest.raises(HubRpcError):
+        M.import_card("../../etc/passwd")
+    assert called["n"] == 0  # rejected before reaching the network
+
+
+def test_import_nsfw_gate_by_tag(monkeypatch):
+    # the detail payload doesn't always echo `isNSFW`; a tag match is the backstop.
+    tagged = {"card": {**_DETAIL["card"], "isNSFW": None, "tags": ["nsfw", "fantasy"]}}
+    monkeypatch.setattr(M, "_get_json", lambda url: tagged)
+    with pytest.raises(HubRpcError):
+        M.import_card("amy/witch")  # nsfw tag → refused even without the isNSFW flag
+    monkeypatch.setattr(M._cards, "save_card", lambda card: {"path": "/deck/x.json"})
+    assert M.import_card("amy/witch", nsfw=True)["path"] == "/deck/x.json"
+
+
 def test_seeded_theme_is_deterministic_and_distinct():
     a1 = M._seeded_theme("amy/witch")
     a2 = M._seeded_theme("amy/witch")
