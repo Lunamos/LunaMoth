@@ -36,6 +36,20 @@ def test_engine_prompt_text_is_brand_free():
             assert banned not in low, f"{banned!r} leaked into model-facing rules text"
 
 
+def test_bundled_toolpack_note_is_brand_free():
+    """The bundled `sandbox` toolpack's note rides the stable prefix (agent.py
+    injects pack.note), so it is model-facing — no upstream brand may leak there.
+    The description is operator-facing but kept clean too."""
+    from lunamoth.tools.toolpacks import load_toolpack
+
+    pack = load_toolpack("sandbox")
+    assert pack is not None
+    for txt in (pack.note, pack.description):
+        low = txt.lower()
+        for banned in ("hermes", "nous", "the vm"):
+            assert banned not in low, f"{banned!r} leaked into the sandbox toolpack"
+
+
 def test_environment_tools_ffmpeg_note_is_honesty_gated():
     """The ffmpeg note is stated ONLY when ffmpeg is actually present — never a
     claim the chara would reach for and not find."""

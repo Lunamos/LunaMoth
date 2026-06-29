@@ -1,10 +1,10 @@
 {
   "name": "sandbox",
-  "description": "Full workshop: read/write/patch/search files, run shell commands and background processes, browse the web, keep notes (memory) and a task list (todo), search your own history, use skills, and run code — the hermes tool surface. Plus your own chara-life tools (speak, rest, wish).",
+  "description": "Full workshop: read/write/patch/search files, run shell commands and background processes, browse the web, keep notes (memory) and a task list (todo), search your own history, use skills, and run code — the full tool surface. Plus your own chara-life tools (speak, rest).",
   "tools": [
     "*"
   ],
-  "note": "The model gets the full tool surface by default (hermes parity); '*' means every registered tool, so a newly added tool is available with nothing to edit. Network is ON by default; the operator can turn it off at runtime (/net off). Browser tools also need the agent-browser driver installed; they stay hidden until then.",
+  "note": "The model gets the full tool surface by default; '*' means every registered tool, so a newly added tool is available with nothing to edit. Network is ON by default; the operator can turn it off at runtime (/net off). Browser tools also need the agent-browser driver installed; they stay hidden until then.",
   "mcp_servers": [
     "*"
   ]
