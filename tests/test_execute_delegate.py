@@ -108,12 +108,15 @@ def make_ctx(tmp_path, *, dispatch=None, llm=None, tool_access=None,
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
-def test_both_tools_registered():
+def test_execute_code_registered_delegate_shelved():
+    """execute_code is live; delegate_task is SHELVED (unregistered) until its
+    per-child timeout is enforced — the chara never sees it. See
+    delegate_task._DELEGATE_ENABLED + docs/OPEN-WORK.md."""
     names = registry.get_all_tool_names()
     assert "execute_code" in names
-    assert "delegate_task" in names
     assert registry.get_entry("execute_code").toolset == "code_execution"
-    assert registry.get_entry("delegate_task").toolset == "delegation"
+    assert "delegate_task" not in names
+    assert dt_mod._DELEGATE_ENABLED is False
 
 
 def test_execute_code_schema_shape():
@@ -124,7 +127,9 @@ def test_execute_code_schema_shape():
 
 
 def test_delegate_schema_shape():
-    schema = registry.get_schema("delegate_task")
+    # Read the module-level schema directly — the tool is shelved (unregistered),
+    # but the code (and its schema) is kept intact for when it's re-enabled.
+    schema = dt_mod.DELEGATE_TASK_SCHEMA
     props = schema["parameters"]["properties"]
     assert set(props) >= {"goal", "context", "toolsets", "tasks"}
     assert schema["parameters"]["required"] == []

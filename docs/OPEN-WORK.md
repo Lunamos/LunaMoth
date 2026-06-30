@@ -25,6 +25,25 @@ history. The one deliberately-unbuilt item, **worth remembering**:
   load-bearing for the audit trail's ordering. Revisit only if throughput becomes a
   real problem.
 
+- **`delegate_task` (parallel sub-agent fan-out) — SHELVED in the foreground**
+  (owner, 2026-06-30). The code is kept in `tools/builtin/delegate_task.py` but NOT
+  registered (`_DELEGATE_ENABLED = False`), so AST discovery never exposes it and the
+  chara never sees it; delegation is mentioned nowhere in the prompt. Why shelved: the
+  per-child timeout (`DEFAULT_PER_CHILD_TIMEOUT = 600`) is **defined but unenforced** —
+  `fut.result()` blocks with no timeout, the single-task path runs inline with none,
+  and the `with ThreadPoolExecutor()` exit does `shutdown(wait=True)` which blocks
+  again — so a worker whose LLM stream or inner tool (terminal/network/browser) stalls
+  hangs the whole turn (the observed "stuck"), violating the no-infinite-wait rule.
+  **Re-enable checklist** (apple-to-apple with hermes, which enforces it): (1)
+  `fut.result(timeout=DEFAULT_PER_CHILD_TIMEOUT)` + catch `TimeoutError` → a real
+  `timed_out` tool_error for that worker, others unaffected; (2) the single-task inline
+  path gets the same bound; (3) `shutdown(wait=False)` so a hung thread can't re-block
+  the return; (4) optional wall-clock deadline inside the worker loop (not only the
+  50-step cap). Caveat: a Python thread can't be force-killed — the stuck worker keeps
+  running in the background, but the parent must STOP waiting and surface the timeout.
+  Flip `_DELEGATE_ENABLED` to True once (1)–(3) land. Tests already assert the shelved
+  state (`tests/test_execute_delegate.py`).
+
 ## Structural root-causes — landed (kept as a record)
 
 The 2026-06-16 diagnosis catalogued a family of drift bugs (Smell A: one fact owned

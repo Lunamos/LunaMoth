@@ -466,12 +466,24 @@ def _build_dynamic_schema_overrides() -> dict:
 DELEGATE_TASK_SCHEMA = _build_dynamic_schema_overrides()
 
 
-registry.register(
-    "delegate_task", "delegation",
-    DELEGATE_TASK_SCHEMA,
-    delegate_task,
-    check_fn=check_delegate_requirements,
-    emoji="🔀",
-    max_result_size_chars=100_000,
-    dynamic_schema_overrides=_build_dynamic_schema_overrides,
-)
+# SHELVED, NOT DELETED (owner, 2026-06-30): delegate_task is kept here but NOT
+# registered, so AST discovery never exposes it and the chara never sees it (nor
+# is delegation mentioned anywhere in the prompt). Reason: the per-child timeout
+# is defined but unenforced (`fut.result()` blocks with no timeout, and the pool
+# shutdown waits too), so a worker whose LLM/inner tool stalls hangs the whole
+# turn — a real "stuck" failure mode that violates the no-infinite-wait rule.
+# Re-enabling requires porting hermes's ENFORCED per-child timeout + non-blocking
+# shutdown + a real timeout tool_error (the thread can't be killed, but the parent
+# must stop waiting). Tracked in docs/OPEN-WORK.md (Part 1). Flip to True after that.
+_DELEGATE_ENABLED = False
+
+if _DELEGATE_ENABLED:
+    registry.register(
+        "delegate_task", "delegation",
+        DELEGATE_TASK_SCHEMA,
+        delegate_task,
+        check_fn=check_delegate_requirements,
+        emoji="🔀",
+        max_result_size_chars=100_000,
+        dynamic_schema_overrides=_build_dynamic_schema_overrides,
+    )
