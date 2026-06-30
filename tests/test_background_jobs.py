@@ -55,6 +55,22 @@ def test_collect_watch_notes_leaves_completions_for_agent_layer():
     assert left == {"completion", "image_gen"}
 
 
+def test_has_pending_notifications_skips_consumed_completions():
+    """The wake peek must agree with drain_notifications: a queue holding only an
+    already-consumed completion is NOT pending (else the supervisor fires a no-op
+    react). A delegate/image_gen event (never skipped) IS pending."""
+    from lunamoth.tools.builtin._process_registry import ProcessRegistry
+    reg = ProcessRegistry()
+    assert reg.has_pending_notifications() is False
+    reg.completion_queue.put({"type": "completion", "session_id": "p1", "exit_code": 0})
+    reg._completion_consumed.add("p1")  # model already polled it
+    assert reg.has_pending_notifications() is False  # consumed → not pending
+    reg.completion_queue.put({"type": "delegate", "status": "done", "results": []})
+    assert reg.has_pending_notifications() is True   # delegate always surfaces
+    # Peeking did not consume anything.
+    assert {e.get("type") for e in reg.drain_notifications()} == {"delegate"}
+
+
 def test_drain_watch_notes_partitions_by_type():
     from lunamoth.tools.builtin._process_registry import ProcessRegistry
     reg = ProcessRegistry()
@@ -103,8 +119,48 @@ def test_agent_injects_background_notice_into_context(agent):
 def test_no_notices_no_injection(agent):
     s = agent.make_session()
     before = len(s.context.messages)
-    agent._inject_background_notices(s)  # nothing pending
+    assert agent._inject_background_notices(s) == ""  # nothing pending → "" returned
     assert len(s.context.messages) == before
+
+
+# ---- pending_notices peek + the completion-WAKE turn (stream_react) -------------
+
+def test_pending_notices_peek_is_nondestructive(agent):
+    assert agent.pending_notices() is False
+    reg = get_registry(agent.tools._ctx())
+    reg.completion_queue.put({"type": "image_gen", "status": "ready", "path": "works/x.png"})
+    # peeking twice must NOT consume the notice (the supervisor polls it repeatedly)
+    assert agent.pending_notices() is True
+    assert agent.pending_notices() is True
+    assert agent.tools.background_notices()  # still drainable
+
+
+def test_inject_returns_the_text(agent):
+    s = agent.make_session()
+    reg = get_registry(agent.tools._ctx())
+    reg.completion_queue.put({"type": "delegate", "status": "done",
+                              "results": [{"task_index": 0, "status": "completed", "summary": "ok"}]})
+    text = agent._inject_background_notices(s)
+    assert "subtask 0" in text and "ok" in text
+
+
+def test_stream_react_is_noop_when_nothing_pending(agent):
+    s = agent.make_session()
+    before = len(s.context.messages)
+    evs = list(agent.stream_react(s))
+    assert evs == []                          # no turn ran
+    assert len(s.context.messages) == before  # context untouched
+
+
+def test_stream_react_drains_and_reacts(agent):
+    s = agent.make_session()
+    reg = get_registry(agent.tools._ctx())
+    reg.completion_queue.put({"type": "image_gen", "status": "ready", "path": "works/x.png"})
+    list(agent.stream_react(s))  # exhaust the turn
+    # the finished job was drained into context as a USER message (like a user word)…
+    assert any(r == "user" and "works/x.png" in c for r, c in s.context.pairs())
+    # …and the queue is now empty (the wake consumed it; no re-wake loop)
+    assert agent.pending_notices() is False
 
 
 # ---- kill_all: reap a chara's background process groups at session teardown -----

@@ -38,16 +38,18 @@ history. The one deliberately-unbuilt item, **worth remembering**:
   blocks the parent. To shelve again: wrap the top-level `registry.register` in
   `if False:` (the discovery AST-scan only imports modules with a top-level register).
 
-- **Background-job completion WAKE regardless of mode — OPEN (P2).** Both async tools
-  (`generate_image`, `delegate_task`) post a completion event to the process registry,
-  and `agent._inject_background_notices` drains it as a synthetic user message — but
-  only at a **turn boundary** (next user message) or a **live-mode idle tick**. In
-  **chat mode** with no incoming message, a finished job waits until the user next
-  speaks; nothing proactively wakes the agent. Desired: when a completion event lands,
-  trigger ONE drain-and-react turn even in chat mode (a new wake source distinct from
-  the autonomous idle loop, one-shot, not full self-work) — the cross-process piece
-  (the agent runs in the child; the supervisor drives turns). Until then, completions
-  surface promptly in live mode and on the next message in chat mode.
+- **Background-job completion WAKE regardless of mode — DONE (2026-06-30).** A finished
+  async job (image gen / delegate / background terminal) now wakes the chara to react,
+  in BOTH live and chat mode, exactly like a user message — the same logic for both,
+  since a job finishing IS a synthetic user turn. Mechanics: `StateSnapshot.pending_notices`
+  is a cheap non-destructive peek (`gateway.has_pending_notifications`); the supervisor's
+  idle loop reads it BEFORE the mode branch and drives a one-shot `react` RPC →
+  `agent.stream_react`, which drains the notice into context (user role) and runs the
+  responsive reply loop (a no-op if nothing pending). `react` is a low-priority stream
+  kind like `idle`: a real user `send` supersedes it; `react` never supersedes a real
+  turn (it raises -32011 when one is in flight, and the supervisor skips — that turn
+  drains the notice itself). Not full self-work — chat mode stays reply-only; the wake
+  fires only when there's a real completion to react to.
 
 ## Structural root-causes — landed (kept as a record)
 

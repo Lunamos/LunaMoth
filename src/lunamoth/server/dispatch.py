@@ -115,7 +115,7 @@ class JsonRpcDispatcher:
         self.handle.set_clarify_hook(self._clarify_hook)
         self._lock = threading.RLock()
         self._stream_thread: threading.Thread | None = None
-        self._stream_kind: str = ""  # kind of the in-flight stream (send|event|idle)
+        self._stream_kind: str = ""  # kind of the in-flight stream (send|event|idle|react)
         self._stream_interrupt = threading.Event()
         self._pending_permissions: dict[str, _PendingPermission] = {}
         self._pending_clarifies: dict[str, _PendingClarify] = {}
@@ -162,6 +162,8 @@ class JsonRpcDispatcher:
                 return self._send(rid, params, wants_response)
             elif method == "idle":
                 return self._idle(rid, params, wants_response)
+            elif method == "react":
+                return self._react(rid, params, wants_response)
             elif method == "event":
                 return self._event(rid, params, wants_response)
             elif method == "greet":
@@ -254,6 +256,16 @@ class JsonRpcDispatcher:
         if params:
             raise RpcError(-32602, "idle takes no params")
         self._start_stream("idle", rid, wants_response, self.handle.stream_idle)
+        return None
+
+    def _react(self, rid: Any, params: dict[str, Any], wants_response: bool) -> None:
+        """Completion-wake turn: drain finished background jobs and react to them
+        (a no-op stream if nothing is pending). Mode-independent — driven by the
+        supervisor when the snapshot reports `pending_notices`."""
+        self._require_attached()
+        if params:
+            raise RpcError(-32602, "react takes no params")
+        self._start_stream("react", rid, wants_response, self.handle.stream_react)
         return None
 
     def _event(self, rid: Any, params: dict[str, Any], wants_response: bool) -> None:
@@ -409,7 +421,7 @@ class JsonRpcDispatcher:
             if self._closed:
                 raise RpcError(-32002, "session is closing")
             if self._is_streaming_locked():
-                if self._stream_kind == "idle":
+                if self._stream_kind in ("idle", "react"):
                     self._stream_interrupt.set()
                     superseding = self._stream_thread
                 else:
@@ -475,11 +487,14 @@ class JsonRpcDispatcher:
         superseding: threading.Thread | None = None
         with self._lock:
             if self._is_streaming_locked():
-                # A human turn (send/event) supersedes the chara's own idle
-                # work: stop the idle stream and take over, rather than failing
-                # the operator with "a stream is already in flight". Two human
-                # turns at once still collide (that is a real client bug).
-                if kind in ("send", "event") and self._stream_kind == "idle":
+                # A human turn (send/event) supersedes the chara's own background
+                # work — an idle self-work turn OR a completion-wake react turn:
+                # stop it and take over, rather than failing the operator with
+                # "a stream is already in flight". A react never supersedes (if a
+                # turn is in flight it raises and the supervisor skips — the running
+                # turn drains the notice anyway). Two human turns at once still
+                # collide (that is a real client bug).
+                if kind in ("send", "event") and self._stream_kind in ("idle", "react"):
                     self._stream_interrupt.set()
                     superseding = self._stream_thread
                 else:

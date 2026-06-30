@@ -517,6 +517,51 @@ class LunaMothAgent:
                 if partial:
                     session.context.add("assistant", partial + self.llm.INTERRUPT_MARK)
 
+    def stream_react(self, session: Session):
+        """React to a finished background job (image gen, delegate, background
+        terminal) EXACTLY as if its completion notice were a user message: drain the
+        pending notices into context (user role) and run the responsive reply loop,
+        so the chara can speak about the result. A NO-OP (yields nothing) when nothing
+        is pending. This is the completion-WAKE turn — mode-independent (it works the
+        same whether the chara is in live or chat mode, because a job finishing is
+        like a user speaking up); the supervisor drives it when `pending_notices` is
+        set on the snapshot, regardless of autonomy."""
+        injected = self._inject_background_notices(session)
+        if not injected:
+            return  # nothing finished — don't burn a turn
+        self.state.clear_rest()  # a finished job wakes it, like a user word
+        self.tools.reset_guardrails()
+        self.audit.write("background_reaction", text=injected[:300])
+        scan_text = self._scan_text(session, injected)
+        stable = self._stable_prefix()
+        volatile = self._volatile_tail(scan_text, session)
+        agent_loop = self._agent_loop_active()
+        speech: list[str] = []
+        committed = False
+        try:
+            view = self._context_view(session)
+            _append_request_log("react", stable + volatile, view,
+                                 self.tools.schemas_names(), self.settings.model)
+            stream = self._reply_stream(
+                injected, view, stable, volatile,
+                in_context=True, record=session.context.add_message,
+                record_volatile=session.context.messages.append,
+            )
+            for ev in stream:
+                if isinstance(ev, TextDelta):
+                    speech.append(ev.text)
+                yield ev
+            committed = True
+            if not agent_loop:
+                reply = "".join(speech).strip()
+                if reply:
+                    session.context.add("assistant", reply)
+        finally:
+            if not committed and not agent_loop:
+                partial = "".join(speech).strip()
+                if partial:
+                    session.context.add("assistant", partial + self.llm.INTERRUPT_MARK)
+
     def _invalidate_stable_prefix(self) -> None:
         self._stable_prefix_cache = None
 
@@ -1062,16 +1107,29 @@ class LunaMothAgent:
     def _now_text(self) -> str:
         return datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    def _inject_background_notices(self, session: Session) -> None:
-        """Drain finished background jobs (image gen, background terminal) and inject
-        them as a synthetic user message so the chara reacts this turn — the
-        turn-boundary drain hermes runs after each loop. Best-effort; never raises."""
+    def _inject_background_notices(self, session: Session) -> str:
+        """Drain finished background jobs (image gen, delegate, background terminal)
+        and inject them as a synthetic user message so the chara reacts — the
+        turn-boundary drain hermes runs after each loop. Best-effort; never raises.
+        Returns the injected text ("" when nothing was pending)."""
         try:
             notices = self.tools.background_notices()
         except Exception:  # noqa: BLE001 — notifications never break a turn
-            return
+            return ""
         if notices:
-            session.context.add("user", "\n\n".join(notices))
+            text = "\n\n".join(notices)
+            session.context.add("user", text)
+            return text
+        return ""
+
+    def pending_notices(self) -> bool:
+        """Are any finished-background-job notices waiting to be drained? A cheap,
+        non-destructive peek (does NOT consume) — the supervisor reads it off the
+        snapshot to decide whether to drive a completion-wake turn."""
+        try:
+            return self.tools.has_pending_notifications()
+        except Exception:  # noqa: BLE001
+            return False
 
     def _note_time_gap(self, session: Session) -> None:
         """One neutral line when a long silence ends — sparse by construction."""

@@ -493,6 +493,32 @@ class CharaChild:
                 # doesn't compound toward suspension or the 1800s cap.
                 self.restart.note_healthy_if_due()
                 snap = await self.snapshot(silent=True)
+                # Completion WAKE — mode-INDEPENDENT (works the same in live and
+                # chat): a finished background job (image gen / delegate / background
+                # terminal) wakes the chara to react to it, exactly like a user
+                # message speaking up. Driven only when no client is streaming; the
+                # `react` RPC raises -32011 if a turn is already in flight, in which
+                # case that turn drains the notice itself, so we just back off. After
+                # reacting we bust the snapshot cache and re-loop so the mode logic
+                # below sees the drained (no-longer-pending) state.
+                if snap.get("pending_notices") and not self._client_stream_ids:
+                    # `snap` is TTL-cached (SNAPSHOT_TTL), so pending_notices can be
+                    # stale — a normal turn may have already drained the notice.
+                    # Re-read FRESH before waking so we never drive a no-op react on
+                    # stale data (and so a real completion is seen promptly).
+                    self._snap_cache = None
+                    snap = await self.snapshot(silent=True)
+                    if snap.get("pending_notices") and not self._client_stream_ids:
+                        try:
+                            await self.private_call("react", {}, timeout=3600.0)
+                        except Exception:  # noqa: BLE001
+                            if self.proc is None or self.proc.returncode is not None:
+                                return
+                            await asyncio.sleep(1.0)  # a turn is already running; it drains it
+                        self._snap_cache = None
+                        continue
+                    # fresh read shows it was already drained → fall through with the
+                    # fresh snapshot (the mode logic below uses it).
                 # Autonomous running is OFF (operator toggled it off on the
                 # AUTONOMY is the chara's `mode`: live = autonomous (the full
                 # lifecycle below), chat = a plain chat agent that NEVER works on

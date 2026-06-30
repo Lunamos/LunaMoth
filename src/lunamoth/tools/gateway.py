@@ -151,6 +151,19 @@ class ToolGateway:
         except Exception:  # noqa: BLE001 — notifications are best-effort, never fatal
             return []
 
+    def has_pending_notifications(self) -> bool:
+        """Cheap, non-destructive: is there a finished-background-job notice waiting
+        to be drained? Read by the snapshot so the supervisor can drive a
+        completion-wake turn. Does NOT consume the queue."""
+        ctx = self._ctx_obj
+        reg = getattr(ctx, "processes", None) if ctx is not None else None
+        try:
+            # Mirror drain_notifications' skip logic (an already-consumed completion
+            # is not pending), so the wake never fires a no-op turn.
+            return bool(reg is not None and reg.has_pending_notifications())
+        except Exception:  # noqa: BLE001
+            return False
+
     def _code_dispatch(self, name: str, args: dict) -> str:
         """The tool surface execute_code exposes to sandboxed Python: same gate +
         guard + audit as a model call, returning the raw JSON string."""

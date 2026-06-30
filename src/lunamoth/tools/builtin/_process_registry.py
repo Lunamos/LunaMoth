@@ -502,6 +502,21 @@ class ProcessRegistry:
             results.append(evt)
         return results
 
+    def has_pending_notifications(self) -> bool:
+        """Non-destructive: is there at least one event that drain_notifications would
+        actually surface? Mirrors that method's skip logic (an already-consumed
+        `completion` is popped-and-skipped, so a queue holding ONLY consumed
+        completions is NOT pending) — so the supervisor's completion-wake never fires
+        a no-op turn on a queue that would drain to nothing. Peeks under the queue
+        mutex; never consumes."""
+        with self.completion_queue.mutex:
+            items = list(self.completion_queue.queue)
+        for evt in items:
+            if evt.get("type") == "completion" and self.is_completion_consumed(evt.get("session_id", "")):
+                continue
+            return True
+        return False
+
     def drain_watch_notes(self) -> list[dict]:
         """Pop ONLY ``watch_*`` events (the terminal tool's inline-in-result surface),
         re-queuing every other event (completion / image_gen) untouched for

@@ -12,7 +12,18 @@ import json
 import pytest
 
 from lunamoth.tools.builtin import browser, _browser_driver as drv
+from lunamoth.tools import registry as _registry_mod
 from lunamoth.tools.registry import registry, discover_builtin_tools
+
+
+@pytest.fixture(autouse=True)
+def _clear_check_fn_cache():
+    """The registry caches check_fn results ~30s. These tests monkeypatch the
+    browser-driver availability, so a value cached by an EARLIER test file (within
+    the TTL) would leak in and make the gate non-deterministic across orderings.
+    Clear it before each test so the gate reflects this test's patched state."""
+    _registry_mod._check_fn_cache.clear()
+    yield
 
 
 # ---------------------------------------------------------------------------

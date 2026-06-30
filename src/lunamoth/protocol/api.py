@@ -100,6 +100,10 @@ class StateSnapshot:
     sprite_url: str = ""
     bg_url: str = ""
     keyvisual_url: str = ""
+    # A finished background job (image gen / delegate / background terminal) is
+    # waiting to be drained. The supervisor reads this to drive a completion-wake
+    # turn (stream_react) regardless of autonomy mode. Cheap, non-destructive.
+    pending_notices: bool = False
     # The chara's provider endpoint, so a per-chara model picker can show WHICH
     # saved provider key is active (matched by provider+base_url). '' when unset.
     base_url: str = ""
@@ -250,6 +254,9 @@ class CharaHandle:
     def stream_idle(self) -> "Iterator[Event]":
         return self._agent.stream_think(self._session)
 
+    def stream_react(self) -> "Iterator[Event]":
+        return self._agent.stream_react(self._session)
+
     # ---- commands ----------------------------------------------------------------
 
     def command(self, line: str) -> Reply:
@@ -274,6 +281,7 @@ class CharaHandle:
         visuals = self._card_visuals()
         snap = StateSnapshot(
             char_name=a.char_name(), lang=a.lang, mode=a.settings.mode,
+            pending_notices=a.pending_notices(),
             provider=a.settings.provider, base_url=a.settings.base_url,
             model=a.settings.model,
             reasoning=a.settings.reasoning or "medium",

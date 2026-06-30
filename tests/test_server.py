@@ -47,6 +47,9 @@ class DummyHandle:
     def stream_idle(self):
         yield TextDelta("idle", "muse")
 
+    def stream_react(self):
+        return iter(())  # nothing pending → a no-op completion-wake turn
+
     def command(self, line: str):
         return Reply(True, f"ran {line}", {"line": line}, verbose=False)
 
@@ -324,6 +327,57 @@ def test_human_send_supersedes_an_in_flight_idle_turn():
     assert done["result"]["ok"] is True
     texts = [f["params"]["text"] for f in frames if f.get("method") == "event"]
     assert "reply: " in texts and "hi" in texts  # the human's turn ran
+
+
+class SlowReactHandle(DummyHandle):
+    """A long completion-wake (react) turn the human should be able to supersede."""
+    def __init__(self):
+        super().__init__()
+        self.react_closed = threading.Event()
+
+    def stream_react(self):
+        try:
+            yield TextDelta("the image is ready", "say")
+            time.sleep(1.0)
+            yield TextDelta(" — here it is", "say")
+        finally:
+            self.react_closed.set()
+
+    def stream_user(self, text: str):
+        yield TextDelta("reply: ")
+        yield TextDelta(text)
+
+
+def test_human_send_supersedes_an_in_flight_react_turn():
+    """A completion-wake (react) turn is low-priority like idle: when the human
+    speaks mid-react, the human turn takes over rather than failing with -32011."""
+    handle = SlowReactHandle()
+    dispatch, frames = make_dispatcher(handle)
+    dispatch.dispatch({"jsonrpc": "2.0", "id": 1, "method": "attach", "params": {}})
+    assert dispatch.dispatch({"jsonrpc": "2.0", "id": 2, "method": "react", "params": {}}) is None
+    deadline = time.time() + 1.0
+    while time.time() < deadline and not [f for f in frames if f.get("method") == "event"]:
+        time.sleep(0.01)
+    assert dispatch.dispatch({"jsonrpc": "2.0", "id": 3, "method": "send", "params": {"text": "hi"}}) is None
+    assert handle.react_closed.wait(1.0)  # the react turn was wound down
+    done = wait_response(frames, 3, timeout=2.0)
+    assert done["result"]["ok"] is True
+    texts = [f["params"]["text"] for f in frames if f.get("method") == "event"]
+    assert "reply: " in texts and "hi" in texts
+
+
+def test_react_does_not_supersede_a_human_turn():
+    """A react never preempts a real turn: if one is in flight, react is refused
+    (-32011) and the supervisor simply skips — the running turn drains the notice."""
+    handle = SlowHandle()
+    dispatch, frames = make_dispatcher(handle)
+    dispatch.dispatch({"jsonrpc": "2.0", "id": 1, "method": "attach", "params": {}})
+    assert dispatch.dispatch({"jsonrpc": "2.0", "id": 2, "method": "send", "params": {"text": "a"}}) is None
+    deadline = time.time() + 1.0
+    while time.time() < deadline and not [f for f in frames if f.get("method") == "event"]:
+        time.sleep(0.01)
+    resp = dispatch.dispatch({"jsonrpc": "2.0", "id": 3, "method": "react", "params": {}})
+    assert resp["error"]["code"] == -32011
 
 
 def test_two_human_turns_still_collide():
