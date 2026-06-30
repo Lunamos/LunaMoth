@@ -77,10 +77,15 @@ const SORTS: ReadonlyArray<readonly [string, TKey]> = [
   ["newest", "market-sort-newest"],
 ] as const;
 
-// Curated common tags (the API has no facet endpoint) — quick filter chips.
+// Quick filter chips. character-tavern has no tag-facet endpoint, so this is a curated
+// set drawn from the catalog's ACTUAL most-common tags (aggregated from the popular feed),
+// cleaned of meta-noise (english / sfw / anypov / original-character≈oc). Not exhaustive —
+// the catalog has 700+ tags; these are the high-traffic genre/theme/character ones. Refine
+// further by combining a chip with a search query.
 const TAGS = [
-  "female", "male", "anime", "fantasy", "romance", "adventure", "rpg",
-  "sci-fi", "horror", "comedy", "slice of life", "action", "mystery", "wholesome",
+  "female", "male", "oc", "anime", "fantasy", "sci-fi", "romance", "drama",
+  "adventure", "rpg", "action", "comedy", "horror", "magic", "villain",
+  "dark fantasy", "multiple characters", "cute", "wholesome",
 ] as const;
 
 const PAGE_SIZE = 24;
