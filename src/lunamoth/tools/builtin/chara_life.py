@@ -1,10 +1,11 @@
-"""Chara-life tools — LunaMoth's own, with no hermes counterpart: speak, rest,
-wish (add/set — the renamed "goal"), request_permission. These are what make a
-chara a living being rather than a workhorse; they stay through the hermes-tool
-migration.
+"""Chara-life tools — LunaMoth's own, with no hermes counterpart: speak and rest.
+These are what make a chara a living being rather than a workhorse; they stay
+through the hermes-tool migration.
 
-`wish` (愿望) is deliberately NOT hermes' `todo`: todo is a forced task-completion
-list; a wish is what the character LIVES FOR — its own aspiration, never forced.
+The chara's own lasting threads are NOT here — they live in the `task` tool
+(tools/task.py), oriented by the user-owned aspiration (tools/polaris.py); `task`
+and `todo` are deliberately distinct. The old chara-mutable wish/goal tool was
+removed (a chara no longer owns its value-direction — the aspiration does).
 
 There is no `send_file` tool: like hermes, the chara puts a file in front of the
 user by writing a ``MEDIA:<workspace path>`` line in its reply — the agent extracts
@@ -144,8 +145,9 @@ registry.register(
 )
 
 
-# Polaris (the chara's north-star) is USER-owned and READ-ONLY to the chara — it
-# is injected into the prompt each turn but there is deliberately NO tool to add,
-# edit, or complete it. (The old chara-mutable add_wish/set_wish_status tools were
-# removed: a chara no longer manages a goal list; its one aim is the user's Polaris,
-# which by design is never finished.)
+# Polaris (the chara's aspiration / north-star) is USER-owned and READ-ONLY to the
+# chara — injected each turn, with deliberately NO tool to add, edit, or complete it.
+# (The old chara-mutable add_wish/set_wish_status tools were removed: the chara no
+# longer owns its value-direction. It DOES set its own instrumental tasks toward the
+# aspiration via the `task` tool — but the aspiration itself, by design, is never
+# finished and never the chara's to change.)

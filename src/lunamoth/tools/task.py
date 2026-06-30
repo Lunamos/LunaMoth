@@ -32,6 +32,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ._atomic import atomic_write_text
+
 _MAX_CONTENT = 280   # rendered every turn — keep each task short
 _MAX_ACTIVE = 12     # a few real threads, never a scatter of trivia
 _MAX_DONE = 50       # sealed records kept for the UI fold; oldest trimmed beyond this
@@ -55,10 +57,7 @@ class TaskStore:
 
     def _write(self, data: dict[str, Any]) -> None:
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(
-                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            atomic_write_text(self.path, json.dumps(data, ensure_ascii=False, indent=2))
         except OSError:
             pass
 
@@ -145,8 +144,13 @@ class TaskStore:
         done = [t for t in data["tasks"] if t.get("status") == "done"]
         if len(done) <= _MAX_DONE:
             return
-        drop = {id(t) for t in sorted(done, key=lambda t: t.get("done_at") or 0)[: len(done) - _MAX_DONE]}
-        data["tasks"] = [t for t in data["tasks"] if id(t) not in drop]
+        # Identify the oldest sealed records by their stable task id (not object
+        # identity), so the keep/drop decision survives any copy or reserialization.
+        drop_ids = {t.get("id") for t in sorted(done, key=lambda t: t.get("done_at") or 0)[: len(done) - _MAX_DONE]}
+        data["tasks"] = [
+            t for t in data["tasks"]
+            if not (t.get("status") == "done" and t.get("id") in drop_ids)
+        ]
 
     # ---- seeding from the card --------------------------------------------
     def seed_once(self, value: Any) -> bool:

@@ -4,7 +4,7 @@ LunaMoth's runtime in two ways only:
 
 1. Handlers take ``(args: dict, ctx: ToolContext) -> str`` and return a JSON
    STRING (hermes' handler contract). The runtime touchpoints (sandbox, state,
-   shell, llm, transcript, memory, wishes, skills, mcp) ride on ``ctx`` injected
+   shell, llm, transcript, memory, polaris, task, skills, mcp) ride on ``ctx`` injected
    at dispatch time — hermes threads a ``task_id`` and looks up a per-task
    environment; LunaMoth is one-process-one-chara so there is exactly one ctx.
 2. The dispatch error sanitizer and the default result-size are local (hermes

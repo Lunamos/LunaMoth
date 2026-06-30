@@ -21,6 +21,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ._atomic import atomic_write_text
+
 
 class PolarisStore:
     """A single user-owned north-star string, read-only to the chara."""
@@ -41,10 +43,8 @@ class PolarisStore:
 
     def _save(self, text: str) -> None:
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(
-                json.dumps({"polaris": text}, ensure_ascii=False, indent=2),
-                encoding="utf-8",
+            atomic_write_text(
+                self.path, json.dumps({"polaris": text}, ensure_ascii=False, indent=2)
             )
         except OSError:
             pass

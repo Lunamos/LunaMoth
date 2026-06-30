@@ -60,6 +60,28 @@ def test_missing_id_raises(store):
         store.complete("nope")
 
 
+def test_done_records_trim_to_cap_dropping_oldest(store):
+    from lunamoth.tools.task import _MAX_DONE
+
+    # Seal more than the cap (one at a time — active cap forbids a big batch).
+    for i in range(_MAX_DONE + 3):
+        item = store.add(f"thread {i}")
+        store.complete(item["id"])
+    done = store.done()
+    assert len(done) == _MAX_DONE
+    # The three OLDEST (t1, t2, t3) were dropped; the newest survive.
+    ids = {t["id"] for t in done}
+    assert "t1" not in ids and "t2" not in ids and "t3" not in ids
+    assert f"t{_MAX_DONE + 3}" in ids
+
+
+def test_atomic_write_leaves_no_temp_files(store, tmp_path):
+    store.add("a thread")
+    store.complete("t1")
+    # No half-written / leftover temp siblings beside task.json.
+    assert [p.name for p in tmp_path.iterdir()] == ["task.json"]
+
+
 def test_seed_once_is_noop_after_chara_edits(store):
     assert store.seed_once("a starter thread") is True
     assert [t["content"] for t in store.active()] == ["a starter thread"]
