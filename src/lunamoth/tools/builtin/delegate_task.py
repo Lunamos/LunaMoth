@@ -39,9 +39,12 @@ import json
 import logging
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 
 from ..registry import TOOL_ERROR_KEY, registry, tool_error
+from ._process_registry import get_registry
 
 logger = logging.getLogger("lunamoth.tools.delegate_task")
 
@@ -347,39 +350,88 @@ def delegate_task(args: dict, ctx) -> str:
         if not str(task.get("goal", "")).strip():
             return tool_error(f"Task {i} is missing a 'goal'.")
 
-    # TRUE PARALLEL FAN-OUT (hermes ThreadPoolExecutor, capped at MAX_CONCURRENT).
-    # A single task still runs (pool of 1). Each worker gets its own LLMClient +
-    # guardrail scope inside _run_single_child; results re-ordered to task index.
-    n = len(task_list)
-    if n == 1:
-        t = task_list[0]
-        results = [_run_single_child(
-            0, str(t["goal"]), t.get("context") or context,
-            t.get("toolsets") or toolsets, ctx, effective_max_iter,
-        )]
-        return json.dumps({"results": results}, ensure_ascii=False)
+    # NON-BLOCKING (2026-06-30): the fan-out runs on a daemon thread and pushes ONE
+    # completion event onto the process registry's queue, which the agent drains at
+    # the next turn boundary (the same background-job shape generate_image uses). The
+    # main agent does NOT wait — it returns immediately and keeps working; the
+    # subagents run alongside it. This is why delegate could be re-enabled: it can no
+    # longer freeze the turn (the old synchronous fan-out + unenforced per-child
+    # timeout was the "stuck" failure mode).
+    reg = get_registry(ctx)
+    job_id = f"delegate-{uuid.uuid4().hex[:8]}"
+    threading.Thread(
+        target=_run_delegate_job,
+        args=(reg, ctx, job_id, task_list, context, toolsets, effective_max_iter),
+        name=job_id, daemon=True,
+    ).start()
+    return json.dumps({
+        "status": "submitted",
+        "job_id": job_id,
+        "n": len(task_list),
+        "note": (
+            f"Delegated {len(task_list)} subtask(s) to run in the BACKGROUND, in "
+            f"parallel (up to {MAX_CONCURRENT} at once). Don't wait on them — continue "
+            "what you were doing. You'll be notified automatically when they finish, "
+            "with each subtask's result; surface anything worth telling your user then."
+        ),
+    }, ensure_ascii=False)
 
+
+def _run_fanout(task_list: list, context, toolsets, ctx, max_iter: int) -> list[dict]:
+    """Run every task through its own scoped child, ENFORCING the per-child timeout
+    (hermes parity — the old code defined the timeout but never applied it, so a
+    stalled worker hung the caller). Always pooled (even one task) so the timeout
+    always applies; results re-ordered to the original task index. A timed-out worker
+    becomes a real `timed_out` result — the parent stops waiting (the leaked worker
+    thread, which Python cannot kill, runs to its own end harmlessly)."""
+    n = len(task_list)
     results_by_index: dict[int, dict] = {}
     workers = min(MAX_CONCURRENT, n)
-    with ThreadPoolExecutor(max_workers=workers,
-                            thread_name_prefix="delegate") as pool:
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="delegate")
+    try:
         futures = {
             pool.submit(
                 _run_single_child,
                 i, str(t["goal"]), t.get("context") or context,
-                t.get("toolsets") or toolsets, ctx, effective_max_iter,
+                t.get("toolsets") or toolsets, ctx, max_iter,
             ): i
             for i, t in enumerate(task_list)
         }
         for fut, i in futures.items():
             try:
-                results_by_index[i] = fut.result()
+                results_by_index[i] = fut.result(timeout=DEFAULT_PER_CHILD_TIMEOUT)
+            except FutureTimeout:
+                results_by_index[i] = _result(
+                    i, "timed_out",
+                    error=f"subtask exceeded the {DEFAULT_PER_CHILD_TIMEOUT}s per-child limit",
+                )
             except Exception as exc:  # noqa: BLE001 - never let one worker abort the batch
                 logger.error("delegate worker %d crashed: %s", i, exc, exc_info=True)
                 results_by_index[i] = _result(i, "failed", error=str(exc))
+    finally:
+        # wait=False: a hung worker thread must not re-block the return (the whole
+        # point of the timeout above). It's daemon-pool work; it finishes on its own.
+        pool.shutdown(wait=False)
+    return [results_by_index[i] for i in range(n)]
 
-    results = [results_by_index[i] for i in range(n)]
-    return json.dumps({"results": results}, ensure_ascii=False)
+
+def _run_delegate_job(reg, ctx, job_id: str, task_list: list, context, toolsets,
+                      max_iter: int) -> None:
+    """Background worker: run the fan-out, then push ONE completion event onto the
+    registry queue. Never raises (it's a daemon thread) — a failure is reported via
+    the queue, never fabricated (mirrors media._run_image_job)."""
+    try:
+        results = _run_fanout(task_list, context, toolsets, ctx, max_iter)
+    except Exception as e:  # noqa: BLE001
+        reg.completion_queue.put({
+            "type": "delegate", "session_id": job_id, "status": "failed",
+            "error": str(e)[:300],
+        })
+        return
+    reg.completion_queue.put({
+        "type": "delegate", "session_id": job_id, "status": "done",
+        "n": len(task_list), "results": results,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -390,14 +442,18 @@ def _delegate_description() -> str:
     return (
         "Delegate one or more self-contained tasks to a scoped subagent that "
         "runs in an ISOLATED context (no access to your conversation history) "
-        "and returns only a final summary — intermediate tool results never "
+        "and reports only a final summary — intermediate tool results never "
         "enter your context. Use this to keep a reasoning-heavy or "
         "data-heavy subtask from flooding your own context window, or to run "
         "several independent subtasks AT THE SAME TIME.\n\n"
-        "Subagents run on your own model with a restricted toolset; a batch runs "
-        f"in PARALLEL (up to {MAX_CONCURRENT} at once) and the results come back "
-        "in task order. A subagent cannot itself delegate. Blocked tools for "
-        "subagents: " + ", ".join(sorted(DELEGATE_BLOCKED_TOOLS)) + "."
+        "This is NON-BLOCKING: the subagents run in the BACKGROUND, alongside you, "
+        "in parallel (up to "
+        f"{MAX_CONCURRENT} at once). The call returns immediately — do NOT wait on "
+        "the results or stop working; keep doing what you were doing. When the "
+        "subtasks finish you are notified automatically, with each subtask's result, "
+        "and you react then (tell your user if it matters). Subagents run on your own "
+        "model with a restricted toolset; one cannot itself delegate. Blocked tools "
+        "for subagents: " + ", ".join(sorted(DELEGATE_BLOCKED_TOOLS)) + "."
     )
 
 
@@ -466,24 +522,24 @@ def _build_dynamic_schema_overrides() -> dict:
 DELEGATE_TASK_SCHEMA = _build_dynamic_schema_overrides()
 
 
-# SHELVED, NOT DELETED (owner, 2026-06-30): delegate_task is kept here but NOT
-# registered, so AST discovery never exposes it and the chara never sees it (nor
-# is delegation mentioned anywhere in the prompt). Reason: the per-child timeout
-# is defined but unenforced (`fut.result()` blocks with no timeout, and the pool
-# shutdown waits too), so a worker whose LLM/inner tool stalls hangs the whole
-# turn — a real "stuck" failure mode that violates the no-infinite-wait rule.
-# Re-enabling requires porting hermes's ENFORCED per-child timeout + non-blocking
-# shutdown + a real timeout tool_error (the thread can't be killed, but the parent
-# must stop waiting). Tracked in docs/OPEN-WORK.md (Part 1). Flip to True after that.
-_DELEGATE_ENABLED = False
-
-if _DELEGATE_ENABLED:
-    registry.register(
-        "delegate_task", "delegation",
-        DELEGATE_TASK_SCHEMA,
-        delegate_task,
-        check_fn=check_delegate_requirements,
-        emoji="🔀",
-        max_result_size_chars=100_000,
-        dynamic_schema_overrides=_build_dynamic_schema_overrides,
-    )
+# RE-ENABLED (owner, 2026-06-30) now that delegation is NON-BLOCKING: the fan-out
+# runs on a daemon thread and reports via the process-registry completion queue (the
+# same background-job shape generate_image uses), and the per-child timeout is now
+# ENFORCED (`fut.result(timeout=…)` + `shutdown(wait=False)` + a real `timed_out`
+# result), so a stalled worker can no longer freeze the turn — the "stuck" failure
+# mode is gone.
+#
+# The register call MUST stay TOP-LEVEL: discovery (`registry._is_registry_register_call`)
+# only AST-scans module-level statements, so wrapping this in any `if` both skips
+# registration AND stops discovery from importing the module — that is exactly how a
+# tool is SHELVED (see web.py). To shelve delegate again: wrap the call below in
+# `if False:` (and note it in docs/OPEN-WORK.md).
+registry.register(
+    "delegate_task", "delegation",
+    DELEGATE_TASK_SCHEMA,
+    delegate_task,
+    check_fn=check_delegate_requirements,
+    emoji="🔀",
+    max_result_size_chars=100_000,
+    dynamic_schema_overrides=_build_dynamic_schema_overrides,
+)

@@ -25,24 +25,29 @@ history. The one deliberately-unbuilt item, **worth remembering**:
   load-bearing for the audit trail's ordering. Revisit only if throughput becomes a
   real problem.
 
-- **`delegate_task` (parallel sub-agent fan-out) — SHELVED in the foreground**
-  (owner, 2026-06-30). The code is kept in `tools/builtin/delegate_task.py` but NOT
-  registered (`_DELEGATE_ENABLED = False`), so AST discovery never exposes it and the
-  chara never sees it; delegation is mentioned nowhere in the prompt. Why shelved: the
-  per-child timeout (`DEFAULT_PER_CHILD_TIMEOUT = 600`) is **defined but unenforced** —
-  `fut.result()` blocks with no timeout, the single-task path runs inline with none,
-  and the `with ThreadPoolExecutor()` exit does `shutdown(wait=True)` which blocks
-  again — so a worker whose LLM stream or inner tool (terminal/network/browser) stalls
-  hangs the whole turn (the observed "stuck"), violating the no-infinite-wait rule.
-  **Re-enable checklist** (apple-to-apple with hermes, which enforces it): (1)
-  `fut.result(timeout=DEFAULT_PER_CHILD_TIMEOUT)` + catch `TimeoutError` → a real
-  `timed_out` tool_error for that worker, others unaffected; (2) the single-task inline
-  path gets the same bound; (3) `shutdown(wait=False)` so a hung thread can't re-block
-  the return; (4) optional wall-clock deadline inside the worker loop (not only the
-  50-step cap). Caveat: a Python thread can't be force-killed — the stuck worker keeps
-  running in the background, but the parent must STOP waiting and surface the timeout.
-  Flip `_DELEGATE_ENABLED` to True once (1)–(3) land. Tests already assert the shelved
-  state (`tests/test_execute_delegate.py`).
+- **`delegate_task` — RE-ENABLED as a NON-BLOCKING background job** (owner, 2026-06-30).
+  Was briefly shelved for hanging the turn; now fixed and live. The fan-out runs on a
+  daemon thread and reports via the process-registry completion queue (the same
+  background-job shape `generate_image` uses): the call returns a `{status: submitted}`
+  receipt immediately, the subagents run alongside the main agent, and the aggregated
+  results are drained as a synthetic user message at the next turn boundary. The
+  per-child timeout is now ENFORCED (`_run_fanout`: always-pooled `fut.result(timeout=
+  DEFAULT_PER_CHILD_TIMEOUT)` → a real `timed_out` result; `shutdown(wait=False)` so a
+  hung worker can't re-block). Caveat (documented in code): a Python thread can't be
+  force-killed, so a stuck worker runs to its own end in the background — but it never
+  blocks the parent. To shelve again: wrap the top-level `registry.register` in
+  `if False:` (the discovery AST-scan only imports modules with a top-level register).
+
+- **Background-job completion WAKE regardless of mode — OPEN (P2).** Both async tools
+  (`generate_image`, `delegate_task`) post a completion event to the process registry,
+  and `agent._inject_background_notices` drains it as a synthetic user message — but
+  only at a **turn boundary** (next user message) or a **live-mode idle tick**. In
+  **chat mode** with no incoming message, a finished job waits until the user next
+  speaks; nothing proactively wakes the agent. Desired: when a completion event lands,
+  trigger ONE drain-and-react turn even in chat mode (a new wake source distinct from
+  the autonomous idle loop, one-shot, not full self-work) — the cross-process piece
+  (the agent runs in the child; the supervisor drives turns). Until then, completions
+  surface promptly in live mode and on the next message in chat mode.
 
 ## Structural root-causes — landed (kept as a record)
 

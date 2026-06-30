@@ -747,6 +747,22 @@ def format_background_notification(evt: dict) -> str:
                     f"Show it to your user by writing a line MEDIA:{p} in your reply.]")
         return ("[Background image generation FAILED: "
                 f"{evt.get('error') or 'unknown error'}. Nothing was saved.]")
+    if etype == "delegate":
+        if evt.get("status") != "done":
+            return ("[Background delegation FAILED: "
+                    f"{evt.get('error') or 'unknown error'}. No subtasks completed.]")
+        results = evt.get("results") or []
+        lines = []
+        for r in results:
+            idx = r.get("task_index")
+            status = r.get("status", "?")
+            body = (r.get("summary") or r.get("error") or "").strip()
+            lines.append(f"  • subtask {idx} [{status}]: {body}" if body
+                         else f"  • subtask {idx} [{status}]")
+        joined = "\n".join(lines)
+        return ("[Your delegated subtasks finished — their results are below. Read them, "
+                "then carry on with whatever you were doing (tell your user if it matters):\n"
+                f"{joined}]")
     if etype == "completion":
         sid = str(evt.get("session_id") or "")
         cmd = str(evt.get("command") or "")

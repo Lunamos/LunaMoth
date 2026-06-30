@@ -14,6 +14,19 @@ from lunamoth.tools.builtin import delegate_task as dt_mod
 from lunamoth.tools.registry import registry
 
 
+def _drain_delegate(ctx, args, timeout=5.0):
+    """delegate_task is NON-BLOCKING: it submits a background fan-out and returns
+    {status: submitted}. This helper submits, then blocks on the registry's
+    completion queue and returns the drained completion event — which carries the
+    same `results` array the old synchronous call returned. On a validation/paused/
+    depth error (no job started) it returns the error dict instead."""
+    out = json.loads(dt_mod.delegate_task(args, ctx))
+    if out.get("status") != "submitted":
+        return out
+    from lunamoth.tools.builtin._process_registry import get_registry
+    return get_registry(ctx).completion_queue.get(timeout=timeout)
+
+
 # ---------------------------------------------------------------------------
 # Fakes
 # ---------------------------------------------------------------------------
@@ -108,15 +121,14 @@ def make_ctx(tmp_path, *, dispatch=None, llm=None, tool_access=None,
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
-def test_execute_code_registered_delegate_shelved():
-    """execute_code is live; delegate_task is SHELVED (unregistered) until its
-    per-child timeout is enforced — the chara never sees it. See
-    delegate_task._DELEGATE_ENABLED + docs/OPEN-WORK.md."""
+def test_both_tools_registered():
+    """Both live again: delegate_task was re-enabled once it became non-blocking
+    with an enforced per-child timeout (delegate_task._DELEGATE_ENABLED)."""
     names = registry.get_all_tool_names()
     assert "execute_code" in names
+    assert "delegate_task" in names
     assert registry.get_entry("execute_code").toolset == "code_execution"
-    assert "delegate_task" not in names
-    assert dt_mod._DELEGATE_ENABLED is False
+    assert registry.get_entry("delegate_task").toolset == "delegation"
 
 
 def test_execute_code_schema_shape():
@@ -356,7 +368,7 @@ def test_delegate_single_goal_runs_subturn(tmp_path):
     from lunamoth.protocol.events import TextDelta
     llm = _FakeLLM(events=[TextDelta("Did the thing.", "muse")])
     ctx = make_ctx(tmp_path, dispatch=lambda n, a: "{}", llm=llm)
-    out = json.loads(dt_mod.delegate_task({"goal": "summarize"}, ctx))
+    out = _drain_delegate(ctx, {"goal": "summarize"})
     assert "results" in out
     assert len(out["results"]) == 1
     r = out["results"][0]
@@ -366,12 +378,58 @@ def test_delegate_single_goal_runs_subturn(tmp_path):
     assert "tool_trace" in r
 
 
+def test_delegate_submit_is_non_blocking(tmp_path):
+    """The call returns immediately with a submit receipt — it does NOT block for
+    results (the whole point: subagents run alongside the main agent)."""
+    from lunamoth.protocol.events import TextDelta
+    llm = _FakeLLM(events=[TextDelta("ok", "muse")])
+    ctx = make_ctx(tmp_path, dispatch=lambda n, a: "{}", llm=llm)
+    out = json.loads(dt_mod.delegate_task({"goal": "x"}, ctx))
+    assert out["status"] == "submitted"
+    assert out["n"] == 1 and "job_id" in out
+    assert "results" not in out  # didn't wait for them
+
+
+def test_delegate_per_child_timeout_is_enforced(tmp_path, monkeypatch):
+    """A worker that stalls past the per-child timeout becomes a real `timed_out`
+    result instead of hanging the fan-out (the fix for the 'stuck' failure mode)."""
+    monkeypatch.setattr(dt_mod, "DEFAULT_PER_CHILD_TIMEOUT", 0.2)
+
+    class _SlowLLM:
+        cfg = _FakeLLMCfg()
+
+        def is_live(self):
+            return True
+
+        def stream_agent(self, *a, **k):
+            import time as _t
+            _t.sleep(1.0)  # outlives the 0.2s per-child limit
+            from lunamoth.protocol.events import TextDelta
+            yield TextDelta("late", k.get("channel", "say"))
+
+    ctx = make_ctx(tmp_path, dispatch=lambda n, a: "{}", llm=_SlowLLM())
+    evt = _drain_delegate(ctx, {"goal": "slow"}, timeout=5.0)
+    assert evt["results"][0]["status"] == "timed_out"
+
+
+def test_delegate_completion_event_formats(tmp_path):
+    """The delegate completion event renders as a model-facing notice line."""
+    from lunamoth.tools.builtin._process_registry import format_background_notification
+    line = format_background_notification({
+        "type": "delegate", "status": "done",
+        "results": [{"task_index": 0, "status": "completed", "summary": "found it"}],
+    })
+    assert "subtask 0" in line and "found it" in line
+    fail = format_background_notification({"type": "delegate", "status": "failed",
+                                           "error": "boom"})
+    assert "FAILED" in fail and "boom" in fail
+
+
 def test_delegate_batch_parallel_in_order(tmp_path):
     from lunamoth.protocol.events import TextDelta
     llm = _FakeLLM(events=[TextDelta("ok", "muse")])
     ctx = make_ctx(tmp_path, dispatch=lambda n, a: "{}", llm=llm)
-    out = json.loads(dt_mod.delegate_task(
-        {"tasks": [{"goal": "a"}, {"goal": "b"}, {"goal": "c"}]}, ctx))
+    out = _drain_delegate(ctx, {"tasks": [{"goal": "a"}, {"goal": "b"}, {"goal": "c"}]})
     # N tasks -> N results, re-ordered to original task index.
     assert [r["task_index"] for r in out["results"]] == [0, 1, 2]
     assert all(r["status"] == "completed" for r in out["results"])
@@ -401,8 +459,7 @@ def test_delegate_batch_actually_concurrent(tmp_path):
             yield TextDelta("done", channel)
 
     ctx = make_ctx(tmp_path, dispatch=lambda n, a: "{}", llm=_BarrierLLM())
-    out = json.loads(dt_mod.delegate_task(
-        {"tasks": [{"goal": f"t{i}"} for i in range(n)]}, ctx))
+    out = _drain_delegate(ctx, {"tasks": [{"goal": f"t{i}"} for i in range(n)]})
     assert len(out["results"]) == n
     assert all(r["status"] == "completed" for r in out["results"])
     # Each worker ran on its own thread (true fan-out, not the caller thread).
@@ -431,7 +488,7 @@ def test_delegate_spawn_pause(tmp_path):
     finally:
         dt_mod.set_spawn_paused(False)
     # Unpaused again, it runs.
-    out2 = json.loads(dt_mod.delegate_task({"goal": "x"}, ctx))
+    out2 = _drain_delegate(ctx, {"goal": "x"})
     assert out2["results"][0]["status"] == "completed"
 
 
@@ -461,8 +518,7 @@ def test_delegate_per_worker_llm_client(tmp_path):
         parent = _SpyClient(_FakeLLMCfg())   # ctx.llm IS an LLMClient (the spy)
         constructed.clear()                  # ignore the parent's construction
         ctx = make_ctx(tmp_path, dispatch=lambda n, a: "{}", llm=parent)
-        json.loads(dt_mod.delegate_task(
-            {"tasks": [{"goal": "a"}, {"goal": "b"}]}, ctx))
+        _drain_delegate(ctx, {"tasks": [{"goal": "a"}, {"goal": "b"}]})
     finally:
         llm_mod.LLMClient = orig
     # Two workers -> two distinct fresh clients, neither is the parent.
@@ -479,7 +535,7 @@ def test_delegate_blocks_forbidden_tool(tmp_path):
     tool_call = {"function": {"name": "memory", "arguments": "{}"}}
     llm = _FakeLLM(events=[TextDelta("done", "muse")], tool_call=tool_call)
     ctx = make_ctx(tmp_path, dispatch=lambda n, a: dispatched.append(n) or "{}", llm=llm)
-    out = json.loads(dt_mod.delegate_task({"goal": "try memory"}, ctx))
+    out = _drain_delegate(ctx, {"goal": "try memory"})
     r = out["results"][0]
     assert any(t["status"] == "blocked" for t in r["tool_trace"])
     assert "memory" not in dispatched
@@ -498,7 +554,7 @@ def test_delegate_allowed_tool_dispatches(tmp_path):
     tool_call = {"function": {"name": "read_file", "arguments": json.dumps({"path": "x"})}}
     llm = _FakeLLM(events=[TextDelta("done", "muse")], tool_call=tool_call)
     ctx = make_ctx(tmp_path, dispatch=disp, llm=llm)
-    out = json.loads(dt_mod.delegate_task({"goal": "read it"}, ctx))
+    out = _drain_delegate(ctx, {"goal": "read it"})
     r = out["results"][0]
     # read_file is a real registered tool (search group). If present it
     # dispatches; if that sibling group isn't loaded, it's blocked-as-unknown.
