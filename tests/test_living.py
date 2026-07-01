@@ -63,7 +63,7 @@ def test_rest_tool_parses_units(agent):
     assert not a.tools.call("rest", duration="0m")["ok"]
 
 
-def test_idle_tick_carries_only_a_timestamp(agent, monkeypatch):
+def test_idle_tick_carries_timestamp_and_presence_note(agent, monkeypatch):
     a = agent(toolpack="")
     a.transcript.reset()
     s = a.make_session()
@@ -81,9 +81,12 @@ def test_idle_tick_carries_only_a_timestamp(agent, monkeypatch):
 
     monkeypatch.setattr(a, "_reply_stream", capture)
     list(a.stream_think(s))
-    # The convention: a timestamp-only user message = no one is speaking.
-    assert re.fullmatch(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]", seen["text"])
-    assert seen["in_context"] is False  # ephemeral — zero residue in the context
+    # The convention: an idle tick is the real wall-clock time plus a point-of-use
+    # note that no one is present (so the chara doesn't greet its user as if they
+    # arrived). Ephemeral (in_context=False) → zero residue in the durable context.
+    assert re.match(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} — ", seen["text"])
+    assert "not your user arriving" in seen["text"]
+    assert seen["in_context"] is False
 
 
 def test_long_silence_gets_one_gap_note(agent):

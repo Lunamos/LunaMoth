@@ -1181,24 +1181,25 @@ class LunaMothAgent:
 
         try:
             if self.thought_cfg.use_llm:
-                # No invented "internal cycle" instruction: an idle tick is an
-                # EMPTY user message — the documented convention (rules layer)
-                # for "no one is speaking to you; time is passing". What the
-                # chara does with unattended time is the card's business, not
-                # ours. The empty message is ephemeral (in_context=False).
+                # No invented "internal cycle" instruction: an idle tick is a
+                # user message carrying the current wall-clock time plus the
+                # rules-layer IDLE_TICK_NOTE — the documented convention for "no
+                # one is speaking to you; time is passing". The note is folded in
+                # HERE (not just the far-away stable prefix) because the tick is
+                # the last USER-role message each self-work cycle (only the
+                # volatile-tail system blocks follow it), and the model kept
+                # misreading a bare timestamp as its user arriving. What the chara
+                # does with unattended time is the card's business, not ours.
                 #
                 # NO failure fallback: if the request fails (after the client's
                 # own retries) the error propagates to the UI as an error — a
                 # failed request is a failed request, never fabricated output.
-                # The tick is a user message carrying ONLY the current wall-clock
-                # time — the documented convention (rules layer) for "no one is
-                # speaking; real time is passing". It is ephemeral
-                # (in_context=False), so the chara always knows what time it is
-                # with ZERO timestamp residue in the durable context.
+                # The tick is ephemeral (in_context=False), so the chara always
+                # knows what time it is with ZERO residue in the durable context.
                 import time as _time
 
                 self._last_turn_wall = _time.time()
-                tick_text = f"[{self._now_text()}]"
+                tick_text = f"[{self._now_text()} — {rules_layer.IDLE_TICK_NOTE}]"
                 scan_text = self._scan_text(session, tick_text)
                 stable = self._stable_prefix()
                 volatile = self._volatile_tail(scan_text, session)
