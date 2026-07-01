@@ -2389,11 +2389,24 @@ body.dark .no-fallback-row{border-color:var(--hairline)}
   padding:3px 10px; border-radius:999px; font-size:11.5px; cursor:pointer;
 }
 .market-tagchip.on{background:var(--accent-soft); border-color:var(--accent); color:var(--accent-deep)}
+.market-tag-entry{position:relative; margin-top:8px}
 .market-tag-input{
-  width:100%; margin-top:8px; padding:5px 9px; border:1px solid var(--hairline); border-radius:7px;
+  width:100%; padding:5px 9px; border:1px solid var(--hairline); border-radius:7px;
   background:var(--panel); color:var(--text); font-size:12px;
 }
 .market-tag-input:focus{outline:none; border-color:var(--accent)}
+.market-tag-sugg{
+  position:absolute; left:0; right:0; top:calc(100% + 3px); z-index:5;
+  background:var(--panel); border:1px solid var(--hairline); border-radius:8px;
+  box-shadow:0 6px 18px rgba(0,0,0,.14); overflow:hidden; max-height:216px; overflow-y:auto;
+}
+.market-tag-suggrow{
+  display:flex; align-items:baseline; gap:8px; width:100%; text-align:left;
+  padding:6px 10px; background:none; border:0; cursor:pointer; color:var(--text); font-size:12.5px;
+}
+.market-tag-suggrow:hover{background:var(--accent-soft)}
+.market-tag-suggzh{font-weight:500}
+.market-tag-suggen{color:var(--text-3); font-size:11px}
 .market-check{display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text); cursor:pointer; padding:3px 0}
 .market-check input{accent-color:var(--accent)}
 .market-pop-note{font-size:11px; color:var(--text-3); margin-top:4px; line-height:1.4}

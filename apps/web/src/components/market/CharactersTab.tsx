@@ -8,7 +8,8 @@
  * Covers load directly from the storage CDN (resized thumbs). Imported cards land UNLOCKED. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useT, type TKey } from "../../i18n";
+import { useT, useLang, type TKey } from "../../i18n";
+import { FEATURED, tagLabel, suggestTags } from "../../lib/marketTags";
 import { useHub } from "../../state/hub";
 import { rpcErrText } from "../../lib/status";
 import { fileToB64 } from "../../lib/file";
@@ -77,21 +78,11 @@ const SORTS: ReadonlyArray<readonly [string, TKey]> = [
   ["newest", "market-sort-newest"],
 ] as const;
 
-// Quick filter chips. character-tavern has no tag-facet endpoint, so this is a curated
-// set drawn from the catalog's ACTUAL most-common tags (aggregated from the popular feed),
-// cleaned of meta-noise (english / sfw / anypov / original-character≈oc). Not exhaustive —
-// the catalog has 700+ tags; these are the high-traffic genre/theme/character ones. Refine
-// further by combining a chip with a search query.
-const TAGS = [
-  "female", "male", "oc", "anime", "fantasy", "sci-fi", "romance", "drama",
-  "adventure", "rpg", "action", "comedy", "horror", "magic", "villain",
-  "dark fantasy", "multiple characters", "cute", "wholesome",
-] as const;
-
 const PAGE_SIZE = 24;
 
 export function CharactersTab() {
   const t = useT();
+  const { lang } = useLang();
   const { hub, refresh } = useHub();
   const [queryInput, setQueryInput] = useState("");
   const [query, setQuery] = useState(""); // the committed query (drives the fetch)
@@ -192,12 +183,18 @@ export function CharactersTab() {
     setTags((prev) => (prev.includes(tag) ? prev.filter((x) => x !== tag) : [...prev, tag]));
   // Manual tag entry — the chips are a curated subset of the catalog's 700+ tags, so let
   // the user filter by ANY tag by typing it (normalized lowercase; the API filters on it).
+  // As they type, `suggestTags` autocompletes from the known vocabulary (matching slug OR
+  // Chinese label), but a tag missing from the dict is still accepted verbatim.
   const [tagInput, setTagInput] = useState("");
-  const addTypedTag = () => {
-    const v = tagInput.trim().toLowerCase();
+  const suggestions = suggestTags(tagInput, tags);
+  const addTag = (raw: string) => {
+    const v = raw.trim().toLowerCase();
     if (v && !tags.includes(v)) setTags((prev) => [...prev, v]);
     setTagInput("");
   };
+  // Enter picks the top suggestion when there is one (so typing 猫 + Enter adds "catgirl"),
+  // else commits the raw text.
+  const commitTyped = () => addTag(suggestions[0]?.slug ?? tagInput);
 
   const importByPath = useCallback(
     async (path: string, name: string, imageUrl: string) => {
@@ -266,28 +263,47 @@ export function CharactersTab() {
                 <div className="market-pop-group">
                   <div className="market-pop-h">{t("market-filter-tags")}</div>
                   <div className="market-pop-tags">
-                    {TAGS.map((tag) => (
+                    {FEATURED.map((tag) => (
                       <button
                         key={tag}
                         className={"market-tagchip" + (tags.includes(tag) ? " on" : "")}
                         onClick={() => toggleTag(tag)}
                       >
-                        {tag}
+                        {tagLabel(tag, lang)}
                       </button>
                     ))}
                   </div>
-                  <input
-                    className="market-tag-input"
-                    placeholder={t("market-tag-add")}
-                    value={tagInput}
-                    onChange={(e) => setTagInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                        e.preventDefault();
-                        addTypedTag();
-                      }
-                    }}
-                  />
+                  <div className="market-tag-entry">
+                    <input
+                      className="market-tag-input"
+                      placeholder={t("market-tag-add")}
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          commitTyped();
+                        }
+                      }}
+                    />
+                    {suggestions.length > 0 && (
+                      <div className="market-tag-sugg">
+                        {suggestions.map((s) => (
+                          <button
+                            key={s.slug}
+                            className="market-tag-suggrow"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              addTag(s.slug);
+                            }}
+                          >
+                            <span className="market-tag-suggzh">{lang === "zh" ? s.zh : s.slug}</span>
+                            {lang === "zh" && <span className="market-tag-suggen">{s.slug}</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="market-pop-group">
                   <div className="market-pop-h">{t("market-filter-type")}</div>
@@ -321,7 +337,7 @@ export function CharactersTab() {
         <div className="market-applied">
           {tags.map((tag) => (
             <button key={tag} className="market-applied-chip" onClick={() => toggleTag(tag)}>
-              {tag} <span aria-hidden>✕</span>
+              {tagLabel(tag, lang)} <span aria-hidden>✕</span>
             </button>
           ))}
           {oc && (
